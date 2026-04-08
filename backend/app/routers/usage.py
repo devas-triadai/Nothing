@@ -1,0 +1,113 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import Optional
+from datetime import datetime, timedelta
+
+from app.database import get_db
+from app.models.models import User, UsageLog
+from app.routers.auth import require_superadmin
+
+router = APIRouter()
+
+
+@router.get("/")
+def get_usage_logs(
+    skip: int = 0,
+    limit: int = 50,
+    user_id: Optional[int] = None,
+    action_type: Optional[str] = None,
+    module: Optional[str] = None,
+    days: int = 7,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    since = datetime.utcnow() - timedelta(days=days)
+    query = db.query(UsageLog).filter(UsageLog.created_at >= since)
+
+    if user_id:
+        query = query.filter(UsageLog.user_id == user_id)
+    if action_type:
+        query = query.filter(UsageLog.action_type == action_type)
+    if module:
+        query = query.filter(UsageLog.module == module)
+
+    total = query.count()
+    logs = query.order_by(UsageLog.created_at.desc()).offset(skip).limit(limit).all()
+
+    result = []
+    for log in logs:
+        user = db.query(User).filter(User.id == log.user_id).first()
+        result.append({
+            "id": log.id,
+            "user": user.username if user else "unknown",
+            "user_id": log.user_id,
+            "action_type": log.action_type,
+            "module": log.module,
+            "input_tokens": log.input_tokens,
+            "output_tokens": log.output_tokens,
+            "response_time_ms": log.response_time_ms,
+            "status": log.status,
+            "created_at": log.created_at
+        })
+    return {"total": total, "logs": result}
+
+
+@router.get("/summary")
+def get_usage_summary(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    since = datetime.utcnow() - timedelta(days=days)
+
+    # Per user usage
+    user_usage = db.query(
+        UsageLog.user_id,
+        func.count(UsageLog.id).label("total_actions"),
+        func.sum(UsageLog.input_tokens).label("total_input_tokens"),
+        func.sum(UsageLog.output_tokens).label("total_output_tokens"),
+        func.avg(UsageLog.response_time_ms).label("avg_response_ms")
+    ).filter(UsageLog.created_at >= since).group_by(UsageLog.user_id).all()
+
+    result = []
+    for row in user_usage:
+        user = db.query(User).filter(User.id == row.user_id).first()
+        result.append({
+            "user_id": row.user_id,
+            "username": user.username if user else "unknown",
+            "full_name": user.full_name if user else "unknown",
+            "total_actions": row.total_actions,
+            "total_input_tokens": row.total_input_tokens or 0,
+            "total_output_tokens": row.total_output_tokens or 0,
+            "avg_response_ms": round(row.avg_response_ms or 0, 2)
+        })
+
+    return {"period_days": days, "user_summary": result}
+
+
+@router.get("/top-users")
+def get_top_users(
+    limit: int = 10,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    since = datetime.utcnow() - timedelta(days=days)
+    top = db.query(
+        UsageLog.user_id,
+        func.count(UsageLog.id).label("count")
+    ).filter(
+        UsageLog.created_at >= since
+    ).group_by(UsageLog.user_id).order_by(func.count(UsageLog.id).desc()).limit(limit).all()
+
+    result = []
+    for row in top:
+        user = db.query(User).filter(User.id == row.user_id).first()
+        result.append({
+            "user_id": row.user_id,
+            "username": user.username if user else "unknown",
+            "department": user.department if user else None,
+            "count": row.count
+        })
+    return result
