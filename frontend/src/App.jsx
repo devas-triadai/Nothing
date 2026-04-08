@@ -6,6 +6,10 @@ import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import UsageAnalytics from './pages/UsageAnalytics';
+import AuditLogs from './pages/AuditLogs';
+import Documents from './pages/Documents';
+import Agents from './pages/Agents';
 
 export const AuthContext = createContext(null);
 
@@ -64,6 +68,10 @@ function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="users" element={<Users />} />
+            <Route path="usage" element={<UsageAnalytics />} />
+            <Route path="audit" element={<AuditLogs />} />
+            <Route path="documents" element={<Documents />} />
+            <Route path="agents" element={<Agents />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
           </Route>
