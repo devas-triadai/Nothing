@@ -1,42 +1,41 @@
-import React, { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../App'
-import { logoutApi } from '../utils/api'
-import toast from 'react-hot-toast'
+import { useState } from 'react';
+import { NavLink, useNavigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../App';
+import auth from '../utils/auth';
 import {
   LayoutDashboard, Users, BarChart3, ScrollText,
-  FileText, Bot, LogOut, Menu, X, Anchor, ChevronRight, Shield
-} from 'lucide-react'
+  FileText, Bot, LogOut, Menu, X, Anchor, Shield,
+  Settings, ClipboardList
+} from 'lucide-react';
 
 const navItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/users', icon: Users, label: 'User Management' },
   { path: '/usage', icon: BarChart3, label: 'Usage Analytics' },
   { path: '/audit', icon: ScrollText, label: 'Audit Logs' },
   { path: '/documents', icon: FileText, label: 'Documents' },
   { path: '/agents', icon: Bot, label: 'Agent Config' },
-]
+  { path: '/reports', icon: ClipboardList, label: 'Reports' },
+  { path: '/settings', icon: Settings, label: 'Settings' },
+];
 
-export default function Layout({ children }) {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+export default function Layout() {
+  const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleLogout = async () => {
-    try {
-      await logoutApi()
-    } catch {}
-    logout()
-    navigate('/login')
-    toast.success('Logged out successfully')
-  }
+    await auth.logout();
+    setUser(null);
+    navigate('/login');
+  };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)' }}>
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)' }}>
       {/* Sidebar */}
       <aside style={{
         width: sidebarOpen ? '260px' : '72px',
-        background: 'var(--bg-secondary)',
+        background: 'var(--surface)',
         borderRight: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
@@ -64,7 +63,7 @@ export default function Layout({ children }) {
           {sidebarOpen && (
             <div>
               <div style={{ fontWeight: 700, fontSize: '16px', letterSpacing: '0.05em', color: 'var(--text-primary)' }}>AGRA</div>
-              <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', fontWeight: 600, letterSpacing: '0.1em' }}>INDIAN COAST GUARD</div>
+              <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', fontWeight: 600, letterSpacing: '0.1em' }}>SUPER ADMIN</div>
             </div>
           )}
         </div>
@@ -75,7 +74,6 @@ export default function Layout({ children }) {
             <NavLink
               key={path}
               to={path}
-              end={path === '/'}
               style={({ isActive }) => ({
                 display: 'flex',
                 alignItems: 'center',
@@ -105,7 +103,7 @@ export default function Layout({ children }) {
           {sidebarOpen && (
             <div style={{
               padding: '12px',
-              background: 'var(--bg-card)',
+              background: 'var(--bg)',
               borderRadius: '8px',
               border: '1px solid var(--border)',
               marginBottom: '8px'
@@ -114,8 +112,8 @@ export default function Layout({ children }) {
                 <Shield size={14} color="var(--accent-gold)" />
                 <span style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 600 }}>SUPER ADMIN</span>
               </div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{user?.full_name}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{user?.username}</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{user?.full_name || user?.name || 'Admin'}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{user?.username || user?.email}</div>
             </div>
           )}
           <button
@@ -123,8 +121,8 @@ export default function Layout({ children }) {
             style={{
               display: 'flex', alignItems: 'center', gap: '10px',
               width: '100%', padding: '10px 12px',
-              background: 'rgba(255, 77, 109, 0.1)',
-              border: '1px solid rgba(255, 77, 109, 0.2)',
+              background: 'rgba(213, 0, 0, 0.1)',
+              border: '1px solid rgba(213, 0, 0, 0.2)',
               borderRadius: '8px', cursor: 'pointer',
               color: 'var(--accent-red)', fontSize: '14px',
               fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden'
@@ -141,7 +139,7 @@ export default function Layout({ children }) {
         {/* Top bar */}
         <header style={{
           height: '64px',
-          background: 'var(--bg-secondary)',
+          background: 'var(--surface)',
           borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'center',
           padding: '0 24px', gap: '16px', flexShrink: 0
@@ -149,7 +147,7 @@ export default function Layout({ children }) {
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             style={{
-              background: 'var(--bg-hover)',
+              background: 'var(--surface-hover)',
               border: '1px solid var(--border)',
               borderRadius: '8px', padding: '8px',
               cursor: 'pointer', color: 'var(--text-secondary)',
@@ -158,16 +156,14 @@ export default function Layout({ children }) {
           >
             {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
-
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>AGRA Super Admin Dashboard</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>AGRA Super Admin Dashboard</div>
           </div>
-
           <div style={{
             display: 'flex', alignItems: 'center', gap: '8px',
             padding: '6px 12px',
-            background: 'rgba(16, 217, 121, 0.1)',
-            border: '1px solid rgba(16, 217, 121, 0.2)',
+            background: 'rgba(0, 200, 83, 0.1)',
+            border: '1px solid rgba(0, 200, 83, 0.2)',
             borderRadius: '20px'
           }}>
             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-green)' }} />
@@ -177,9 +173,9 @@ export default function Layout({ children }) {
 
         {/* Page content */}
         <main style={{ flex: 1, overflowY: 'auto' }}>
-          {children}
+          <Outlet />
         </main>
       </div>
     </div>
-  )
+  );
 }
