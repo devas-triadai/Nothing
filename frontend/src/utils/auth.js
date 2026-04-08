@@ -1,68 +1,75 @@
-export const auth = {
-  getToken: () => localStorage.getItem('agra_token'),
+export async function login(username, password) {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  })
 
-  getUser: () => {
-    try {
-      const user = localStorage.getItem('agra_user');
-      return user ? JSON.parse(user) : null;
-    } catch {
-      return null;
-    }
-  },
+  const data = await res.json().catch(() => ({}))
 
-  setSession: (token, user) => {
-    localStorage.setItem('agra_token', token);
-    localStorage.setItem('agra_user', JSON.stringify(user));
-  },
+  if (!res.ok) {
+    throw new Error(data.detail || 'Login failed')
+  }
 
-  clearSession: () => {
-    localStorage.removeItem('agra_token');
-    localStorage.removeItem('agra_user');
-  },
+  localStorage.setItem('agra_token', data.access_token)
+  localStorage.setItem('agra_user', JSON.stringify(data.user || {}))
+  return data
+}
 
-  isAuthenticated: () => {
-    return !!localStorage.getItem('agra_token');
-  },
+export function getToken() {
+  return localStorage.getItem('agra_token') || ''
+}
 
-  hasRole: (role) => {
-    try {
-      const user = JSON.parse(localStorage.getItem('agra_user') || '{}');
-      return user.role === role;
-    } catch {
-      return false;
-    }
-  },
+export function getUser() {
+  try {
+    return JSON.parse(localStorage.getItem('agra_user') || 'null')
+  } catch {
+    return null
+  }
+}
 
-  login: async (email, password) => {
-    const res = await fetch('/api/auth/login', {
+export function isAuthenticated() {
+  return !!getToken()
+}
+
+export function authHeaders(extra = {}) {
+  const token = getToken()
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra
+  }
+}
+
+export async function logout() {
+  const token = getToken()
+  try {
+    await fetch('/api/auth/logout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.message || 'Login failed');
-    }
-    const data = await res.json();
-    auth.setSession(data.token, data.user);
-    return data;
-  },
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+  } catch (_) {}
 
-  logout: async () => {
-    try {
-      const token = auth.getToken();
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      auth.clearSession();
-    }
-  },
-};
+  localStorage.removeItem('agra_token')
+  localStorage.removeItem('agra_user')
+  window.location.href = '/login'
+}
 
-export default auth;
+// Legacy compat export
+export const auth = {
+  getToken,
+  getUser,
+  isAuthenticated,
+  authHeaders,
+  logout,
+  setSession: (token, user) => {
+    localStorage.setItem('agra_token', token)
+    localStorage.setItem('agra_user', JSON.stringify(user))
+  },
+  clearSession: () => {
+    localStorage.removeItem('agra_token')
+    localStorage.removeItem('agra_user')
+  }
+}
+
+export default auth
