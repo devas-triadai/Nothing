@@ -1,8 +1,14 @@
+// auth.js — sends form-encoded for OAuth2PasswordRequestForm compatibility
 export async function login(username, password) {
+  // FastAPI OAuth2PasswordRequestForm requires application/x-www-form-urlencoded
+  const body = new URLSearchParams()
+  body.append('username', username)
+  body.append('password', password)
+
   const res = await fetch('/api/auth/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
   })
 
   const data = await res.json().catch(() => ({}))
@@ -49,7 +55,6 @@ export async function logout() {
       headers: token ? { Authorization: `Bearer ${token}` } : {}
     })
   } catch (_) {}
-
   localStorage.removeItem('agra_token')
   localStorage.removeItem('agra_user')
   window.location.href = '/login'
