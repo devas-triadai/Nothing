@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, extract
+from sqlalchemy import func
 from datetime import datetime, timedelta
 from typing import Optional, List
 from app.database import get_db
 from app.models.models import UsageLog, User, AuditLog, Document
-from app.utils.security import get_current_user
+from app.routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -17,14 +17,14 @@ def get_reports_summary(
 ):
     """Get overall system reports summary"""
     total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.is_active == True).count()
+    active_users = db.query(User).filter(User.status == "active").count()
     total_queries = db.query(UsageLog).count()
     total_documents = db.query(Document).count()
 
     # Last 30 days stats
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     recent_queries = db.query(UsageLog).filter(
-        UsageLog.timestamp >= thirty_days_ago
+        UsageLog.created_at >= thirty_days_ago
     ).count()
 
     return {
@@ -47,14 +47,14 @@ def get_usage_over_time(
     start_date = datetime.utcnow() - timedelta(days=days)
 
     usage_data = db.query(
-        func.date(UsageLog.timestamp).label("date"),
+        func.date(UsageLog.created_at).label("date"),
         func.count(UsageLog.id).label("count")
     ).filter(
-        UsageLog.timestamp >= start_date
+        UsageLog.created_at >= start_date
     ).group_by(
-        func.date(UsageLog.timestamp)
+        func.date(UsageLog.created_at)
     ).order_by(
-        func.date(UsageLog.timestamp)
+        func.date(UsageLog.created_at)
     ).all()
 
     return {
@@ -105,15 +105,15 @@ def get_system_health(
     one_day_ago = now - timedelta(days=1)
 
     queries_last_hour = db.query(UsageLog).filter(
-        UsageLog.timestamp >= one_hour_ago
+        UsageLog.created_at >= one_hour_ago
     ).count()
 
     queries_last_day = db.query(UsageLog).filter(
-        UsageLog.timestamp >= one_day_ago
+        UsageLog.created_at >= one_day_ago
     ).count()
 
     audit_events_today = db.query(AuditLog).filter(
-        AuditLog.timestamp >= one_day_ago
+        AuditLog.created_at >= one_day_ago
     ).count()
 
     return {
@@ -137,15 +137,17 @@ def export_report(
 
     if report_type == "usage":
         records = db.query(UsageLog).filter(
-            UsageLog.timestamp >= start_date
-        ).order_by(UsageLog.timestamp.desc()).all()
+            UsageLog.created_at >= start_date
+        ).order_by(UsageLog.created_at.desc()).all()
         data = [
             {
                 "id": r.id,
                 "user_id": r.user_id,
-                "query": r.query,
+                "action_type": r.action_type,
+                "module": r.module,
                 "response_time_ms": r.response_time_ms,
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
             }
             for r in records
         ]
@@ -157,22 +159,25 @@ def export_report(
                 "username": r.username,
                 "email": r.email,
                 "role": r.role,
-                "is_active": r.is_active,
+                "status": r.status,
+                "department": r.department,
                 "created_at": r.created_at.isoformat() if r.created_at else None
             }
             for r in records
         ]
     elif report_type == "audit":
         records = db.query(AuditLog).filter(
-            AuditLog.timestamp >= start_date
-        ).order_by(AuditLog.timestamp.desc()).all()
+            AuditLog.created_at >= start_date
+        ).order_by(AuditLog.created_at.desc()).all()
         data = [
             {
                 "id": r.id,
                 "user_id": r.user_id,
                 "action": r.action,
-                "resource": r.resource,
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
             }
             for r in records
         ]
