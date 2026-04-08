@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.database import engine, Base
-from app.routers import auth, users, usage, audit, dashboard, documents, agents
+from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports
 from app.seed import seed_superadmin
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.include_router(audit.router, prefix="/api/audit", tags=["Audit Logs"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
+app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 
 @app.get("/")
 def root():
