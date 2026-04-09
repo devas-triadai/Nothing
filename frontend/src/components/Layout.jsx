@@ -11,8 +11,8 @@ import {
 const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/users', icon: Users, label: 'User Management' },
-  { path: '/usage', icon: BarChart3, label: 'Usage Analytics' },
-  { path: '/audit', icon: ScrollText, label: 'Audit Logs' },
+  { path: '/usage-analytics', icon: BarChart3, label: 'Usage Analytics' },
+  { path: '/audit-logs', icon: ScrollText, label: 'Audit Logs' },
   { path: '/documents', icon: FileText, label: 'Documents' },
   { path: '/agents', icon: Bot, label: 'Agent Config' },
   { path: '/reports', icon: ClipboardList, label: 'Reports' },
@@ -31,44 +31,32 @@ export default function Layout() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#0b1020', color: '#fff' }}>
       {/* Sidebar */}
       <aside style={{
-        width: sidebarOpen ? '260px' : '72px',
-        background: 'var(--surface)',
-        borderRight: '1px solid var(--border)',
+        width: sidebarOpen ? 260 : 80,
+        background: 'rgba(10, 15, 30, 0.95)',
+        borderRight: '1px solid rgba(70, 110, 255, 0.2)',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'width 0.25s ease',
-        flexShrink: 0,
-        overflow: 'hidden'
+        transition: 'all 0.3s ease'
       }}>
-        {/* Logo */}
-        <div style={{
-          padding: '20px 16px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          minHeight: '72px'
-        }}>
+        <div style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: 12, minHeight: 72 }}>
           <div style={{
-            width: '40px', height: '40px', flexShrink: 0,
+            width: 40, height: 40, flexShrink: 0,
             background: 'linear-gradient(135deg, #1e6bff, #00c8e0)',
-            borderRadius: '10px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
+            borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}>
-            <Anchor size={20} color="white" strokeWidth={2.5} />
+            <Shield size={20} color="white" strokeWidth={2.5} />
           </div>
           {sidebarOpen && (
             <div>
-              <div style={{ fontWeight: 700, fontSize: '16px', letterSpacing: '0.05em', color: 'var(--text-primary)' }}>AGRA</div>
-              <div style={{ fontSize: '10px', color: 'var(--accent-cyan)', fontWeight: 600, letterSpacing: '0.1em' }}>SUPER ADMIN</div>
+              <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '0.05em' }}>AGRA</div>
+              <div style={{ fontSize: 10, color: '#7ab4ff', fontWeight: 600 }}>SUPER ADMIN</div>
             </div>
           )}
         </div>
 
-        {/* Nav items */}
         <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto' }}>
           {navItems.map(({ path, icon: Icon, label }) => (
             <NavLink
@@ -77,19 +65,17 @@ export default function Layout() {
               style={({ isActive }) => ({
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
+                gap: 12,
                 padding: '10px 12px',
-                borderRadius: '8px',
+                borderRadius: 8,
                 textDecoration: 'none',
-                marginBottom: '2px',
-                background: isActive ? 'rgba(30, 107, 255, 0.15)' : 'transparent',
-                color: isActive ? 'var(--accent-blue-light)' : 'var(--text-secondary)',
+                marginBottom: 2,
+                background: isActive ? 'rgba(36, 99, 255, 0.15)' : 'transparent',
+                color: isActive ? '#7ab4ff' : '#7a90b8',
                 fontWeight: isActive ? 600 : 400,
-                fontSize: '14px',
-                borderLeft: isActive ? '3px solid var(--accent-blue)' : '3px solid transparent',
-                transition: 'all 0.15s',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden'
+                fontSize: 14,
+                borderLeft: isActive ? '3px solid #2463ff' : '3px solid transparent',
+                transition: 'all 0.2s'
               })}
             >
               <Icon size={18} style={{ flexShrink: 0 }} />
@@ -98,84 +84,43 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* User info + Logout */}
-        <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
-          {sidebarOpen && (
-            <div style={{
-              padding: '12px',
-              background: 'var(--bg)',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-              marginBottom: '8px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                <Shield size={14} color="var(--accent-gold)" />
-                <span style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 600 }}>SUPER ADMIN</span>
-              </div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{user?.full_name || user?.name || 'Admin'}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{user?.username || user?.email}</div>
-            </div>
-          )}
+        <div style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
           <button
             onClick={handleLogout}
             style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              width: '100%', padding: '10px 12px',
-              background: 'rgba(213, 0, 0, 0.1)',
-              border: '1px solid rgba(213, 0, 0, 0.2)',
-              borderRadius: '8px', cursor: 'pointer',
-              color: 'var(--accent-red)', fontSize: '14px',
-              fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden'
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '10px 12px', borderRadius: 8, border: 'none',
+              background: 'rgba(255, 80, 80, 0.05)', color: '#ff9b9b',
+              cursor: 'pointer', fontSize: 14, fontWeight: 600
             }}
           >
-            <LogOut size={16} style={{ flexShrink: 0 }} />
-            {sidebarOpen && 'Logout'}
+            <LogOut size={18} />
+            {sidebarOpen && <span>Logout</span>}
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Top bar */}
+      {/* Main Content */}
+      <main style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
         <header style={{
-          height: '64px',
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center',
-          padding: '0 24px', gap: '16px', flexShrink: 0
+          height: 64, display: 'flex', alignItems: 'center', padding: '0 24px',
+          background: 'rgba(10, 15, 30, 0.5)', borderBottom: '1px solid rgba(255,255,255,0.05)'
         }}>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            style={{
-              background: 'var(--surface-hover)',
-              border: '1px solid var(--border)',
-              borderRadius: '8px', padding: '8px',
-              cursor: 'pointer', color: 'var(--text-secondary)',
-              display: 'flex', alignItems: 'center'
-            }}
+            style={{ background: 'none', border: 'none', color: '#7a90b8', cursor: 'pointer' }}
           >
-            {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
+            {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>AGRA Super Admin Dashboard</div>
-          </div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '6px 12px',
-            background: 'rgba(0, 200, 83, 0.1)',
-            border: '1px solid rgba(0, 200, 83, 0.2)',
-            borderRadius: '20px'
-          }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-green)' }} />
-            <span style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 500 }}>System Online</span>
+          <div style={{ flex: 1 }}></div>
+          <div style={{ fontSize: 13, color: '#7a90b8' }}>
+            Welcome, <span style={{ color: '#fff', fontWeight: 600 }}>{user?.username || 'Admin'}</span>
           </div>
         </header>
-
-        {/* Page content */}
-        <main style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ padding: 0 }}>
           <Outlet />
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }
