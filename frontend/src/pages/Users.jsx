@@ -25,6 +25,16 @@ export default function Users() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newUser, setNewUser] = useState({
+    username: '',
+    email: '',
+    full_name: '',
+    password: '',
+    role: 'viewer',
+    department: '',
+    rank: ''
+  })
 
   useEffect(() => {
     fetchUsers()
@@ -39,6 +49,31 @@ export default function Users() {
       console.error('Fetch users error:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleAddUser() {
+    try {
+      const res = await apiFetch('/users/', {
+        method: 'POST',
+        body: JSON.stringify(newUser)
+      })
+      if (res) {
+        setShowAddModal(false)
+        setNewUser({
+          username: '',
+          email: '',
+          full_name: '',
+          password: '',
+          role: 'viewer',
+          department: '',
+          rank: ''
+        })
+        fetchUsers()
+      }
+    } catch (e) {
+      console.error('Add user error:', e)
+      alert('Failed to add user')
     }
   }
 
@@ -60,7 +95,7 @@ export default function Users() {
           <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: '#fff' }}>User Management</h1>
           <p style={{ color: '#7a90b8', margin: '4px 0 0', fontSize: '14px' }}>Manage system administrators and operators</p>
         </div>
-        <button style={{
+        <button onClick={() => setShowAddModal(true)} style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -218,6 +253,172 @@ export default function Users() {
           </table>
         </div>
       </div>
+
+      {showAddModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#1a1f2e',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '16px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', margin: '0 0 24px' }}>Add New User</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <input
+                placeholder="Username"
+                value={newUser.username}
+                onChange={(e) => setNewUser({...newUser, username: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <input
+                placeholder="Email"
+                type="email"
+                value={newUser.email}
+                onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <input
+                placeholder="Full Name"
+                value={newUser.full_name}
+                onChange={(e) => setNewUser({...newUser, full_name: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <input
+                placeholder="Password"
+                type="password"
+                value={newUser.password}
+                onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <select
+                value={newUser.role}
+                onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="analyst">Analyst</option>
+                <option value="admin">Admin</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+              <input
+                placeholder="Department (optional)"
+                value={newUser.department}
+                onChange={(e) => setNewUser({...newUser, department: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <input
+                placeholder="Rank (optional)"
+                value={newUser.rank}
+                onChange={(e) => setNewUser({...newUser, rank: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                <button
+                  onClick={handleAddUser}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: '#2463ff',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  Add User
+                </button>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

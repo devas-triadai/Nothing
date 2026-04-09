@@ -5,6 +5,7 @@ import uvicorn
 
 from app.database import engine, Base
 from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports
+from app.routers.audit import router as audit_logs_router
 from app.seed import seed_superadmin
 
 @asynccontextmanager
@@ -31,11 +32,13 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(usage.router, prefix="/api/usage", tags=["Usage"])
+app.include_router(audit_logs_router, prefix="/api/audit-logs", tags=["Audit Logs"])
 app.include_router(audit.router, prefix="/api/audit", tags=["Audit Logs"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 
 @app.get("/")
 def root():

@@ -25,6 +25,13 @@ export default function Documents() {
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [uploadData, setUploadData] = useState({
+    category: '',
+    description: '',
+    version_notes: ''
+  })
 
   useEffect(() => {
     fetchDocs()
@@ -39,6 +46,41 @@ export default function Documents() {
       console.error('Fetch docs error:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleUpload() {
+    if (!selectedFile) {
+      alert('Please select a file')
+      return
+    }
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('category', uploadData.category)
+      formData.append('description', uploadData.description)
+      formData.append('version_notes', uploadData.version_notes)
+
+      const token = getToken()
+      const res = await fetch('/api/documents/upload', {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: formData
+      })
+
+      if (res.ok) {
+        setShowUploadModal(false)
+        setSelectedFile(null)
+        setUploadData({ category: '', description: '', version_notes: '' })
+        fetchDocs()
+      } else {
+        alert('Failed to upload file')
+      }
+    } catch (e) {
+      console.error('Upload error:', e)
+      alert('Failed to upload file')
     }
   }
 
@@ -59,7 +101,7 @@ export default function Documents() {
           <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: '#fff' }}>Document Knowledge Base</h1>
           <p style={{ color: '#7a90b8', margin: '4px 0 0', fontSize: '14px' }}>Manage files used for RAG and agent training</p>
         </div>
-        <button style={{
+        <button onClick={() => setShowUploadModal(true)} style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -206,6 +248,134 @@ export default function Documents() {
           </table>
         </div>
       </div>
+
+      {showUploadModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#1a1f2e',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '16px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', margin: '0 0 24px' }}>Upload Document</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{
+                padding: '24px',
+                border: '2px dashed rgba(255, 255, 255, 0.2)',
+                borderRadius: '12px',
+                textAlign: 'center',
+                cursor: 'pointer'
+              }} onClick={() => document.getElementById('fileInput').click()}>
+                <Upload size={32} style={{ color: '#7ab4ff', marginBottom: '12px' }} />
+                <p style={{ color: '#7a90b8', fontSize: '14px', margin: 0 }}>
+                  {selectedFile ? selectedFile.name : 'Click to select file'}
+                </p>
+                <input
+                  id="fileInput"
+                  type="file"
+                  style={{ display: 'none' }}
+                  onChange={(e) => setSelectedFile(e.target.files[0])}
+                />
+              </div>
+              <input
+                placeholder="Category (optional)"
+                value={uploadData.category}
+                onChange={(e) => setUploadData({...uploadData, category: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <textarea
+                placeholder="Description (optional)"
+                value={uploadData.description}
+                onChange={(e) => setUploadData({...uploadData, description: e.target.value})}
+                rows={3}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none',
+                  resize: 'none'
+                }}
+              />
+              <input
+                placeholder="Version notes (optional)"
+                value={uploadData.version_notes}
+                onChange={(e) => setUploadData({...uploadData, version_notes: e.target.value})}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                <button
+                  onClick={handleUpload}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: '#2463ff',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  Upload
+                </button>
+                <button
+                  onClick={() => {
+                    setShowUploadModal(false)
+                    setSelectedFile(null)
+                    setUploadData({ category: '', description: '', version_notes: '' })
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
