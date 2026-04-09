@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { getToken, logout, getUser } from '../utils/auth';
+import { Settings as SettingsIcon, User, Bell, Shield, Key, Save, Eye, EyeOff } from 'lucide-react';
 
 const API = '/api';
 
@@ -21,175 +21,205 @@ async function apiFetch(path, opts = {}) {
   return res.json().catch(() => null);
 }
 
+const SectionCard = ({ title, icon: Icon, children }) => (
+  <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+    <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <Icon size={16} color="#1e6bff" />
+      <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{title}</h2>
+    </div>
+    <div style={{ padding: '20px' }}>{children}</div>
+  </div>
+);
+
+const FormRow = ({ label, children, hint }) => (
+  <div style={{ marginBottom: '16px' }}>
+    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '6px' }}>{label}</label>
+    {children}
+    {hint && <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>{hint}</p>}
+  </div>
+);
+
+const inputStyle = {
+  width: '100%',
+  padding: '9px 12px',
+  borderRadius: '8px',
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  color: 'var(--text-primary)',
+  fontSize: '13px',
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
 export default function Settings() {
-  const navigate = useNavigate();
-  const user = getUser();
-  const [activeTab, setActiveTab] = useState('general');
+  const [profile, setProfile] = useState({ name: '', email: '', role: '' });
+  const [passwords, setPasswords] = useState({ current: '', new_pass: '', confirm: '' });
+  const [showPw, setShowPw] = useState(false);
+  const [notifications, setNotifications] = useState({ email_alerts: true, system_alerts: true, audit_alerts: false });
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState({
-    siteName: 'AGRA Super Admin',
-    siteDescription: 'Administrative Control Panel',
-    maintenanceMode: false,
-    allowRegistration: true,
-    sessionTimeout: 30,
-    maxLoginAttempts: 5,
-    twoFactorRequired: false,
-    emailNotifications: true,
-    slackWebhook: '',
-    smtpHost: 'smtp.agra.gov.in',
-    smtpPort: 587
-  });
+  const [message, setMessage] = useState(null);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      navigate('/login');
-      return;
+    const user = getUser();
+    if (user) {
+      setProfile({ name: user.name || user.username || '', email: user.email || '', role: user.role || '' });
     }
+    fetchSettings();
   }, []);
 
-  const handleSave = async () => {
-    setSaving(true);
-    // Simulate save
-    setTimeout(() => {
-      setSaving(false);
-      alert('Settings saved successfully!');
-    }, 1000);
+  const fetchSettings = async () => {
+    try {
+      const data = await apiFetch('/settings');
+      if (data?.notifications) setNotifications(data.notifications);
+    } catch (err) {
+      console.error('Settings fetch error:', err);
+    }
   };
 
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setSettings(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
+  const showMsg = (text, type = 'success') => {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleProfileSave = async () => {
+    setSaving(true);
+    try {
+      const data = await apiFetch('/settings/profile', { method: 'PUT', body: JSON.stringify(profile) });
+      if (data) showMsg('Profile updated successfully');
+      else showMsg('Failed to update profile', 'error');
+    } catch (err) {
+      showMsg('Error updating profile', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (passwords.new_pass !== passwords.confirm) {
+      showMsg('Passwords do not match', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const data = await apiFetch('/settings/password', {
+        method: 'PUT',
+        body: JSON.stringify({ current_password: passwords.current, new_password: passwords.new_pass })
+      });
+      if (data?.success) {
+        showMsg('Password changed successfully');
+        setPasswords({ current: '', new_pass: '', confirm: '' });
+      } else {
+        showMsg(data?.error || 'Failed to change password', 'error');
+      }
+    } catch (err) {
+      showMsg('Error changing password', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleNotificationSave = async () => {
+    setSaving(true);
+    try {
+      const data = await apiFetch('/settings/notifications', { method: 'PUT', body: JSON.stringify(notifications) });
+      if (data) showMsg('Notification settings saved');
+      else showMsg('Failed to save notifications', 'error');
+    } catch (err) {
+      showMsg('Error saving notifications', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0b1020 0%, #111a2e 100%)',
-      color: '#fff',
-      fontFamily: 'Inter, system-ui, sans-serif',
-      padding: '24px'
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 32,
-        paddingBottom: 20,
-        borderBottom: '1px solid rgba(70,110,255,0.2)'
-      }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>⚙️ System Settings</h1>
-          <p style={{ margin: '4px 0 0', color: '#7a90b8', fontSize: 13 }}>
-            Configure global platform parameters and security
-          </p>
+    <div style={{ padding: '24px', maxWidth: '720px' }}>
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+          <SettingsIcon size={24} color="#1e6bff" />
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Settings</h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#9fb0d0', fontSize: 13 }}>{user?.username || 'Admin'}</span>
-          <button onClick={() => logout()} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.3)',
-            background: 'rgba(255,80,80,0.1)', color: '#ff9b9b', cursor: 'pointer', fontSize: 13, fontWeight: 600
-          }}>Logout</button>
-        </div>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, paddingLeft: '36px' }}>
+          Manage your account and system preferences
+        </p>
       </div>
 
-      {/* Nav */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 32, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Dashboard', path: '/dashboard' },
-          { label: 'Users', path: '/users' },
-          { label: 'Reports', path: '/reports' },
-          { label: 'Agents', path: '/agents' },
-          { label: 'Documents', path: '/documents' },
-          { label: 'Audit Logs', path: '/audit-logs' },
-          { label: 'Usage Analytics', path: '/usage-analytics' }
-        ].map(item => (
-          <button key={item.path} onClick={() => navigate(item.path)} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(70,110,255,0.3)',
-            background: 'rgba(36,99,255,0.1)', color: '#7ab4ff', cursor: 'pointer', fontSize: 13, fontWeight: 500
-          }}>{item.label}</button>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', gap: 32 }}>
-        {/* Sidebar Tabs */}
-        <div style={{ width: 200, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {['general', 'security', 'notifications', 'email'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                textAlign: 'left', padding: '12px 16px', borderRadius: 8, border: 'none',
-                background: activeTab === tab ? 'rgba(36,99,255,0.15)' : 'transparent',
-                color: activeTab === tab ? '#7ab4ff' : '#7a90b8',
-                cursor: 'pointer', fontSize: 14, fontWeight: 600, textTransform: 'capitalize'
-              }}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
+      {message && (
         <div style={{
-          flex: 1, background: 'rgba(10,15,30,0.8)', border: '1px solid rgba(70,110,255,0.2)',
-          borderRadius: 14, padding: 32
-        }}>
-          {activeTab === 'general' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: '#c8d8f0' }}>Site Name</label>
-                <input name="siteName" value={settings.siteName} onChange={handleChange} style={{
-                  background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '10px 16px', borderRadius: 8, outline: 'none'
-                }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: '#c8d8f0' }}>Site Description</label>
-                <textarea name="siteDescription" value={settings.siteDescription} onChange={handleChange} style={{
-                  background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '10px 16px', borderRadius: 8, outline: 'none', minHeight: 80
-                }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <input type="checkbox" name="maintenanceMode" checked={settings.maintenanceMode} onChange={handleChange} style={{ width: 18, height: 18 }} />
-                <label style={{ fontSize: 14, color: '#c8d8f0' }}>Maintenance Mode</label>
-              </div>
-            </div>
-          )}
+          padding: '12px 16px', borderRadius: '8px', marginBottom: '20px', fontSize: '13px', fontWeight: 500,
+          background: message.type === 'success' ? 'rgba(0,200,83,0.15)' : 'rgba(213,0,0,0.15)',
+          color: message.type === 'success' ? '#00c853' : '#d50000',
+          border: `1px solid ${message.type === 'success' ? 'rgba(0,200,83,0.3)' : 'rgba(213,0,0,0.3)'}`,
+        }}>{message.text}</div>
+      )}
 
-          {activeTab === 'security' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: '#c8d8f0' }}>Session Timeout (minutes)</label>
-                <input type="number" name="sessionTimeout" value={settings.sessionTimeout} onChange={handleChange} style={{
-                  background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '10px 16px', borderRadius: 8, outline: 'none', width: 100
-                }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <input type="checkbox" name="twoFactorRequired" checked={settings.twoFactorRequired} onChange={handleChange} style={{ width: 18, height: 18 }} />
-                <label style={{ fontSize: 14, color: '#c8d8f0' }}>Require 2FA for all Admins</label>
-              </div>
-            </div>
-          )}
+      <SectionCard title="Profile Information" icon={User}>
+        <FormRow label="Full Name">
+          <input style={inputStyle} value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} placeholder="Enter your name" />
+        </FormRow>
+        <FormRow label="Email Address">
+          <input style={inputStyle} type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} placeholder="Enter your email" />
+        </FormRow>
+        <FormRow label="Role">
+          <input style={{ ...inputStyle, background: 'var(--surface-hover)', cursor: 'not-allowed' }} value={profile.role} readOnly />
+        </FormRow>
+        <button onClick={handleProfileSave} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '9px 18px', borderRadius: '8px', border: 'none', background: '#1e6bff', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}>
+          <Save size={14} /> {saving ? 'Saving...' : 'Save Profile'}
+        </button>
+      </SectionCard>
 
-          <div style={{ marginTop: 40, paddingTop: 24, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                padding: '12px 32px', borderRadius: 10, border: 'none',
-                background: '#2463ff', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600,
-                opacity: saving ? 0.7 : 1
-              }}
-            >
-              {saving ? 'Saving...' : 'Save Changes'}
+      <SectionCard title="Change Password" icon={Key}>
+        <FormRow label="Current Password">
+          <div style={{ position: 'relative' }}>
+            <input
+              style={{ ...inputStyle, paddingRight: '40px' }}
+              type={showPw ? 'text' : 'password'}
+              value={passwords.current}
+              onChange={e => setPasswords(p => ({ ...p, current: e.target.value }))}
+              placeholder="Current password"
+            />
+            <button onClick={() => setShowPw(v => !v)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+              {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
-        </div>
-      </div>
+        </FormRow>
+        <FormRow label="New Password">
+          <input style={inputStyle} type="password" value={passwords.new_pass} onChange={e => setPasswords(p => ({ ...p, new_pass: e.target.value }))} placeholder="New password" />
+        </FormRow>
+        <FormRow label="Confirm New Password">
+          <input style={inputStyle} type="password" value={passwords.confirm} onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))} placeholder="Confirm new password" />
+        </FormRow>
+        <button
+          onClick={handlePasswordChange}
+          disabled={saving || !passwords.current || !passwords.new_pass}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '9px 18px', borderRadius: '8px', border: 'none', background: '#1e6bff', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 500, opacity: (!passwords.current || !passwords.new_pass) ? 0.6 : 1 }}
+        >
+          <Key size={14} /> {saving ? 'Saving...' : 'Change Password'}
+        </button>
+      </SectionCard>
+
+      <SectionCard title="Notification Preferences" icon={Bell}>
+        {[
+          { key: 'email_alerts', label: 'Email Alerts', desc: 'Receive important alerts via email' },
+          { key: 'system_alerts', label: 'System Notifications', desc: 'In-app system notifications' },
+          { key: 'audit_alerts', label: 'Audit Log Alerts', desc: 'Notifications for critical audit events' },
+        ].map(({ key, label, desc }) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{label}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{desc}</div>
+            </div>
+            <button
+              onClick={() => setNotifications(n => ({ ...n, [key]: !n[key] }))}
+              style={{ width: 44, height: 24, borderRadius: '12px', border: 'none', cursor: 'pointer', background: notifications[key] ? '#1e6bff' : 'var(--border)', position: 'relative', transition: 'background 0.2s' }}
+            >
+              <span style={{ position: 'absolute', top: '3px', width: 18, height: 18, borderRadius: '50%', background: 'white', left: notifications[key] ? '23px' : '3px', transition: 'left 0.2s' }} />
+            </button>
+          </div>
+        ))}
+        <button onClick={handleNotificationSave} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '9px 18px', borderRadius: '8px', border: 'none', background: '#1e6bff', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 500, marginTop: '16px' }}>
+          <Save size={14} /> Save Preferences
+        </button>
+      </SectionCard>
     </div>
   );
 }
