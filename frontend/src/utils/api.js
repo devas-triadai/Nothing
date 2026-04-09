@@ -1,7 +1,9 @@
 import axios from 'axios'
 
+export const API_BASE = '/api';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' }
 })
 
@@ -24,6 +26,29 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/**
+ * Centralised fetch wrapper used by all pages.
+ * Handles auth headers, 401 redirect, and JSON parsing.
+ */
+export async function apiFetch(path, opts = {}) {
+  const token = localStorage.getItem('agra_token');
+  const res = await fetch(API_BASE + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {})
+    }
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('agra_token');
+    localStorage.removeItem('agra_user');
+    window.location.href = '/login';
+    return null;
+  }
+  return res.json().catch(() => null);
+}
 
 // Auth
 export const loginApi = (username, password) => {

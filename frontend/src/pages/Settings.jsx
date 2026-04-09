@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getToken, logout, getUser } from '../utils/auth';
+import { apiFetch } from '../utils/api';
+import { getUser } from '../utils/auth';
 import { Settings as SettingsIcon, User, Bell, Shield, Key, Save, Eye, EyeOff } from 'lucide-react';
-
-const API = '/api';
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken();
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  });
-  if (res.status === 401) {
-    logout();
-    return null;
-  }
-  return res.json().catch(() => null);
-}
 
 const SectionCard = ({ title, icon: Icon, children }) => (
   <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>

@@ -1,25 +1,8 @@
 import { useState, useEffect } from 'react'
-import { getToken, logout } from '../utils/auth'
+import { apiFetch } from '../utils/api'
+import Spinner from '../components/Spinner'
+import { getToken } from '../utils/auth'
 import { FileText, Upload, Download, Trash2, Eye, History, Search, Filter, MoreVertical } from 'lucide-react'
-
-const API = '/api'
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken()
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  })
-  if (res.status === 401) {
-    logout()
-    return null
-  }
-  return res.json().catch(() => null)
-}
 
 export default function Documents() {
   const [docs, setDocs] = useState([])
@@ -186,7 +169,7 @@ export default function Documents() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading documents...</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center' }}><Spinner size={28} /></td>
                 </tr>
               ) : filteredDocs.length === 0 ? (
                 <tr>

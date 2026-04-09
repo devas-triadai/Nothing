@@ -117,3 +117,10 @@ class SystemMetric(Base):
     metric_value = Column(Float, default=0.0)
     unit = Column(String(20), nullable=True)
     recorded_at = Column(DateTime, default=datetime.utcnow)
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

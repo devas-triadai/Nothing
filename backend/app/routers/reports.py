@@ -59,10 +59,14 @@ def get_reports_summary(
     current_user: User = Depends(get_current_user)
 ):
     """Get overall system reports summary"""
+    from app.models.models import UserSession
     total_users = db.query(User).count()
     active_users = db.query(User).filter(User.status == "active").count()
     total_queries = db.query(UsageLog).count()
     total_documents = db.query(Document).count()
+
+    # Active sessions count
+    active_sessions = db.query(UserSession).filter(UserSession.is_active == True).count()
 
     # Last 30 days stats
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
@@ -73,8 +77,10 @@ def get_reports_summary(
     return {
         "total_users": total_users,
         "active_users": active_users,
+        "active_sessions": active_sessions,
         "total_queries": total_queries,
         "total_documents": total_documents,
+        "api_calls": total_queries,
         "queries_last_30_days": recent_queries,
         "generated_at": datetime.utcnow().isoformat()
     }

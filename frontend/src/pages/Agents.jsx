@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react'
-import { getToken, logout } from '../utils/auth'
+import { apiFetch } from '../utils/api'
+import Spinner from '../components/Spinner'
 import { Bot, Settings2, Activity, Cpu, Zap, Plus, Search, Trash2, Edit2 } from 'lucide-react'
-
-const API = '/api'
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken()
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  })
-  if (res.status === 401) {
-    logout()
-    return null
-  }
-  return res.json().catch(() => null)
-}
 
 export default function Agents() {
   const [agents, setAgents] = useState([])
@@ -83,7 +65,7 @@ export default function Agents() {
         gap: '20px'
       }}>
         {loading ? (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px', color: '#7a90b8' }}>Loading agents...</div>
+          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px' }}><Spinner size={28} /></div>
         ) : filteredAgents.length === 0 ? (
           <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '40px', color: '#7a90b8' }}>No agents configured yet.</div>
         ) : (

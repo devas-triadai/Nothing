@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getToken, logout } from '../utils/auth';
+import { apiFetch } from '../utils/api';
+import Spinner from '../components/Spinner';
 import { Shield, Search, Filter } from 'lucide-react';
-
-const API = '/api';
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken();
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  });
-  if (res.status === 401) {
-    logout();
-    return null;
-  }
-  return res.json().catch(() => null);
-}
 
 const ACTION_COLORS = {
   login: { bg: 'rgba(0,200,83,0.15)', color: '#00c853' },
@@ -135,8 +117,8 @@ const AuditLogs = () => {
 
       <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-secondary)' }}>
-            Loading audit logs...
+          <div style={{ textAlign: 'center', padding: '60px' }}>
+            <Spinner size={32} />
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

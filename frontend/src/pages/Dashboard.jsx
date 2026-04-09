@@ -1,29 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { getToken, logout } from '../utils/auth'
+import { apiFetch } from '../utils/api'
+import Spinner from '../components/Spinner'
 import { Users, CheckCircle, BarChart3, Clock } from 'lucide-react'
 
-const API = '/api'
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken()
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  })
-  if (res.status === 401) {
-    logout()
-    return null
-  }
-  return res.json().catch(() => null)
-}
-
 export default function Dashboard() {
-  const navigate = useNavigate()
   const [stats, setStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
@@ -34,34 +14,30 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = getToken()
-    if (!token) {
-      navigate('/login')
-      return
-    }
     fetchDashboardData()
   }, [])
 
   async function fetchDashboardData() {
     setLoading(true)
     try {
-      const [usersData, reportsData, logsData] = await Promise.all([
-        apiFetch('/users/'),
-        apiFetch('/reports/'),
-        apiFetch('/audit-logs/')
+      const [statsData, activityData] = await Promise.all([
+        apiFetch('/dashboard/stats'),
+        apiFetch('/dashboard/activity?limit=8')
       ])
 
-      const users = Array.isArray(usersData) ? usersData : (usersData?.items || [])
-      const reports = Array.isArray(reportsData) ? reportsData : (reportsData?.items || [])
-      const logs = Array.isArray(logsData) ? logsData : (logsData?.items || [])
+      if (statsData) {
+        setStats({
+          totalUsers: statsData.total_users ?? statsData.totalUsers ?? 0,
+          activeUsers: statsData.active_users ?? statsData.activeUsers ?? 0,
+          totalReports: statsData.total_reports ?? statsData.totalReports ?? 0,
+          pendingActions: statsData.pending_actions ?? statsData.pendingActions ?? 0
+        })
+      }
 
-      setStats({
-        totalUsers: users.length,
-        activeUsers: users.filter(u => u.is_active !== false).length,
-        totalReports: reports.length,
-        pendingActions: reports.filter(r => r.status === 'pending').length
-      })
-      setRecentActivity(logs.slice(0, 8))
+      if (activityData) {
+        const items = Array.isArray(activityData) ? activityData : (activityData.items || activityData.logs || [])
+        setRecentActivity(items.slice(0, 8))
+      }
     } catch (e) {
       console.error('Dashboard fetch error:', e)
     } finally {
@@ -77,11 +53,7 @@ export default function Dashboard() {
   ]
 
   if (loading) {
-    return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>
-        Loading dashboard data...
-      </div>
-    )
+    return <Spinner size={36} />
   }
 
   return (

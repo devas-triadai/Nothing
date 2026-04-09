@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getToken, logout } from '../utils/auth';
+import { apiFetch } from '../utils/api';
+import Spinner from '../components/Spinner';
 import { TrendingUp, Activity, Users, Zap, Clock, RefreshCw } from 'lucide-react';
-
-const API = '/api';
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken();
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  });
-  if (res.status === 401) {
-    logout();
-    return null;
-  }
-  return res.json().catch(() => null);
-}
 
 const MetricCard = ({ icon: Icon, label, value, unit, color, change }) => (
   <div style={{
@@ -118,8 +100,8 @@ export default function UsageAnalytics() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-secondary)' }}>
-          Loading analytics...
+        <div style={{ textAlign: 'center', padding: '60px' }}>
+          <Spinner size={32} />
         </div>
       ) : (
         <div>

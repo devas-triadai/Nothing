@@ -21,11 +21,26 @@ def get_analytics(
     period_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(period, 7)
     start_date = datetime.utcnow() - timedelta(days=period_days)
 
+    # Previous period for calculating change percentages
+    prev_start = start_date - timedelta(days=period_days)
+
     total_calls = db.query(UsageLog).filter(UsageLog.created_at >= start_date).count()
+    prev_calls = db.query(UsageLog).filter(
+        UsageLog.created_at >= prev_start, UsageLog.created_at < start_date
+    ).count()
+
     active_users = db.query(UsageLog.user_id).filter(UsageLog.created_at >= start_date).distinct().count()
+    prev_active = db.query(UsageLog.user_id).filter(
+        UsageLog.created_at >= prev_start, UsageLog.created_at < start_date
+    ).distinct().count()
+
     avg_response_time = db.query(func.avg(UsageLog.response_time_ms)).filter(
         UsageLog.created_at >= start_date
     ).scalar() or 0
+
+    # Calculate change percentages
+    calls_change = round(((total_calls - prev_calls) / max(prev_calls, 1)) * 100, 1)
+    users_change = round(((active_users - prev_active) / max(prev_active, 1)) * 100, 1)
 
     # Top users
     top_users_data = db.query(
@@ -52,6 +67,8 @@ def get_analytics(
         "active_users": active_users,
         "avg_response_time": round(avg_response_time, 2),
         "uptime": 99.9,
+        "calls_change": calls_change,
+        "users_change": users_change,
         "top_users": top_users,
         "top_agents": []
     }

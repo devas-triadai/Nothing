@@ -1,25 +1,7 @@
 import { useState, useEffect } from 'react'
-import { getToken, logout } from '../utils/auth'
+import { apiFetch } from '../utils/api'
+import Spinner from '../components/Spinner'
 import { UserPlus, Search, Filter, MoreVertical, UserCheck, UserX } from 'lucide-react'
-
-const API = '/api'
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken()
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {})
-    }
-  })
-  if (res.status === 401) {
-    logout()
-    return null
-  }
-  return res.json().catch(() => null)
-}
 
 export default function Users() {
   const [users, setUsers] = useState([])
@@ -180,7 +162,7 @@ export default function Users() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading users...</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center' }}><Spinner size={28} /></td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
