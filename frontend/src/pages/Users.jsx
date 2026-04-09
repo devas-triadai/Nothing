@@ -145,11 +145,11 @@ export default function Users() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan=\"5\" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading users...</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading users...</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan=\"5\" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>No users found.</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>No users found.</td>
                 </tr>
               ) : (
                 filteredUsers.map((user, i) => (

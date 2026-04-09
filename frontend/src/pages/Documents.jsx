@@ -144,11 +144,11 @@ export default function Documents() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan=\"5\" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading documents...</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>Loading documents...</td>
                 </tr>
               ) : filteredDocs.length === 0 ? (
                 <tr>
-                  <td colSpan=\"5\" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>No documents found.</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>No documents found.</td>
                 </tr>
               ) : (
                 filteredDocs.map((doc, i) => (
@@ -193,10 +193,10 @@ export default function Documents() {
                     </td>
                     <td style={{ padding: '16px 20px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                        <button title=\"View\" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Eye size={18} /></button>
-                        <button title=\"Download\" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Download size={18} /></button>
-                        <button title=\"History\" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><History size={18} /></button>
-                        <button title=\"Delete\" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
+                        <button title="View" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Eye size={18} /></button>
+                        <button title="Download" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Download size={18} /></button>
+                        <button title="History" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><History size={18} /></button>
+                        <button title="Delete" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
                       </div>
                     </td>
                   </tr>
