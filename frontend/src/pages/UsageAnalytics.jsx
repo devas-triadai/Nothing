@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getToken, logout, getUser } from '../utils/auth';
+import { getToken, logout } from '../utils/auth';
+import { TrendingUp, Activity, Users, Zap, Clock, RefreshCw } from 'lucide-react';
 
 const API = '/api';
 
@@ -21,159 +21,200 @@ async function apiFetch(path, opts = {}) {
   return res.json().catch(() => null);
 }
 
-const StatCard = ({ label, value, unit, color }) => (
+const MetricCard = ({ icon: Icon, label, value, unit, color, change }) => (
   <div style={{
-    background: 'rgba(10,15,30,0.8)', borderRadius: '14px', padding: '24px',
-    border: `1px solid ${color || 'rgba(70,110,255,0.2)'}`,
-    boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+    background: 'var(--surface)',
+    borderRadius: '12px',
+    border: '1px solid var(--border)',
+    padding: '20px',
+    flex: '1 1 180px',
+    minWidth: '180px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
   }}>
-    <div style={{ fontSize: '13px', color: '#7a90b8', marginBottom: '8px' }}>{label}</div>
-    <div style={{ fontSize: '28px', fontWeight: 800, color: color || '#fff' }}>
-      {value}<span style={{ fontSize: '14px', fontWeight: 400, marginLeft: '4px', color: '#7a90b8' }}>{unit}</span>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+      <div style={{ width: 36, height: 36, borderRadius: '8px', background: color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon size={18} color={color} />
+      </div>
+      {change !== undefined && (
+        <span style={{ fontSize: '12px', fontWeight: 600, color: change >= 0 ? '#00c853' : '#d50000', background: change >= 0 ? 'rgba(0,200,83,0.1)' : 'rgba(213,0,0,0.1)', padding: '3px 8px', borderRadius: '20px' }}>
+          {change >= 0 ? '+' : ''}{change}%
+        </span>
+      )}
     </div>
+    <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+      {value ?? '-'}
+      {unit && <span style={{ fontSize: '14px', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '4px' }}>{unit}</span>}
+    </div>
+    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px' }}>{label}</div>
   </div>
 );
 
+const PERIODS = ['24h', '7d', '30d', '90d'];
+
 export default function UsageAnalytics() {
-  const navigate = useNavigate();
-  const user = getUser();
-  const [stats, setStats] = useState({
-    apiCalls: '1.2M',
-    avgLatency: '142',
-    activeSessions: '842',
-    storageUsed: '45.2'
-  });
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState('7d');
+  const [topAgents, setTopAgents] = useState([]);
+  const [topUsers, setTopUsers] = useState([]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      navigate('/login');
-      return;
+    fetchAnalytics();
+  }, [period]);
+
+  const fetchAnalytics = async () => {
+    setLoading(true);
+    try {
+      const result = await apiFetch(`/analytics?period=${period}`);
+      if (result) {
+        setData(result);
+        setTopAgents(result.top_agents || []);
+        setTopUsers(result.top_users || []);
+      }
+    } catch (err) {
+      console.error('Analytics fetch error:', err);
+    } finally {
+      setLoading(false);
     }
-    // Simulate loading
-    setTimeout(() => setLoading(false), 800);
-  }, []);
+  };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0b1020 0%, #111a2e 100%)',
-      color: '#fff',
-      fontFamily: 'Inter, system-ui, sans-serif',
-      padding: '24px'
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 32,
-        paddingBottom: 20,
-        borderBottom: '1px solid rgba(70,110,255,0.2)'
-      }}>
+    <div style={{ padding: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>📈 Usage Analytics</h1>
-          <p style={{ margin: '4px 0 0', color: '#7a90b8', fontSize: 13 }}>
-            Real-time system performance and resource monitoring
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+            <TrendingUp size={24} color="#1e6bff" />
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Usage Analytics</h1>
+          </div>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, paddingLeft: '36px' }}>
+            Platform usage metrics and trends
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#9fb0d0', fontSize: 13 }}>{user?.username || 'Admin'}</span>
-          <button onClick={() => logout()} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.3)',
-            background: 'rgba(255,80,80,0.1)', color: '#ff9b9b', cursor: 'pointer', fontSize: 13, fontWeight: 600
-          }}>Logout</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+            {PERIODS.map(p => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                style={{
+                  padding: '7px 14px',
+                  border: 'none',
+                  background: period === p ? '#1e6bff' : 'transparent',
+                  color: period === p ? 'white' : 'var(--text-secondary)',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: period === p ? 600 : 400,
+                }}
+              >{p}</button>
+            ))}
+          </div>
+          <button
+            onClick={fetchAnalytics}
+            style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}
+          >
+            <RefreshCw size={13} /> Refresh
+          </button>
         </div>
-      </div>
-
-      {/* Nav */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 32, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Dashboard', path: '/dashboard' },
-          { label: 'Users', path: '/users' },
-          { label: 'Reports', path: '/reports' },
-          { label: 'Agents', path: '/agents' },
-          { label: 'Documents', path: '/documents' },
-          { label: 'Audit Logs', path: '/audit-logs' },
-          { label: 'Settings', path: '/settings' }
-        ].map(item => (
-          <button key={item.path} onClick={() => navigate(item.path)} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(70,110,255,0.3)',
-            background: 'rgba(36,99,255,0.1)', color: '#7ab4ff', cursor: 'pointer', fontSize: 13, fontWeight: 500
-          }}>{item.label}</button>
-        ))}
       </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#7a90b8' }}>Analyzing system data...</div>
+        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-secondary)' }}>
+          Loading analytics...
+        </div>
       ) : (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, marginBottom: 32 }}>
-            <StatCard label="Total API Requests" value={stats.apiCalls} color="#2463ff" />
-            <StatCard label="Avg. Latency" value={stats.avgLatency} unit="ms" color="#22c55e" />
-            <StatCard label="Active Sessions" value={stats.activeSessions} color="#f59e0b" />
-            <StatCard label="Storage Usage" value={stats.storageUsed} unit="GB" color="#ef4444" />
+        <div>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
+            <MetricCard icon={Activity} label="Total API Calls" value={data?.total_calls?.toLocaleString()} color="#1e6bff" change={data?.calls_change} />
+            <MetricCard icon={Users} label="Active Users" value={data?.active_users} color="#00c853" change={data?.users_change} />
+            <MetricCard icon={Zap} label="Avg Response Time" value={data?.avg_response_time} unit="ms" color="#f0b429" change={data?.response_change} />
+            <MetricCard icon={Clock} label="Uptime" value={data?.uptime} unit="%" color="#00c853" />
           </div>
 
-          <div style={{
-            background: 'rgba(10,15,30,0.8)', border: '1px solid rgba(70,110,255,0.2)',
-            borderRadius: 14, padding: 24, marginBottom: 32
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>System Load Trend</h2>
-              <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{
-                background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '6px 12px', borderRadius: 6
-              }}>
-                <option value="24h">Last 24 Hours</option>
-                <option value="7d">Last 7 Days</option>
-                <option value="30d">Last 30 Days</option>
-              </select>
-            </div>
-            <div style={{
-              height: 200, display: 'flex', alignItems: 'flex-end', gap: 10, padding: '0 10px'
-            }}>
-              {[40, 65, 45, 80, 55, 90, 70, 85, 60, 75, 50, 95].map((h, i) => (
-                <div key={i} style={{
-                  flex: 1, height: `${h}%`, background: 'linear-gradient(to top, #2463ff, #7ab4ff)',
-                  borderRadius: '4px 4px 0 0', opacity: 0.8
-                }}></div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, color: '#4a5e8a', fontSize: 12 }}>
-              <span>00:00</span>
-              <span>06:00</span>
-              <span>12:00</span>
-              <span>18:00</span>
-              <span>23:59</span>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24 }}>
-            <div style={{ background: 'rgba(10,15,30,0.8)', border: '1px solid rgba(70,110,255,0.2)', borderRadius: 14, padding: 24 }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Top API Endpoints</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {[
-                  { path: '/api/v1/search', count: '452k', p: 85 },
-                  { path: '/api/v1/auth/login', count: '128k', p: 40 },
-                  { path: '/api/v1/agents/chat', count: '94k', p: 30 },
-                  { path: '/api/v1/users/profile', count: '62k', p: 20 }
-                ].map((item, i) => (
-                  <div key={i}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                      <span style={{ color: '#c8d8f0', fontFamily: 'monospace' }}>{item.path}</span>
-                      <span style={{ color: '#7a90b8' }}>{item.count}</span>
-                    </div>
-                    <div style={{ height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
-                      <div style={{ height: '100%', width: `${item.p}%`, background: '#2463ff', borderRadius: 2 }}></div>
-                    </div>
-                  </div>
-                ))}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+            <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+                <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Top Agents by Usage</h2>
               </div>
+              {topAgents.length === 0 ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data available</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-hover)' }}>
+                      {['Agent', 'Calls', 'Avg Time', 'Success Rate'].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '10px 16px', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topAgents.map((agent, i) => (
+                      <tr
+                        key={agent.id || i}
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{agent.name || agent.agent_name}</td>
+                        <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>{agent.calls?.toLocaleString()}</td>
+                        <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>{agent.avg_time}ms</td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${agent.success_rate || 0}%`, background: '#00c853', borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', minWidth: 32 }}>{agent.success_rate}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+                <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Most Active Users</h2>
+              </div>
+              {topUsers.length === 0 ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data available</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-hover)' }}>
+                      {['User', 'Requests', 'Last Active'].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '10px 16px', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topUsers.map((user, i) => (
+                      <tr
+                        key={user.id || i}
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        <td style={{ padding: '10px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1e6bff22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, color: '#1e6bff' }}>
+                              {(user.name || user.username || '?')[0].toUpperCase()}
+                            </div>
+                            <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{user.name || user.username}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>{user.requests?.toLocaleString()}</td>
+                        <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {user.last_active ? new Date(user.last_active).toLocaleDateString() : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
