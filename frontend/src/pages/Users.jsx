@@ -1,30 +1,48 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getToken, logout, getUser } from '../utils/auth';
 
-const Users = () => {
+const API = '/api';
+
+async function apiFetch(path, opts = {}) {
+  const token = getToken();
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {})
+    }
+  });
+  if (res.status === 401) {
+    logout();
+    return null;
+  }
+  return res.json().catch(() => null);
+}
+
+export default function Users() {
   const navigate = useNavigate();
+  const user = getUser();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [selectedUser, setSelectedUser] = useState(null);
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('agra_token');
-    if (!token) { navigate('/login'); return; }
+    const token = getToken();
+    if (!token) {
+      navigate('/login');
+      return;
+    }
     fetchUsers();
   }, []);
 
   const fetchUsers = async () => {
+    setLoading(true);
     try {
-      const token = localStorage.getItem('agra_token');
-      const res = await fetch('/api/users', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users || []);
-      }
+      const data = await apiFetch('/users/');
+      setUsers(Array.isArray(data) ? data : (data?.items || []));
     } catch (err) {
       console.error('Users fetch error:', err);
     } finally {
@@ -32,136 +50,157 @@ const Users = () => {
     }
   };
 
-  const handleStatusToggle = async (userId, currentStatus) => {
+  const toggleUserStatus = async (userId, currentStatus) => {
     try {
-      const token = localStorage.getItem('agra_token');
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-      const res = await fetch(`/api/users/${userId}/status`, {
+      await apiFetch(`/users/${userId}`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ is_active: !currentStatus })
       });
-      if (res.ok) {
-        setUsers(users.map(u => u.id === userId ? { ...u, status: newStatus } : u));
-      }
+      fetchUsers();
     } catch (err) {
       console.error('Status toggle error:', err);
     }
   };
 
   const filteredUsers = users.filter(u =>
-    u.name?.toLowerCase().includes(search.toLowerCase()) ||
+    u.username?.toLowerCase().includes(search.toLowerCase()) ||
+    u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
     u.email?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0b1020 0%, #111a2e 100%)',
+      color: '#fff',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      padding: '24px'
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 32,
+        paddingBottom: 20,
+        borderBottom: '1px solid rgba(70,110,255,0.2)'
+      }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>User Management</h1>
-          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Manage all registered users
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>👥 User Management</h1>
+          <p style={{ margin: '4px 0 0', color: '#7a90b8', fontSize: 13 }}>
+            Manage system administrators and operators
           </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: '#9fb0d0', fontSize: 13 }}>{user?.username || 'Admin'}</span>
+          <button onClick={() => logout()} style={{
+            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.3)',
+            background: 'rgba(255,80,80,0.1)', color: '#ff9b9b', cursor: 'pointer', fontSize: 13, fontWeight: 600
+          }}>Logout</button>
         </div>
       </div>
 
-      <div style={{
-        background: 'var(--surface)',
-        borderRadius: '12px',
-        border: '1px solid var(--border)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        overflow: 'hidden',
-      }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-          <input
-            type="text"
-            placeholder="Search users by name or email..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{
-              width: '300px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-              background: 'var(--bg)',
-              color: 'var(--text-primary)',
-              fontSize: '13px',
-              outline: 'none',
-            }}
-          />
-        </div>
+      {/* Nav */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 32, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Dashboard', path: '/dashboard' },
+          { label: 'Reports', path: '/reports' },
+          { label: 'Agents', path: '/agents' },
+          { label: 'Documents', path: '/documents' },
+          { label: 'Audit Logs', path: '/audit-logs' },
+          { label: 'Usage Analytics', path: '/usage-analytics' },
+          { label: 'Settings', path: '/settings' }
+        ].map(item => (
+          <button key={item.path} onClick={() => navigate(item.path)} style={{
+            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(70,110,255,0.3)',
+            background: item.path === '/users' ? 'rgba(36,99,255,0.2)' : 'rgba(36,99,255,0.1)',
+            color: item.path === '/users' ? '#fff' : '#7ab4ff',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500
+          }}>{item.label}</button>
+        ))}
+      </div>
 
+      {/* Actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 24 }}>
+        <input
+          type="text"
+          placeholder="Search users..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            flex: 1, maxWidth: 400, background: '#1a2236', border: '1px solid #2d3b5a',
+            color: '#fff', padding: '10px 16px', borderRadius: 10, outline: 'none'
+          }}
+        />
+        <button onClick={() => setShowModal(true)} style={{
+          padding: '10px 24px', borderRadius: 10, border: 'none',
+          background: '#2463ff', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600
+        }}>+ Add User</button>
+      </div>
+
+      {/* Table */}
+      <div style={{
+        background: 'rgba(10,15,30,0.8)', border: '1px solid rgba(70,110,255,0.2)',
+        borderRadius: 14, overflow: 'hidden'
+      }}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-secondary)' }}>Loading users...</div>
+          <div style={{ padding: 40, textAlign: 'center', color: '#7a90b8' }}>Loading users...</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ background: 'var(--surface-hover)' }}>
-                {['Name', 'Email', 'Role', 'Status', 'Joined', 'Actions'].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
-                ))}
+              <tr style={{ background: 'rgba(70,110,255,0.1)', borderBottom: '1px solid rgba(70,110,255,0.2)' }}>
+                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>User</th>
+                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Role</th>
+                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Last Login</th>
+                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Status</th>
+                <th style={{ textAlign: 'right', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredUsers.length === 0 ? (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>No users found</td></tr>
-              ) : filteredUsers.map(user => (
-                <tr key={user.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background = ''}
-                >
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{
-                        width: '34px', height: '34px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #1e6bff, #3d8bff)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '13px', fontWeight: 700, color: 'white', flexShrink: 0,
-                      }}>
-                        {user.name?.charAt(0).toUpperCase() || 'U'}
-                      </div>
-                      <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{user.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>{user.email}</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{
-                      padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600,
-                      background: user.role === 'admin' ? 'rgba(30,107,255,0.15)' : 'rgba(255,255,255,0.08)',
-                      color: user.role === 'admin' ? '#1e6bff' : 'var(--text-secondary)',
-                    }}>{user.role || 'user'}</span>
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{
-                      padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600,
-                      background: user.status === 'active' ? 'rgba(0,200,83,0.15)' : 'rgba(213,0,0,0.15)',
-                      color: user.status === 'active' ? '#00c853' : '#d50000',
-                    }}>{user.status || 'active'}</span>
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <button
-                      onClick={() => handleStatusToggle(user.id, user.status)}
-                      style={{
-                        padding: '5px 12px', borderRadius: '6px', border: 'none',
-                        fontSize: '12px', cursor: 'pointer', fontWeight: 500,
-                        background: user.status === 'active' ? 'rgba(213,0,0,0.15)' : 'rgba(0,200,83,0.15)',
-                        color: user.status === 'active' ? '#d50000' : '#00c853',
-                      }}
-                    >
-                      {user.status === 'active' ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </td>
+                <tr>
+                  <td colSpan="5" style={{ padding: 40, textAlign: 'center', color: '#4a5e8a' }}>No users found.</td>
                 </tr>
-              ))}
+              ) : (
+                filteredUsers.map((u) => (
+                  <tr key={u.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <td style={{ padding: '16px 20px' }}>
+                      <div style={{ fontWeight: 600, color: '#fff' }}>{u.full_name || u.username}</div>
+                      <div style={{ fontSize: 12, color: '#7a90b8' }}>{u.email || u.username}</div>
+                    </td>
+                    <td style={{ padding: '16px 20px', color: '#c8d8f0' }}>{u.role || 'Operator'}</td>
+                    <td style={{ padding: '16px 20px', color: '#7a90b8' }}>
+                      {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
+                    </td>
+                    <td style={{ padding: '16px 20px' }}>
+                      <span style={{
+                        padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                        background: u.is_active !== false ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                        color: u.is_active !== false ? '#4ade80' : '#f87171'
+                      }}>{u.is_active !== false ? 'Active' : 'Inactive'}</span>
+                    </td>
+                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                      <button
+                        onClick={() => toggleUserStatus(u.id, u.is_active)}
+                        style={{
+                          background: 'none', border: 'none', color: '#7ab4ff', cursor: 'pointer',
+                          fontSize: 12, fontWeight: 600, marginRight: 12
+                        }}
+                      >
+                        {u.is_active !== false ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button style={{
+                        background: 'none', border: 'none', color: '#ff9b9b', cursor: 'pointer',
+                        fontSize: 12, fontWeight: 600
+                      }}>Delete</button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}
       </div>
     </div>
   );
-};
-
-export default Users;
+}
