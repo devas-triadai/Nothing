@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.database import engine, Base
-from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports
+from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports, settings
 from app.routers.audit import router as audit_logs_router
 from app.seed import seed_superadmin
 
