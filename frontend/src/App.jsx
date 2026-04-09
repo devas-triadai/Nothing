@@ -45,7 +45,7 @@ function App() {
     return (
       <div style={{
         height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg)', color: 'var(--text-primary)', fontSize: '16px',
+        background: '#0b1020', color: '#fff', fontSize: '16px',
       }}>
         Loading AGRA...
       </div>
@@ -68,8 +68,8 @@ function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="users" element={<Users />} />
-            <Route path="usage" element={<UsageAnalytics />} />
-            <Route path="audit" element={<AuditLogs />} />
+            <Route path="usage-analytics" element={<UsageAnalytics />} />
+            <Route path="audit-logs" element={<AuditLogs />} />
             <Route path="documents" element={<Documents />} />
             <Route path="agents" element={<Agents />} />
             <Route path="reports" element={<Reports />} />
