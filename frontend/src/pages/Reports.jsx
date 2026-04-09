@@ -63,11 +63,11 @@ export default function Reports() {
     setLoading(true);
     try {
       const [statsData, reportsData] = await Promise.all([
-        apiFetch('/reports/stats'),
-        apiFetch('/reports'),
+        apiFetch('/reports/summary'),
+        apiFetch('/reports/'),
       ]);
       if (statsData) setStats(statsData);
-      if (reportsData) setReports(reportsData.reports || reportsData || []);
+      if (reportsData) setReports(Array.isArray(reportsData.reports) ? reportsData.reports : []);
     } catch (err) {
       console.error('Reports fetch error:', err);
     } finally {

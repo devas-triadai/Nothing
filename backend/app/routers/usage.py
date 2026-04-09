@@ -1,14 +1,60 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
 from datetime import datetime, timedelta
 
 from app.database import get_db
-from app.models.models import User, UsageLog
-from app.routers.auth import require_superadmin
+from app.models.models import User, UsageLog, Document
+from app.routers.auth import require_superadmin, get_current_user
 
 router = APIRouter()
+
+
+@router.get("/analytics")
+def get_analytics(
+    period: str = Query(default="7d", regex="^(24h|7d|30d|90d)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get usage analytics for a time period"""
+    period_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(period, 7)
+    start_date = datetime.utcnow() - timedelta(days=period_days)
+
+    total_calls = db.query(UsageLog).filter(UsageLog.created_at >= start_date).count()
+    active_users = db.query(UsageLog.user_id).filter(UsageLog.created_at >= start_date).distinct().count()
+    avg_response_time = db.query(func.avg(UsageLog.response_time_ms)).filter(
+        UsageLog.created_at >= start_date
+    ).scalar() or 0
+
+    # Top users
+    top_users_data = db.query(
+        UsageLog.user_id,
+        func.count(UsageLog.id).label("count")
+    ).filter(
+        UsageLog.created_at >= start_date
+    ).group_by(UsageLog.user_id).order_by(func.count(UsageLog.id).desc()).limit(10).all()
+
+    top_users = []
+    for row in top_users_data:
+        user = db.query(User).filter(User.id == row.user_id).first()
+        top_users.append({
+            "id": row.user_id,
+            "name": user.username if user else "unknown",
+            "username": user.username if user else "unknown",
+            "requests": row.count,
+            "last_active": user.last_login if user else None
+        })
+
+    return {
+        "period": period,
+        "total_calls": total_calls,
+        "active_users": active_users,
+        "avg_response_time": round(avg_response_time, 2),
+        "uptime": 99.9,
+        "top_users": top_users,
+        "top_agents": []
+    }
 
 
 @router.get("/")

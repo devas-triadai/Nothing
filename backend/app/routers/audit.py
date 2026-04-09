@@ -10,6 +10,21 @@ from app.routers.auth import require_superadmin
 router = APIRouter()
 
 
+@router.get("/audit-logs")
+def get_audit_logs_alias(
+    skip: int = 0,
+    limit: int = 50,
+    user_id: Optional[int] = None,
+    action: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    """Alias for audit logs endpoint"""
+    return get_audit_logs(skip, limit, user_id, action, resource_type, days, db, current_user)
+
+
 @router.get("/")
 def get_audit_logs(
     skip: int = 0,

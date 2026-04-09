@@ -45,7 +45,7 @@ const AuditLogs = () => {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch('/audit');
+      const data = await apiFetch('/audit/');
       if (data) setLogs(data.logs || []);
     } catch (err) {
       console.error('Audit logs fetch error:', err);

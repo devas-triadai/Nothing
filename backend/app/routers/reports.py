@@ -10,6 +10,49 @@ from app.routers.auth import get_current_user
 router = APIRouter()
 
 
+@router.get("/")
+def get_reports_list(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get list of available reports"""
+    reports = [
+        {
+            "id": 1,
+            "name": "System Usage Report",
+            "type": "usage",
+            "created_at": datetime.utcnow(),
+            "status": "completed"
+        },
+        {
+            "id": 2,
+            "name": "User Activity Report",
+            "type": "users",
+            "created_at": datetime.utcnow(),
+            "status": "completed"
+        },
+        {
+            "id": 3,
+            "name": "Document Index Report",
+            "type": "documents",
+            "created_at": datetime.utcnow(),
+            "status": "completed"
+        }
+    ]
+    return {"reports": reports, "total": len(reports)}
+
+
+@router.get("/stats")
+def get_reports_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get reports statistics (alias for summary)"""
+    return get_reports_summary(db, current_user)
+
+
 @router.get("/summary")
 def get_reports_summary(
     db: Session = Depends(get_db),

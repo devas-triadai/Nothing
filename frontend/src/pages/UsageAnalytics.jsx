@@ -65,7 +65,7 @@ export default function UsageAnalytics() {
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
-      const result = await apiFetch(`/analytics?period=${period}`);
+      const result = await apiFetch(`/usage/analytics?period=${period}`);
       if (result) {
         setData(result);
         setTopAgents(result.top_agents || []);
