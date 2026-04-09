@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getToken, logout, getUser } from '../utils/auth';
+import { getToken, logout } from '../utils/auth';
+import { BarChart2, Download, RefreshCw, TrendingUp, Users, FileText, Activity } from 'lucide-react';
 
 const API = '/api';
 
@@ -21,29 +21,53 @@ async function apiFetch(path, opts = {}) {
   return res.json().catch(() => null);
 }
 
+const StatCard = ({ icon: Icon, label, value, change, color }) => (
+  <div style={{
+    background: 'var(--surface)',
+    borderRadius: '12px',
+    border: '1px solid var(--border)',
+    padding: '20px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    flex: '1 1 180px',
+    minWidth: '180px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ width: 36, height: 36, borderRadius: '8px', background: color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon size={18} color={color} />
+      </div>
+      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
+    </div>
+    <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text-primary)' }}>{value ?? '-'}</div>
+    {change !== undefined && (
+      <div style={{ fontSize: '12px', color: change >= 0 ? '#00c853' : '#d50000' }}>
+        {change >= 0 ? '+' : ''}{change}% from last period
+      </div>
+    )}
+  </div>
+);
+
 export default function Reports() {
-  const navigate = useNavigate();
-  const user = getUser();
+  const [stats, setStats] = useState(null);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-    fetchReports();
+    fetchData();
   }, []);
 
-  const fetchReports = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch('/reports/');
-      setReports(Array.isArray(data) ? data : (data?.items || []));
+      const [statsData, reportsData] = await Promise.all([
+        apiFetch('/reports/stats'),
+        apiFetch('/reports'),
+      ]);
+      if (statsData) setStats(statsData);
+      if (reportsData) setReports(reportsData.reports || reportsData || []);
     } catch (err) {
       console.error('Reports fetch error:', err);
     } finally {
@@ -51,147 +75,122 @@ export default function Reports() {
     }
   };
 
-  const handleExport = async (format) => {
-    alert(`Exporting as ${format}... (Feature coming soon)`);
-  };
+  const tabs = ['overview', 'usage', 'agents', 'users'];
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0b1020 0%, #111a2e 100%)',
-      color: '#fff',
-      fontFamily: 'Inter, system-ui, sans-serif',
-      padding: '24px'
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 32,
-        paddingBottom: 20,
-        borderBottom: '1px solid rgba(70,110,255,0.2)'
-      }}>
+    <div style={{ padding: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>📊 Reports</h1>
-          <p style={{ margin: '4px 0 0', color: '#7a90b8', fontSize: 13 }}>
-            System Analytics & Data Export
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+            <BarChart2 size={24} color="#1e6bff" />
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Reports</h1>
+          </div>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, paddingLeft: '36px' }}>
+            Analytics and performance insights
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#9fb0d0', fontSize: 13 }}>{user?.username || 'Admin'}</span>
-          <button onClick={() => logout()} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,80,80,0.3)',
-            background: 'rgba(255,80,80,0.1)', color: '#ff9b9b', cursor: 'pointer', fontSize: 13, fontWeight: 600
-          }}>Logout</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={fetchData}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+          <button
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: 'none', background: '#1e6bff', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}
+          >
+            <Download size={14} /> Export
+          </button>
         </div>
       </div>
 
-      {/* Nav */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 32, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Dashboard', path: '/dashboard' },
-          { label: 'Users', path: '/users' },
-          { label: 'Agents', path: '/agents' },
-          { label: 'Documents', path: '/documents' },
-          { label: 'Audit Logs', path: '/audit-logs' },
-          { label: 'Usage Analytics', path: '/usage-analytics' },
-          { label: 'Settings', path: '/settings' }
-        ].map(item => (
-          <button key={item.path} onClick={() => navigate(item.path)} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(70,110,255,0.3)',
-            background: 'rgba(36,99,255,0.1)', color: '#7ab4ff', cursor: 'pointer', fontSize: 13, fontWeight: 500
-          }}>{item.label}</button>
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
+        {tabs.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: '10px 20px',
+              border: 'none',
+              background: 'none',
+              color: activeTab === tab ? '#1e6bff' : 'var(--text-secondary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: activeTab === tab ? 600 : 400,
+              borderBottom: activeTab === tab ? '2px solid #1e6bff' : '2px solid transparent',
+              textTransform: 'capitalize',
+              marginBottom: '-1px',
+            }}
+          >{tab}</button>
         ))}
       </div>
 
-      {/* Controls */}
-      <div style={{
-        display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap',
-        background: 'rgba(10,15,30,0.5)', padding: 16, borderRadius: 12, border: '1px solid rgba(70,110,255,0.1)'
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <label style={{ fontSize: 11, color: '#7a90b8' }}>Filter Type</label>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{
-            background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '6px 12px', borderRadius: 6
-          }}>
-            <option value="all">All Reports</option>
-            <option value="usage">Usage Stats</option>
-            <option value="errors">Error Logs</option>
-            <option value="security">Security Alerts</option>
-          </select>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-secondary)' }}>
+          Loading reports...
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#7a90b8' }}>From</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{
-              background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '6px 12px', borderRadius: 6
-            }} />
+      ) : (
+        <div>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
+            <StatCard icon={Users} label="Total Users" value={stats?.total_users ?? stats?.users} change={stats?.user_change} color="#1e6bff" />
+            <StatCard icon={Activity} label="Active Sessions" value={stats?.active_sessions ?? stats?.sessions} change={stats?.session_change} color="#00c853" />
+            <StatCard icon={FileText} label="Documents" value={stats?.total_documents ?? stats?.documents} change={stats?.doc_change} color="#f0b429" />
+            <StatCard icon={TrendingUp} label="API Calls" value={stats?.api_calls ?? stats?.requests} change={stats?.api_change} color="#ff6d00" />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: '#7a90b8' }}>To</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{
-              background: '#1a2236', border: '1px solid #2d3b5a', color: '#fff', padding: '6px 12px', borderRadius: 6
-            }} />
-          </div>
-        </div>
-        <div style={{ flex: 1 }}></div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <button onClick={() => handleExport('csv')} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid #22c55e',
-            background: 'rgba(34,197,94,0.1)', color: '#4ade80', cursor: 'pointer', fontSize: 13, fontWeight: 600
-          }}>Export CSV</button>
-          <button onClick={() => handleExport('pdf')} style={{
-            padding: '8px 16px', borderRadius: 8, border: '1px solid #ef4444',
-            background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', fontSize: 13, fontWeight: 600
-          }}>Export PDF</button>
-        </div>
-      </div>
 
-      {/* Content */}
-      <div style={{
-        background: 'rgba(10,15,30,0.8)', border: '1px solid rgba(70,110,255,0.2)',
-        borderRadius: 14, overflow: 'hidden'
-      }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#7a90b8' }}>Loading reports...</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: 'rgba(70,110,255,0.1)', borderBottom: '1px solid rgba(70,110,255,0.2)' }}>
-                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>ID</th>
-                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Title</th>
-                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Category</th>
-                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Date</th>
-                <th style={{ textAlign: 'left', padding: '16px 20px', color: '#7a90b8', fontWeight: 600 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.length === 0 ? (
-                <tr>
-                  <td colSpan="5" style={{ padding: 40, textAlign: 'center', color: '#4a5e8a' }}>No reports found for the selected period.</td>
-                </tr>
-              ) : (
-                reports.map((report) => (
-                  <tr key={report.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <td style={{ padding: '16px 20px', color: '#c8d8f0' }}>#{report.id}</td>
-                    <td style={{ padding: '16px 20px', fontWeight: 500 }}>{report.title}</td>
-                    <td style={{ padding: '16px 20px', color: '#7a90b8' }}>{report.category}</td>
-                    <td style={{ padding: '16px 20px', color: '#7a90b8' }}>{new Date(report.created_at).toLocaleDateString()}</td>
-                    <td style={{ padding: '16px 20px' }}>
-                      <span style={{
-                        padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                        background: report.status === 'completed' ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
-                        color: report.status === 'completed' ? '#4ade80' : '#fbbf24'
-                      }}>{report.status}</span>
-                    </td>
+          <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Recent Reports</h2>
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{reports.length} reports</span>
+            </div>
+            {reports.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                No reports available
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface-hover)' }}>
+                    {['Report Name', 'Type', 'Generated', 'Status', 'Actions'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                    ))}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {reports.map((report, i) => (
+                    <tr
+                      key={report.id || i}
+                      style={{ borderBottom: '1px solid var(--border)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = ''}
+                    >
+                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                        {report.name || report.title || 'Untitled'}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {report.type || '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {report.created_at ? new Date(report.created_at).toLocaleDateString() : '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{
+                          display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                          background: report.status === 'completed' ? 'rgba(0,200,83,0.15)' : 'rgba(240,180,41,0.15)',
+                          color: report.status === 'completed' ? '#00c853' : '#f0b429',
+                        }}>{report.status || 'pending'}</span>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <button style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>Download</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
