@@ -121,15 +121,15 @@ export default function Agents() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Cpu size={14} color=\"#4a5e8a\" />
+                  <Cpu size={14} color="#4a5e8a" />
                   <span style={{ fontSize: '13px', color: '#7a90b8' }}>Model: <span style={{ color: '#c8d8f0' }}>{agent.model || 'GPT-4'}</span></span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Zap size={14} color=\"#4a5e8a\" />
+                  <Zap size={14} color="#4a5e8a" />
                   <span style={{ fontSize: '13px', color: '#7a90b8' }}>Version: <span style={{ color: '#c8d8f0' }}>v{agent.version || '1.0'}</span></span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Activity size={14} color=\"#22c55e\" />
+                  <Activity size={14} color="#22c55e" />
                   <span style={{ fontSize: '13px', color: '#22c55e', fontWeight: 600 }}>System Active</span>
                 </div>
               </div>

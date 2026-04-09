@@ -97,9 +97,9 @@ export default function Documents() {
               transform: 'translateY(-50%)', 
               color: '#4a5e8a' 
             }} />
-            <input 
-              type=\"text\" 
-              placeholder=\"Search documents...\"
+            <input
+              type="text"
+              placeholder="Search documents..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{

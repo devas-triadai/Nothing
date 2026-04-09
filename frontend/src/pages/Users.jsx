@@ -98,9 +98,9 @@ export default function Users() {
               transform: 'translateY(-50%)', 
               color: '#4a5e8a' 
             }} />
-            <input 
-              type=\"text\" 
-              placeholder=\"Search by name, email or username...\"
+            <input
+              type="text"
+              placeholder="Search by name, email or username..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{
@@ -192,12 +192,12 @@ export default function Users() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {user.is_active !== false ? (
                           <>
-                            <UserCheck size={14} color=\"#22c55e\" />
+                            <UserCheck size={14} color="#22c55e" />
                             <span style={{ color: '#22c55e', fontSize: '13px' }}>Active</span>
                           </>
                         ) : (
                           <>
-                            <UserX size={14} color=\"#ef4444\" />
+                            <UserX size={14} color="#ef4444" />
                             <span style={{ color: '#ef4444', fontSize: '13px' }}>Inactive</span>
                           </>
                         )}
