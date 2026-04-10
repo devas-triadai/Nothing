@@ -116,19 +116,33 @@ export default function Agents() {
                 </div>
               </div>
 
-              <button style={{
+              <button 
+                onClick={() => {
+                  const token = localStorage.getItem('agra_token');
+                  let targetUrl = 'http://localhost:7860';
+                  // Automatically determine public URL if running on runpod proxy
+                  if (window.location.hostname.includes('runpod.net')) {
+                    targetUrl = window.location.origin.replace('3000', '7860');
+                  }
+                  window.open(`${targetUrl}/?token=${token}`, '_blank');
+                }}
+                style={{
                 marginTop: '24px',
                 width: '100%',
                 padding: '10px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
+                background: '#2463ff',
+                border: 'none',
                 borderRadius: '8px',
-                color: '#7ab4ff',
+                color: '#fff',
                 fontSize: '13px',
                 fontWeight: 600,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
               }}>
-                Configure Agent
+                Open Agent UI
               </button>
             </div>
           ))

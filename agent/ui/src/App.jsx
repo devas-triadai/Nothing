@@ -1,18 +1,27 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { getToken } from './utils/auth';
+import { getToken, setToken, getDashboardUrl } from './utils/auth';
 import Chat from './pages/Chat';
 import Upload from './pages/Upload';
 import Generate from './pages/Generate';
 import Compliance from './pages/Compliance';
 
 function ProtectedRoute({ children }) {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tokenParams = params.get('token');
+    if (tokenParams) {
+      setToken(tokenParams);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   const token = getToken();
+  
   if (!token) {
-    const podId = import.meta.env.VITE_POD_ID || '';
-    if (podId && podId !== 'your-runpod-pod-id-here') {
-      window.location.href = `https://${podId}-3000.proxy.runpod.net/login`;
-    } else {
-      window.location.href = 'http://localhost:3000/login';
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('token')) {
+      window.location.href = getDashboardUrl('/login');
     }
     return null;
   }
