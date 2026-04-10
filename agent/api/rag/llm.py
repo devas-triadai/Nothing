@@ -18,7 +18,7 @@ _GGUF_PATTERN = "google_gemma-4-31B-it-Q4_K_L.gguf"
 
 # LLM configuration
 _N_GPU_LAYERS = -1      # Offload all layers to GPU
-_N_CTX = 32768          # 32k context window
+_N_CTX = 8192           # 8k context window (prevents OOM on <40GB GPUs)
 _MAX_TOKENS_DEFAULT = 2048
 
 
