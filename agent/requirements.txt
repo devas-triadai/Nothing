@@ -14,7 +14,7 @@ llama-cpp-python==0.3.20
 # --- Embeddings & Reranking ---
 sentence-transformers>=2.7.0
 transformers>=4.46.0
-torch>=2.5.0
+
 
 # --- Vector Database (embedded mode, no server) ---
 qdrant-client==1.17.1
