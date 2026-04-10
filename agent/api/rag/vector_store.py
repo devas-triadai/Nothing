@@ -192,13 +192,14 @@ class VectorStore:
                 must=[FieldCondition(key="metadata.doc_id", match=MatchValue(value=doc_id_filter))]
             )
 
-        dense_results = self.client.search(
+        response = self.client.query_points(
             collection_name=_COLLECTION,
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=min(top_k * 3, 50),
             query_filter=qdrant_filter,
             with_payload=True,
         )
+        dense_results = response.points
 
         dense_scores: Dict[str, float] = {}
         result_map: Dict[str, Dict[str, Any]] = {}
