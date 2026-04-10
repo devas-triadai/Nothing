@@ -6,9 +6,9 @@
 #  the agent/models/ directory to the air-gapped deployment.
 #
 #  Usage:
-#    cd Nothing/agent
-#    chmod +x download_models.sh
-#    ./download_models.sh
+#    cd Nothing
+#    chmod +x agent/download_models.sh
+#    bash agent/download_models.sh
 # ============================================================================
 
 set -euo pipefail
@@ -22,11 +22,34 @@ echo "║  Target directory: ${MODELS_DIR}                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Ensure huggingface-cli is installed
-if ! command -v huggingface-cli &> /dev/null; then
-    echo "⚠  huggingface-cli not found. Installing..."
+# ── Detect the correct HuggingFace CLI command ──
+# huggingface_hub >= 1.x uses "hf", older versions use "huggingface-cli"
+HF_CMD=""
+
+if command -v hf &> /dev/null; then
+    HF_CMD="hf"
+    echo "✔  Found HuggingFace CLI: hf"
+elif command -v huggingface-cli &> /dev/null; then
+    HF_CMD="huggingface-cli"
+    echo "✔  Found HuggingFace CLI: huggingface-cli"
+else
+    echo "⚠  HuggingFace CLI not found. Installing..."
     pip install -U "huggingface_hub[cli]"
+    # After install, check which command is available
+    if command -v hf &> /dev/null; then
+        HF_CMD="hf"
+    elif command -v huggingface-cli &> /dev/null; then
+        HF_CMD="huggingface-cli"
+    else
+        echo "❌ Failed to install HuggingFace CLI. Please install manually:"
+        echo "   pip install -U huggingface_hub"
+        exit 1
+    fi
+    echo "✔  Installed HuggingFace CLI: ${HF_CMD}"
 fi
+
+echo "   Using command: ${HF_CMD}"
+echo ""
 
 mkdir -p "${MODELS_DIR}"
 
@@ -42,10 +65,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  [1/3] Downloading Gemma 4 31B-IT (Q4_K_L) GGUF..."
 echo "  Repo:  bartowski/google_gemma-4-31B-it-GGUF"
 echo "  File:  google_gemma-4-31B-it-Q4_K_L.gguf"
-echo "  Size:  ~20 GB"
+echo "  Size:  ~20 GB (this will take a while)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-huggingface-cli download \
+$HF_CMD download \
     bartowski/google_gemma-4-31B-it-GGUF \
     --include "google_gemma-4-31B-it-Q4_K_L.gguf" \
     --local-dir "${MODELS_DIR}/gemma4-31b-it"
@@ -64,7 +87,7 @@ echo "  Repo:  BAAI/bge-m3"
 echo "  Size:  ~2.2 GB"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-huggingface-cli download \
+$HF_CMD download \
     BAAI/bge-m3 \
     --local-dir "${MODELS_DIR}/bge-m3"
 
@@ -81,7 +104,7 @@ echo "  Repo:  BAAI/bge-reranker-v2-m3"
 echo "  Size:  ~2.2 GB"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-huggingface-cli download \
+$HF_CMD download \
     BAAI/bge-reranker-v2-m3 \
     --local-dir "${MODELS_DIR}/bge-reranker-v2-m3"
 
@@ -103,9 +126,9 @@ echo "║  └── bge-reranker-v2-m3/                                    ║"
 echo "║      └── (cross-encoder model files)           (~2.2 GB)    ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Total: ~24.4 GB                                            ║"
-echo "║  VRAM at runtime: ~20 GB (Gemma 4 Q4_K_L)                  ║"
+echo "║  VRAM at runtime: ~23 GB (LLM + embedder + reranker)       ║"
 echo "║  Fits on: 1x RTX 6000 Ada (48 GB) with room to spare       ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
-echo "To start the agent API:"
-echo "  cd agent && uvicorn api.main:app --host 0.0.0.0 --port 8001"
+echo "To start the agent:"
+echo "  bash agent/start_agent.sh"
