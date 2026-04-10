@@ -21,9 +21,9 @@ fi
 # ── 1. Start Agent API ──
 # IMPORTANT: Must run from agent/ directory (not agent/api/)
 # because imports use "from api.utils..." relative to agent/
-echo "[AGRA Agent] Starting Agent API on port 8001..."
+echo "[AGRA Agent] Starting Agent API on port 8005..."
 cd /workspace/Nothing/agent
-uvicorn api.main:app --host 0.0.0.0 --port 8001 --workers 1 &
+uvicorn api.main:app --host 0.0.0.0 --port 8005 --workers 1 &
 API_PID=$!
 echo "[AGRA Agent] Agent API started (PID: $API_PID)"
 
@@ -52,9 +52,9 @@ echo "[AGRA Agent] Agent UI started (PID: $UI_PID)"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  AGRA Agent Services Running:"
-echo "  • Agent API:  http://0.0.0.0:8001  (PID: $API_PID)"
+echo "  • Agent API:  http://0.0.0.0:8005  (PID: $API_PID)"
 echo "  • Agent UI:   http://0.0.0.0:7860  (PID: $UI_PID)"
-echo "  • API Docs:   http://0.0.0.0:8001/docs"
+echo "  • API Docs:   http://0.0.0.0:8005/docs"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
