@@ -115,6 +115,14 @@ export default function Chat() {
     const question = input.trim();
     if (!question || isStreaming) return;
 
+    const userMsg = { role: 'user', content: question, timestamp: Date.now() };
+    const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
+    const updatedMsgs = [...messages, userMsg, aiMsg];
+
+    setMessages(updatedMsgs);
+    setInput('');
+    setIsStreaming(true);
+
     // Create session if none active
     let sessId = activeSessionId;
     if (!sessId) {
@@ -122,7 +130,7 @@ export default function Chat() {
       const sess = {
         id,
         title: question.slice(0, 50),
-        messages: [],
+        messages: updatedMsgs,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -134,25 +142,17 @@ export default function Chat() {
       setActiveSessionId(id);
       sessId = id;
     } else {
-      // Update title if it's still "New Chat"
+      // Update title and messages
       setSessions(prev => {
         const updated = prev.map(s =>
-          s.id === sessId && s.title === 'New Chat'
-            ? { ...s, title: question.slice(0, 50) }
+          s.id === sessId
+            ? { ...s, title: s.title === 'New Chat' ? question.slice(0, 50) : s.title, messages: updatedMsgs, updatedAt: Date.now() }
             : s
         );
         saveSessions(updated);
         return updated;
       });
     }
-
-    const userMsg = { role: 'user', content: question, timestamp: Date.now() };
-    const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
-
-    const updatedMsgs = [...messages, userMsg, aiMsg];
-    setMessages(updatedMsgs);
-    setInput('');
-    setIsStreaming(true);
 
     const history = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -169,6 +169,7 @@ export default function Chat() {
         if (data.token) {
           accumulatedText += data.token;
           setMessages(prev => {
+            if (!prev || prev.length === 0) return prev;
             const copy = [...prev];
             const last = copy[copy.length - 1];
             copy[copy.length - 1] = { ...last, content: accumulatedText };
@@ -180,11 +181,12 @@ export default function Chat() {
       (data) => {
         setIsStreaming(false);
         setMessages(prev => {
+          if (!prev || prev.length === 0) return prev;
           const copy = [...prev];
           const last = copy[copy.length - 1];
           copy[copy.length - 1] = {
             ...last,
-            content: accumulatedText || last.content,
+            content: accumulatedText || last.content || '',
             sources: data?.sources || [],
             streaming: false,
           };
@@ -204,6 +206,7 @@ export default function Chat() {
       (err) => {
         setIsStreaming(false);
         setMessages(prev => {
+          if (!prev || prev.length === 0) return prev;
           const copy = [...prev];
           const last = copy[copy.length - 1];
           copy[copy.length - 1] = {
