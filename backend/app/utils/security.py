@@ -12,7 +12,7 @@ _env_config = dotenv_values(str(_ENV_PATH)) if _ENV_PATH.exists() else {}
 SECRET_KEY = (
     _env_config.get("SECRET_KEY") 
     or os.getenv("SECRET_KEY") 
-    or "agra-icg-super-secret-key-2026-hq-jwt-token-change-in-production"
+    or "agra-icg-super-secret-key-2026-hq-jwt-token"
 )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(_env_config.get("ACCESS_TOKEN_EXPIRE_MINUTES") or os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES") or "480")
