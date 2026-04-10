@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { getToken, setToken, getDashboardUrl } from './utils/auth';
 import Chat from './pages/Chat';
@@ -7,24 +7,24 @@ import Generate from './pages/Generate';
 import Compliance from './pages/Compliance';
 
 function ProtectedRoute({ children }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const tokenParams = params.get('token');
-    if (tokenParams) {
-      setToken(tokenParams);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      setToken(urlToken);
+      setIsAuthenticated(true);
       window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (!getToken()) {
+      window.location.href = getDashboardUrl('/login');
     }
   }, []);
 
-  const token = getToken();
-  
-  if (!token) {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get('token')) {
-      window.location.href = getDashboardUrl('/login');
-    }
+  if (!isAuthenticated) {
     return null;
   }
+
   return children;
 }
 
