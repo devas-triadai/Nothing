@@ -25,7 +25,7 @@ _env_config = dotenv_values(str(_BACKEND_ENV)) if _BACKEND_ENV.exists() else {}
 SECRET_KEY: str = (
     _env_config.get("SECRET_KEY")
     or os.getenv("SECRET_KEY")
-    or "agra-icg-super-secret-key-2026-hq-jwt-token"
+    or "agra-icg-super-secret-key-2026-hq-jwt-token-change-in-production"
 )
 ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
 
