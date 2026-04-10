@@ -1,0 +1,264 @@
+/* ═════════════════════════════════════════════════════════════
+   AGRA Agent UI — Design Tokens & Global Styles
+   Matches the admin dashboard color system exactly.
+   ═════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── Core Palette ── */
+  --bg-page:       #0b1020;
+  --bg-card:       #111a2e;
+  --bg-card-hover: #162038;
+  --bg-surface:    #0e1528;
+  --bg-input:      #0d1225;
+
+  --border:        #1e2d4d;
+  --border-light:  #253559;
+  --border-focus:  #4a8bff;
+
+  --primary:       #4a8bff;
+  --primary-hover: #5e9aff;
+  --primary-glow:  rgba(74, 139, 255, 0.15);
+  --primary-dim:   rgba(74, 139, 255, 0.08);
+
+  --accent-green:  #00c853;
+  --accent-red:    #ff4757;
+  --accent-amber:  #f0b429;
+  --accent-grey:   #8899bb;
+
+  /* ── Text ── */
+  --text-primary:   #e0e6f0;
+  --text-secondary: #8899bb;
+  --text-muted:     #556688;
+  --text-inverse:   #0b1020;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ── Spacing ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 24px rgba(74, 139, 255, 0.12);
+
+  /* ── Transitions ── */
+  --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Selection ── */
+::selection {
+  background: rgba(74, 139, 255, 0.35);
+  color: #ffffff;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e2d4d;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3f66;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e2d4d transparent;
+}
+
+/* ── Links ── */
+a {
+  color: var(--primary);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+/* ── Buttons Base ── */
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: all var(--transition);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Inputs Base ── */
+input, textarea, select {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Keyframes ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes typingBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes progressStripe {
+  0%   { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+
+/* ── Utility Classes ── */
+.animate-fade-in    { animation: fadeIn 0.3s ease-out; }
+.animate-slide-up   { animation: slideInUp 0.35s ease-out; }
+.animate-slide-left { animation: slideInLeft 0.3s ease-out; }
+.animate-pulse      { animation: pulse 1.5s infinite; }
+
+/* ── Markdown Rendered Content ── */
+.md-content h1 { font-size: 1.5em; font-weight: 700; margin: 16px 0 8px; color: var(--text-primary); }
+.md-content h2 { font-size: 1.3em; font-weight: 600; margin: 14px 0 6px; color: var(--text-primary); }
+.md-content h3 { font-size: 1.1em; font-weight: 600; margin: 12px 0 4px; color: var(--text-primary); }
+.md-content p  { margin: 6px 0; line-height: 1.7; }
+.md-content ul, .md-content ol { padding-left: 20px; margin: 6px 0; }
+.md-content li { margin: 3px 0; line-height: 1.6; }
+.md-content strong { color: #fff; font-weight: 600; }
+.md-content em { font-style: italic; color: var(--text-secondary); }
+.md-content code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: rgba(74, 139, 255, 0.1);
+  color: #7eb8ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.md-content pre {
+  background: #0a0e1a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.md-content pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--text-primary);
+}
+.md-content blockquote {
+  border-left: 3px solid var(--primary);
+  padding-left: 14px;
+  margin: 10px 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.md-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+}
+.md-content th, .md-content td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+.md-content th {
+  background: var(--bg-card);
+  font-weight: 600;
+}

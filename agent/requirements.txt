@@ -1,0 +1,54 @@
+# ── AGRA Phase 2 — Agent API Dependencies ──
+# Confirmed versions as of April 2026
+
+# --- Core API ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.18
+sse-starlette>=2.2.1
+
+# --- LLM Inference ---
+# Build with CUDA: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python==0.3.20
+llama-cpp-python==0.3.20
+
+# --- Embeddings & Reranking ---
+sentence-transformers>=2.7.0
+transformers>=4.46.0
+torch>=2.5.0
+
+# --- Vector Database (embedded mode, no server) ---
+qdrant-client==1.17.1
+
+# --- Document Processing ---
+python-pptx>=1.0.2
+python-docx>=1.1.2
+PyMuPDF>=1.25.0               # fitz — PDF text + image extraction
+python-magic>=0.4.27
+openpyxl>=3.1.5
+docx2txt>=0.8
+
+# --- OCR (scanned documents) ---
+paddlepaddle>=2.6.0
+paddleocr>=2.9.0
+
+# --- Tokenization / Chunking ---
+tiktoken>=0.8.0               # cl100k_base tokenizer for chunking
+
+# --- Hybrid Search ---
+rank-bm25>=0.2.2
+
+# --- Auth (shared JWT with admin backend) ---
+python-jose[cryptography]>=3.3.0
+python-dotenv>=1.0.1
+
+# --- Database (agent-local) ---
+sqlalchemy>=2.0.0
+aiosqlite>=0.20.0
+
+# --- Utilities ---
+huggingface-hub>=0.27.0
+Pillow>=10.4.0
+numpy>=1.26.0
+tqdm>=4.67.0
+aiofiles>=24.1.0
+httpx>=0.28.0                 # async HTTP client for admin API calls
