@@ -85,18 +85,15 @@ async def _async_query_wrapper(
     doc_id_filter: Optional[str],
 ):
     """
-    Wraps the sync generator from query_pipeline into an async generator.
-    query_pipeline is async but yields sync generator items internally.
+    Wraps and iterates over the async generator returned by query_pipeline.
     """
-    gen = await query_pipeline(
+    async for event in query_pipeline(
         question=question,
         session_history=session_history,
         user_id=user_id,
         token=token,
         doc_id_filter=doc_id_filter,
-    )
-    # query_pipeline returns a sync generator from the LLM streaming
-    for event in gen:
+    ):
         yield event
         # Yield control to event loop between tokens
         await asyncio.sleep(0)
