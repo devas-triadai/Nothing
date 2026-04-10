@@ -3,10 +3,19 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 import os
+from pathlib import Path
+from dotenv import dotenv_values
 
-SECRET_KEY = os.getenv("SECRET_KEY", "agra-icg-super-secret-key-2026-hq-jwt-token")
+_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
+_env_config = dotenv_values(str(_ENV_PATH)) if _ENV_PATH.exists() else {}
+
+SECRET_KEY = (
+    _env_config.get("SECRET_KEY") 
+    or os.getenv("SECRET_KEY") 
+    or "agra-icg-super-secret-key-2026-hq-jwt-token-change-in-production"
+)
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(_env_config.get("ACCESS_TOKEN_EXPIRE_MINUTES") or os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES") or "480")
 
 
 def get_password_hash(password: str) -> str:

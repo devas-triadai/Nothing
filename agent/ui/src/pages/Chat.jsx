@@ -50,6 +50,7 @@ export default function Chat() {
 
   const token = getToken();
   const user = token ? (getUser() || decodeToken(token)) : null;
+  const isSuperAdmin = user?.role === 'super_admin';
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function Chat() {
 
   const deleteSession = (id, e) => {
     e.stopPropagation();
+    if (!isSuperAdmin) return;
     setSessions(prev => {
       const updated = prev.filter(s => s.id !== id);
       saveSessions(updated);
@@ -316,13 +318,15 @@ export default function Chat() {
               >
                 <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.5 }} />
                 <span style={styles.sessionTitle}>{sess.title}</span>
-                <button
-                  onClick={(e) => deleteSession(sess.id, e)}
-                  style={styles.sessionDeleteBtn}
-                  title="Delete"
-                >
-                  <X size={12} />
-                </button>
+                {isSuperAdmin && (
+                  <button
+                    onClick={(e) => deleteSession(sess.id, e)}
+                    style={styles.sessionDeleteBtn}
+                    title="Delete"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
