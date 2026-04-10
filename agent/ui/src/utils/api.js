@@ -6,8 +6,20 @@
 import axios from 'axios';
 import { getToken, logout } from './auth';
 
+export function getApiUrl(path = '') {
+  const isBrowser = typeof window !== 'undefined';
+  if (isBrowser && window.location.hostname.includes('runpod.net')) {
+    return window.location.origin.replace('7860', '8005') + path;
+  }
+  const podId = import.meta.env.VITE_POD_ID || '';
+  if (podId && podId !== 'your-runpod-pod-id-here') {
+    return `https://${podId}-8005.proxy.runpod.net${path}`;
+  }
+  return `http://localhost:8005${path}`;
+}
+
 const api = axios.create({
-  baseURL: '/api/agent',
+  baseURL: getApiUrl('/api/agent'),
   timeout: 120000,
 });
 

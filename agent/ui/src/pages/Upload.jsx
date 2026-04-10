@@ -9,7 +9,7 @@ import {
   Upload as UploadIcon, FileText, Trash2, ArrowLeft, CheckCircle2,
   AlertCircle, Clock, Loader2, File, Image, X, RefreshCw, HardDrive,
 } from 'lucide-react';
-import api from '../utils/api';
+import api, { getApiUrl } from '../utils/api';
 import { getToken } from '../utils/auth';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -65,7 +65,7 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/agent/upload', {
+      const response = await fetch(getApiUrl('/api/agent/upload'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

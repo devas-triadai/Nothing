@@ -11,6 +11,7 @@ import {
   Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout } from '../utils/auth';
+import { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -162,7 +163,7 @@ export default function Chat() {
     let accumulatedText = '';
 
     streamRef.current = connectStream(
-      '/api/agent/chat',
+      getApiUrl('/api/agent/chat'),
       { question, history, session_id: sessId },
       // onToken
       (data) => {
@@ -186,7 +187,7 @@ export default function Chat() {
           const last = copy[copy.length - 1];
           copy[copy.length - 1] = {
             ...last,
-            content: accumulatedText || last.content || '',
+            content: accumulatedText || last?.content || '',
             sources: data?.sources || [],
             streaming: false,
           };
@@ -240,7 +241,7 @@ export default function Chat() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const resp = await fetch('/api/agent/upload', {
+      const resp = await fetch(getApiUrl('/api/agent/upload'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
