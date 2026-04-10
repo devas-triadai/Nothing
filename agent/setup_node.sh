@@ -28,10 +28,13 @@ echo "⚠  Node.js $CURRENT_NODE is too old. Vite requires Node >= 18."
 echo "   Installing Node.js 20 LTS via NodeSource..."
 echo ""
 
+# Remove conflicting older Ubuntu node binaries
+apt-get remove --purge -y nodejs npm libnode-dev || true
+apt-get autoremove -y
+
 # Install Node.js 20 LTS
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-
+apt-get -o Dpkg::Options::="--force-overwrite" install -y nodejs
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 NEW_NODE=$(node -v)
