@@ -5,6 +5,7 @@ Clause-by-clause analysis against ingested standards.
 
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -25,6 +26,13 @@ router = APIRouter()
 
 _OUTPUTS_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _clean_json(raw: str) -> str:
+    """Strip markdown code fences (```json...```) from LLM output before JSON parsing."""
+    cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
+    return cleaned.strip()
 
 
 class ComplianceRequest(BaseModel):
@@ -101,11 +109,16 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
     findings_raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.3)
 
     try:
-        start = findings_raw.find("[")
-        end = findings_raw.rfind("]") + 1
-        findings = json.loads(findings_raw[start:end])
-    except (json.JSONDecodeError, ValueError):
-        logger.error("Failed to parse compliance JSON: %s", findings_raw[:500])
+        cleaned = _clean_json(findings_raw)
+        start = cleaned.find("[")
+        end = cleaned.rfind("]") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON array found in compliance response")
+        findings = json.loads(cleaned[start:end])
+        if not isinstance(findings, list):
+            raise ValueError("Expected a JSON array of findings")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error("Failed to parse compliance JSON: %s\nRaw (first 800): %s", e, findings_raw[:800])
         raise HTTPException(status_code=500, detail="Failed to parse compliance analysis. Please try again.")
 
     # Stream findings as SSE

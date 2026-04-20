@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
 from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.models.models import User, UsageLog, Document
@@ -13,7 +14,7 @@ router = APIRouter()
 
 @router.get("/analytics")
 def get_analytics(
-    period: str = Query(default="7d", regex="^(24h|7d|30d|90d)$"),
+    period: str = Query(default="7d", pattern="^(24h|7d|30d|90d)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -72,6 +73,42 @@ def get_analytics(
         "top_users": top_users,
         "top_agents": []
     }
+
+
+class UsageLogEntry(BaseModel):
+    """Schema for agent-submitted usage log events."""
+    action_type: str               # e.g. 'chat', 'ppt', 'quiz', 'summary'
+    module: Optional[str] = None   # e.g. 'rag', 'generate'
+    input_tokens: int = 0
+    output_tokens: int = 0
+    response_time_ms: float = 0.0
+    status: str = "success"        # 'success' | 'error'
+    user_id: Optional[int] = None  # Override if not pulling from JWT
+
+
+@router.post("/log", status_code=201)
+def log_usage(
+    entry: UsageLogEntry,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Accept a usage log event from the agent service.
+    Called by the agent after every successful generation.
+    Previously caused 405 because there was no POST handler.
+    """
+    log = UsageLog(
+        user_id=entry.user_id or current_user.id,
+        action_type=entry.action_type,
+        module=entry.module,
+        input_tokens=entry.input_tokens,
+        output_tokens=entry.output_tokens,
+        response_time_ms=entry.response_time_ms,
+        status=entry.status,
+    )
+    db.add(log)
+    db.commit()
+    return {"logged": True, "log_id": log.id}
 
 
 @router.get("/")

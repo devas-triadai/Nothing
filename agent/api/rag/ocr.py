@@ -19,15 +19,25 @@ _paddle_ocr = None
 
 
 def _get_paddle_ocr():
+    """
+    Lazy-load PaddleOCR with forward-compatible argument handling.
+
+    PaddleOCR v3+ removed several legacy arguments (show_log, use_gpu).
+    We try the minimal compatible API and fall back if needed.
+    """
     global _paddle_ocr
     if _paddle_ocr is None:
         from paddleocr import PaddleOCR
-        _paddle_ocr = PaddleOCR(
-            use_angle_cls=True,
-            lang="en",
-            show_log=False,
-            use_gpu=True,
-        )
+        try:
+            # PaddleOCR v3+ minimal API — GPU is auto-detected, show_log removed
+            _paddle_ocr = PaddleOCR(use_angle_cls=True, lang="en")
+        except TypeError as e:
+            logger.warning("PaddleOCR init with use_angle_cls failed (%s), retrying bare init.", e)
+            try:
+                _paddle_ocr = PaddleOCR(lang="en")
+            except Exception as e2:
+                logger.error("PaddleOCR could not be initialised: %s", e2)
+                raise
         logger.info("PaddleOCR engine initialised.")
     return _paddle_ocr
 

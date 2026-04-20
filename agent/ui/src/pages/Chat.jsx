@@ -1,7 +1,7 @@
 /**
  * AGRA Agent — Chat Page
- * Main conversational Q&A interface with SSE streaming.
- * Perplexity-inspired dark UI with RAG citations.
+ * Unified chat UI: Q&A, PPT generation, quiz, summary — all from the prompt.
+ * Perplexity-style numbered citations with clickable source pills.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -9,6 +9,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   MessageSquare, Plus, Send, Paperclip, ChevronDown, ChevronRight,
   Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
+  Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
+  ExternalLink, ChevronLeft,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout } from '../utils/auth';
 import { getApiUrl } from '../utils/api';
@@ -19,21 +21,192 @@ const SESSIONS_KEY = 'agra_chat_sessions';
 const ACTIVE_KEY = 'agra_active_session';
 
 function loadSessions() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
-  } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); }
+  catch { return []; }
 }
-
 function saveSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
 }
-
 function newSessionId() {
   return 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+// ── Citation chip renderer ──
+// Replaces [1], [2] in text with styled superscript chips linked to sources
+function renderWithCitations(html, sources, onCiteClick) {
+  if (!sources || sources.length === 0) return html;
+  return html.replace(/\[(\d+)\]/g, (match, num) => {
+    const idx = parseInt(num) - 1;
+    if (idx >= 0 && idx < sources.length) {
+      return `<sup class="cite-chip" data-cite="${idx}" title="${sources[idx]?.document || ''} · p.${sources[idx]?.page || '?'}">[${num}]</sup>`;
+    }
+    return match;
+  });
+}
+
+// ── Inline Quiz Component ──
+function InlineQuiz({ quiz }) {
+  const [answers, setAnswers] = useState({});
+  const [revealed, setRevealed] = useState({});
+
+  const select = (qi, opt) => setAnswers(p => ({ ...p, [qi]: opt }));
+  const reveal = (qi) => setRevealed(p => ({ ...p, [qi]: true }));
+
+  if (!quiz?.mcq) return null;
+
+  return (
+    <div style={quizStyles.container}>
+      <div style={quizStyles.header}>
+        <ClipboardList size={16} color="#7c6ef7" />
+        <span style={quizStyles.headerText}>{quiz.title || 'Knowledge Quiz'}</span>
+        <span style={quizStyles.badge}>{quiz.mcq.length} MCQ{quiz.short_answer?.length ? ` · ${quiz.short_answer.length} Short Answer` : ''}</span>
+      </div>
+
+      {quiz.mcq.map((q, qi) => {
+        const chosen = answers[qi];
+        const isRevealed = revealed[qi];
+        const isCorrect = chosen === q.correct;
+        return (
+          <div key={qi} style={quizStyles.question}>
+            <p style={quizStyles.questionText}><strong>Q{qi + 1}.</strong> {q.question}</p>
+            <div style={quizStyles.options}>
+              {Object.entries(q.options || {}).map(([key, val]) => {
+                let bg = 'var(--bg-card)';
+                let border = 'var(--border)';
+                let color = 'var(--text-secondary)';
+                if (chosen === key) {
+                  if (isRevealed) {
+                    bg = isCorrect ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+                    border = isCorrect ? '#22c55e' : '#ef4444';
+                    color = isCorrect ? '#22c55e' : '#ef4444';
+                  } else {
+                    bg = 'rgba(124, 110, 247, 0.1)';
+                    border = '#7c6ef7';
+                    color = '#7c6ef7';
+                  }
+                } else if (isRevealed && key === q.correct) {
+                  bg = 'rgba(34, 197, 94, 0.08)';
+                  border = '#22c55e';
+                  color = '#22c55e';
+                }
+                return (
+                  <button
+                    key={key}
+                    onClick={() => !isRevealed && select(qi, key)}
+                    style={{ ...quizStyles.option, background: bg, borderColor: border, color }}
+                  >
+                    <span style={quizStyles.optKey}>{key}</span>
+                    {val}
+                  </button>
+                );
+              })}
+            </div>
+            {isRevealed && (
+              <div style={quizStyles.explanation}>
+                {isCorrect ? <CheckCircle size={13} color="#22c55e" /> : <XCircle size={13} color="#ef4444" />}
+                <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {isCorrect ? 'Correct! ' : `Incorrect. Correct: ${q.correct}. `}
+                  {q.explanation}
+                </span>
+              </div>
+            )}
+            {chosen && !isRevealed && (
+              <button onClick={() => reveal(qi)} style={quizStyles.revealBtn}>
+                Reveal Answer
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {quiz.short_answer?.map((q, qi) => (
+        <div key={`sa-${qi}`} style={quizStyles.question}>
+          <p style={quizStyles.questionText}><strong>SA{qi + 1}.</strong> {q.question}</p>
+          <details style={quizStyles.details}>
+            <summary style={quizStyles.summary}>Show model answer</summary>
+            <p style={quizStyles.modelAnswer}>{q.model_answer}</p>
+          </details>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── PPT Card Component ──
+function PPTCard({ filename, slides, downloadUrl, topic }) {
+  return (
+    <div style={pptStyles.card}>
+      <div style={pptStyles.icon}><Presentation size={28} color="#4a8bff" /></div>
+      <div style={pptStyles.info}>
+        <div style={pptStyles.title}>{topic || filename}</div>
+        <div style={pptStyles.meta}>{slides} slides · PowerPoint Presentation</div>
+      </div>
+      <a
+        href={downloadUrl}
+        download
+        style={pptStyles.dlBtn}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <Download size={14} />
+        Download
+      </a>
+    </div>
+  );
+}
+
+// ── Summary Card ──
+function SummaryCard({ filename, downloadUrl }) {
+  return (
+    <div style={pptStyles.card}>
+      <div style={{ ...pptStyles.icon, background: 'rgba(52, 211, 153, 0.1)' }}>
+        <BookOpen size={24} color="#34d399" />
+      </div>
+      <div style={pptStyles.info}>
+        <div style={pptStyles.title}>Executive Summary</div>
+        <div style={pptStyles.meta}>{filename} · Word Document</div>
+      </div>
+      {downloadUrl && (
+        <a href={downloadUrl} download style={{ ...pptStyles.dlBtn, background: '#34d399' }}>
+          <Download size={14} />
+          Download
+        </a>
+      )}
+    </div>
+  );
+}
+
+// ── Source Side Panel ──
+function SourcePanel({ source, onClose, apiUrl }) {
+  if (!source) return null;
+  const downloadHref = source.doc_id
+    ? `${apiUrl}/api/agent/download/${source.doc_id}`
+    : null;
+  return (
+    <div style={panelStyles.overlay} onClick={onClose}>
+      <div style={panelStyles.panel} onClick={e => e.stopPropagation()}>
+        <div style={panelStyles.header}>
+          <div style={panelStyles.headerLeft}>
+            <FileText size={16} color="#4a8bff" />
+            <span style={panelStyles.filename}>{source.document}</span>
+            {source.page && <span style={panelStyles.page}>Page {source.page}</span>}
+          </div>
+          <button onClick={onClose} style={panelStyles.closeBtn}><X size={16} /></button>
+        </div>
+        <div style={panelStyles.excerpt}>{source.excerpt}</div>
+        {downloadHref && (
+          <a href={downloadHref} download style={panelStyles.downloadBtn} target="_blank" rel="noopener noreferrer">
+            <Download size={14} />
+            Download document
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function Chat() {
-  const navigate = useNavigate();
   const [sessions, setSessions] = useState(loadSessions);
   const [activeSessionId, setActiveSessionId] = useState(
     () => localStorage.getItem(ACTIVE_KEY) || null
@@ -41,23 +214,23 @@ export default function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [expandedSources, setExpandedSources] = useState({});
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [selectedSource, setSelectedSource] = useState(null); // for side panel
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const token = getToken();
   const user = token ? (getUser() || decodeToken(token)) : null;
   const isSuperAdmin = user?.role === 'super_admin';
+  const apiUrl = getApiUrl('');
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load messages for active session
   useEffect(() => {
     if (activeSessionId) {
       localStorage.setItem(ACTIVE_KEY, activeSessionId);
@@ -68,12 +241,12 @@ export default function Chat() {
     }
   }, [activeSessionId]);
 
-  // Save messages to session
-  const persistMessages = useCallback((msgs) => {
-    if (!activeSessionId) return;
+  const persistMessages = useCallback((msgs, sessId) => {
+    const sid = sessId || activeSessionId;
+    if (!sid) return;
     setSessions(prev => {
       const updated = prev.map(s =>
-        s.id === activeSessionId ? { ...s, messages: msgs, updatedAt: Date.now() } : s
+        s.id === sid ? { ...s, messages: msgs, updatedAt: Date.now() } : s
       );
       saveSessions(updated);
       return updated;
@@ -82,18 +255,8 @@ export default function Chat() {
 
   const createNewChat = () => {
     const id = newSessionId();
-    const sess = {
-      id,
-      title: 'New Chat',
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setSessions(prev => {
-      const updated = [sess, ...prev];
-      saveSessions(updated);
-      return updated;
-    });
+    const sess = { id, title: 'New Chat', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+    setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(id);
     setMessages([]);
     setInput('');
@@ -103,15 +266,95 @@ export default function Chat() {
   const deleteSession = (id, e) => {
     e.stopPropagation();
     if (!isSuperAdmin) return;
-    setSessions(prev => {
-      const updated = prev.filter(s => s.id !== id);
-      saveSessions(updated);
-      return updated;
-    });
-    if (activeSessionId === id) {
-      setActiveSessionId(null);
-      setMessages([]);
+    setSessions(prev => { const u = prev.filter(s => s.id !== id); saveSessions(u); return u; });
+    if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
+  };
+
+  // ── Handle generation intents from chat ──
+  const handleIntent = async (intent, intentParams, originalQuestion) => {
+    const { type, doc_ids, doc_id, topic, num_slides, num_mcq, num_short_answer, summary_type } = intentParams;
+    const authHeader = { Authorization: `Bearer ${token}` };
+
+    try {
+      if (type === 'ppt') {
+        const res = await fetch(getApiUrl('/api/agent/generate/ppt'), {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic, num_slides: num_slides || 10, doc_ids }),
+        });
+        if (!res.ok) throw new Error(`PPT generation failed: ${res.status}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+          || `AGRA_${topic.slice(0, 30)}.pptx`;
+        return {
+          role: 'assistant',
+          content: `I've generated a PowerPoint presentation on **${topic}**.`,
+          ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10 },
+          sources: [],
+          timestamp: Date.now(),
+        };
+      }
+
+      if (type === 'quiz') {
+        const res = await fetch(getApiUrl('/api/agent/generate/quiz'), {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc_id, num_mcq: num_mcq || 5, num_short_answer: num_short_answer || 3 }),
+        });
+        if (!res.ok) throw new Error(`Quiz generation failed: ${res.status}`);
+        const data = await res.json();
+        return {
+          role: 'assistant',
+          content: 'Here is your knowledge quiz:',
+          quiz: data.quiz,
+          sources: [],
+          timestamp: Date.now(),
+        };
+      }
+
+      if (type === 'summary') {
+        // Stream the summary
+        return null; // handled via stream separately
+      }
+    } catch (err) {
+      return {
+        role: 'assistant',
+        content: `Sorry, I couldn't generate the ${type}: ${err.message}`,
+        sources: [],
+        timestamp: Date.now(),
+        isError: true,
+      };
     }
+  };
+
+  // ── Stream summary via SSE ──
+  const streamSummary = (intentParams, sessId, updateMsgs) => {
+    const { doc_id, summary_type } = intentParams;
+    let accumulated = '';
+    let summaryDownloadUrl = null;
+
+    return connectStream(
+      getApiUrl('/api/agent/generate/summary'),
+      { doc_id, summary_type: summary_type || 'executive' },
+      (data) => {
+        if (data.token) {
+          accumulated += data.token;
+          updateMsgs(accumulated, null);
+        }
+      },
+      (data) => {
+        summaryDownloadUrl = data.download_url
+          ? getApiUrl(data.download_url)
+          : null;
+        updateMsgs(accumulated, summaryDownloadUrl);
+        setIsStreaming(false);
+      },
+      (err) => {
+        updateMsgs(accumulated || `Error: ${err.message}`, null);
+        setIsStreaming(false);
+      }
+    );
   };
 
   const handleSend = async () => {
@@ -126,34 +369,22 @@ export default function Chat() {
     setInput('');
     setIsStreaming(true);
 
-    // Create session if none active
+    // Ensure session exists
     let sessId = activeSessionId;
     if (!sessId) {
       const id = newSessionId();
-      const sess = {
-        id,
-        title: question.slice(0, 50),
-        messages: updatedMsgs,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      setSessions(prev => {
-        const updated = [sess, ...prev];
-        saveSessions(updated);
-        return updated;
-      });
+      const sess = { id, title: question.slice(0, 50), messages: updatedMsgs, createdAt: Date.now(), updatedAt: Date.now() };
+      setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
       setActiveSessionId(id);
       sessId = id;
     } else {
-      // Update title and messages
       setSessions(prev => {
-        const updated = prev.map(s =>
-          s.id === sessId
-            ? { ...s, title: s.title === 'New Chat' ? question.slice(0, 50) : s.title, messages: updatedMsgs, updatedAt: Date.now() }
-            : s
+        const u = prev.map(s => s.id === sessId
+          ? { ...s, title: s.title === 'New Chat' ? question.slice(0, 50) : s.title, messages: updatedMsgs, updatedAt: Date.now() }
+          : s
         );
-        saveSessions(updated);
-        return updated;
+        saveSessions(u);
+        return u;
       });
     }
 
@@ -174,17 +405,79 @@ export default function Chat() {
           setMessages(prev => {
             if (!prev || prev.length === 0) return prev;
             const copy = [...prev];
-            const last = copy[copy.length - 1];
-            copy[copy.length - 1] = { ...last, content: accumulatedText };
+            copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText };
             return copy;
           });
         }
       },
       // onDone
-      (data) => {
+      async (data) => {
+        // Check for intent signal
+        if (data.intent) {
+          const intentType = data.intent;
+          const intentParams = data.intent_params || {};
+
+          if (intentType === 'summary') {
+            // Replace placeholder with summary header, then stream
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = {
+                ...copy[copy.length - 1],
+                content: '',
+                streaming: true,
+                summaryHeader: true,
+              };
+              return copy;
+            });
+
+            streamRef.current = streamSummary(
+              intentParams,
+              sessId,
+              (text, downloadUrl) => {
+                setMessages(prev => {
+                  const copy = [...prev];
+                  const last = copy[copy.length - 1];
+                  copy[copy.length - 1] = {
+                    ...last,
+                    content: text,
+                    streaming: !downloadUrl,
+                    summary: downloadUrl ? { downloadUrl } : last.summary,
+                  };
+                  if (!downloadUrl) return copy;
+                  // persist final
+                  persistMessages(copy, sessId);
+                  return copy;
+                });
+              }
+            );
+            return;
+          }
+
+          // PPT or Quiz — call generation API
+          setMessages(prev => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], content: 'Generating…', streaming: true };
+            return copy;
+          });
+
+          const result = await handleIntent(intentType, intentParams, question);
+          setIsStreaming(false);
+
+          setMessages(prev => {
+            const copy = [...prev];
+            copy[copy.length - 1] = {
+              ...(result || { role: 'assistant', content: 'Done.', sources: [] }),
+              streaming: false,
+            };
+            persistMessages(copy, sessId);
+            return copy;
+          });
+          return;
+        }
+
+        // Normal Q&A done
         setIsStreaming(false);
         setMessages(prev => {
-          if (!prev || prev.length === 0) return prev;
           const copy = [...prev];
           const last = copy[copy.length - 1];
           copy[copy.length - 1] = {
@@ -193,15 +486,7 @@ export default function Chat() {
             sources: data?.sources || [],
             streaming: false,
           };
-          // Persist to session
-          const finalMsgs = copy;
-          setSessions(sp => {
-            const updated = sp.map(s =>
-              s.id === sessId ? { ...s, messages: finalMsgs, updatedAt: Date.now() } : s
-            );
-            saveSessions(updated);
-            return updated;
-          });
+          persistMessages(copy, sessId);
           return copy;
         });
       },
@@ -209,7 +494,6 @@ export default function Chat() {
       (err) => {
         setIsStreaming(false);
         setMessages(prev => {
-          if (!prev || prev.length === 0) return prev;
           const copy = [...prev];
           const last = copy[copy.length - 1];
           copy[copy.length - 1] = {
@@ -225,18 +509,9 @@ export default function Chat() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  const toggleSources = (idx) => {
-    setExpandedSources(prev => ({ ...prev, [idx]: !prev[idx] }));
-  };
-
-  // ── File quick-upload ──
-  const fileInputRef = useRef(null);
   const handleFileAttach = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -248,36 +523,38 @@ export default function Chat() {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (resp.ok) {
-        setInput(prev => prev + ` [Uploaded: ${file.name}]`);
-      }
-    } catch (err) {
-      console.error('Upload failed:', err);
-    }
+      if (resp.ok) setInput(prev => prev + ` [Uploaded: ${file.name}]`);
+    } catch (err) { console.error('Upload failed:', err); }
     e.target.value = '';
   };
 
-  // Cleanup on unmount
+  // Citation click handler — attach to document, read data-cite attr
   useEffect(() => {
-    return () => {
-      streamRef.current?.abort?.();
+    const handler = (e) => {
+      const chip = e.target.closest('.cite-chip');
+      if (!chip) return;
+      const citeIdx = parseInt(chip.getAttribute('data-cite'));
+      // Find which message this belongs to
+      for (const msg of messages) {
+        if (msg.sources && msg.sources[citeIdx]) {
+          setSelectedSource(msg.sources[citeIdx]);
+          break;
+        }
+      }
     };
-  }, []);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [messages]);
+
+  useEffect(() => () => { streamRef.current?.abort?.(); }, []);
 
   return (
     <div style={styles.layout}>
       {/* ── Sidebar ── */}
-      <aside style={{
-        ...styles.sidebar,
-        width: sidebarCollapsed ? '60px' : '280px',
-        minWidth: sidebarCollapsed ? '60px' : '280px',
-      }}>
-        {/* Logo */}
+      <aside style={{ ...styles.sidebar, width: sidebarCollapsed ? '60px' : '260px', minWidth: sidebarCollapsed ? '60px' : '260px' }}>
         <div style={styles.sidebarHeader}>
           <div style={styles.logoGroup}>
-            <div style={styles.logoIcon}>
-              <ShieldCheck size={20} color="#4a8bff" />
-            </div>
+            <div style={styles.logoIcon}><ShieldCheck size={20} color="#4a8bff" /></div>
             {!sidebarCollapsed && (
               <div>
                 <div style={styles.logoText}>AGRA</div>
@@ -285,19 +562,16 @@ export default function Chat() {
               </div>
             )}
           </div>
+          <button onClick={() => setSidebarCollapsed(p => !p)} style={styles.collapseBtn} title="Toggle sidebar">
+            {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+          </button>
         </div>
 
-        {/* New Chat */}
-        <button
-          onClick={createNewChat}
-          style={styles.newChatBtn}
-          id="new-chat-btn"
-        >
+        <button onClick={createNewChat} style={styles.newChatBtn} id="new-chat-btn">
           <Plus size={16} />
           {!sidebarCollapsed && <span>New Chat</span>}
         </button>
 
-        {/* Session List */}
         {!sidebarCollapsed && (
           <div style={styles.sessionList}>
             {sessions.length === 0 && (
@@ -312,18 +586,14 @@ export default function Chat() {
                 onClick={() => setActiveSessionId(sess.id)}
                 style={{
                   ...styles.sessionItem,
-                  background: activeSessionId === sess.id ? 'var(--primary-dim)' : 'transparent',
-                  borderLeft: activeSessionId === sess.id ? '2px solid var(--primary)' : '2px solid transparent',
+                  background: activeSessionId === sess.id ? 'rgba(74,139,255,0.08)' : 'transparent',
+                  borderLeft: activeSessionId === sess.id ? '2px solid #4a8bff' : '2px solid transparent',
                 }}
               >
-                <MessageSquare size={14} style={{ flexShrink: 0, opacity: 0.5 }} />
+                <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.4 }} />
                 <span style={styles.sessionTitle}>{sess.title}</span>
                 {isSuperAdmin && (
-                  <button
-                    onClick={(e) => deleteSession(sess.id, e)}
-                    style={styles.sessionDeleteBtn}
-                    title="Delete"
-                  >
+                  <button onClick={(e) => deleteSession(sess.id, e)} style={styles.sessionDeleteBtn} title="Delete">
                     <X size={12} />
                   </button>
                 )}
@@ -332,130 +602,124 @@ export default function Chat() {
           </div>
         )}
 
-        {/* Nav Links */}
         <div style={styles.navSection}>
-          <Link to="/upload" style={styles.navLink}>
-            <Upload size={16} />
-            {!sidebarCollapsed && <span>Documents</span>}
-          </Link>
-          <Link to="/generate" style={styles.navLink}>
-            <FileText size={16} />
-            {!sidebarCollapsed && <span>Generate</span>}
-          </Link>
-          <Link to="/compliance" style={styles.navLink}>
-            <ShieldCheck size={16} />
-            {!sidebarCollapsed && <span>Compliance</span>}
-          </Link>
+          <Link to="/upload" style={styles.navLink}><Upload size={15} />{!sidebarCollapsed && <span>Documents</span>}</Link>
+          <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>Compliance</span>}</Link>
         </div>
 
-        {/* User / Logout */}
         <div style={styles.sidebarFooter}>
           {!sidebarCollapsed && user && (
             <div style={styles.userInfo}>
-              <div style={styles.userAvatar}>
-                <User size={14} />
-              </div>
+              <div style={styles.userAvatar}><User size={13} /></div>
               <span style={styles.userName}>{user.sub || user.username || 'Agent'}</span>
             </div>
           )}
           <button onClick={logout} style={styles.logoutBtn} title="Logout" id="logout-btn">
-            <LogOut size={16} />
+            <LogOut size={15} />
             {!sidebarCollapsed && <span>Logout</span>}
           </button>
         </div>
       </aside>
 
-      {/* ── Main Chat Area ── */}
+      {/* ── Main Area ── */}
       <main style={styles.main}>
         {messages.length === 0 ? (
-          /* Welcome Screen */
           <div style={styles.welcome}>
-            <div style={styles.welcomeIcon}>
-              <Sparkles size={40} color="#4a8bff" />
-            </div>
+            <div style={styles.welcomeIcon}><Sparkles size={36} color="#4a8bff" /></div>
             <h1 style={styles.welcomeTitle}>AGRA Intelligence Agent</h1>
             <p style={styles.welcomeDesc}>
-              Air-gapped, secure document intelligence. Ask questions about your uploaded documents,
-              generate reports, and run compliance checks — all processed locally.
+              Ask questions, generate presentations, create quizzes, or get summaries — all from your uploaded documents.
             </p>
             <div style={styles.suggestionsGrid}>
               {[
-                'Summarize the key findings from the latest inspection report',
-                'What are the compliance requirements for vessel safety?',
-                'Generate a training quiz from the operations manual',
-                'Compare this bid against the procurement standards',
+                { icon: <MessageSquare size={14} />, text: 'What are the key requirements in the SOTR?' },
+                { icon: <Presentation size={14} />, text: 'Create a PPT about ICG AGRA' },
+                { icon: <ClipboardList size={14} />, text: 'Generate a quiz from the uploaded document' },
+                { icon: <BookOpen size={14} />, text: 'Summarize the technical proposal' },
               ].map((q, i) => (
                 <button
                   key={i}
-                  onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                  onClick={() => { setInput(q.text); inputRef.current?.focus(); }}
                   style={styles.suggestionCard}
                 >
-                  {q}
+                  <span style={styles.suggestionIcon}>{q.icon}</span>
+                  {q.text}
                 </button>
               ))}
             </div>
           </div>
         ) : (
-          /* Messages */
           <div style={styles.messagesContainer}>
             {messages.map((msg, idx) => (
               <div
                 key={idx}
                 style={{
-                  ...styles.messageBubbleRow,
+                  ...styles.msgRow,
                   justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 }}
-                className="animate-fade-in"
               >
                 {msg.role === 'assistant' && (
-                  <div style={styles.aiAvatar}>
-                    <Bot size={16} color="#4a8bff" />
-                  </div>
+                  <div style={styles.aiAvatar}><Bot size={15} color="#4a8bff" /></div>
                 )}
                 <div style={{
-                  ...styles.messageBubble,
+                  ...styles.bubble,
                   ...(msg.role === 'user' ? styles.userBubble : styles.aiBubble),
-                  ...(msg.isError ? { borderColor: 'var(--accent-red)' } : {}),
+                  ...(msg.isError ? { borderColor: '#ef4444' } : {}),
                 }}>
                   {msg.role === 'assistant' ? (
                     <>
-                      <div
-                        className="md-content"
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                      />
-                      {msg.streaming && (
-                        <span style={styles.typingCursor}>▊</span>
+                      {/* Streaming text or markdown content */}
+                      {msg.content && (
+                        <div
+                          className="md-content"
+                          dangerouslySetInnerHTML={{
+                            __html: renderWithCitations(
+                              renderMarkdown(msg.content),
+                              msg.sources || [],
+                              (src) => setSelectedSource(src)
+                            )
+                          }}
+                        />
                       )}
-                      {/* Sources */}
+                      {msg.streaming && <span style={styles.cursor}>▊</span>}
+
+                      {/* PPT Card */}
+                      {msg.ppt && !msg.streaming && (
+                        <PPTCard
+                          filename={msg.ppt.filename}
+                          slides={msg.ppt.slides}
+                          downloadUrl={msg.ppt.downloadUrl}
+                          topic={msg.ppt.topic}
+                        />
+                      )}
+
+                      {/* Quiz */}
+                      {msg.quiz && !msg.streaming && <InlineQuiz quiz={msg.quiz} />}
+
+                      {/* Summary download card */}
+                      {msg.summary?.downloadUrl && !msg.streaming && (
+                        <SummaryCard
+                          filename="Summary Document"
+                          downloadUrl={getApiUrl(msg.summary.downloadUrl)}
+                        />
+                      )}
+
+                      {/* Perplexity-style citation pills */}
                       {msg.sources?.length > 0 && !msg.streaming && (
-                        <div style={styles.sourcesSection}>
-                          <button
-                            onClick={() => toggleSources(idx)}
-                            style={styles.sourcesToggle}
-                          >
-                            {expandedSources[idx] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            <span>{msg.sources.length} Source{msg.sources.length !== 1 ? 's' : ''}</span>
-                          </button>
-                          {expandedSources[idx] && (
-                            <div style={styles.sourcesGrid}>
-                              {msg.sources.map((src, si) => (
-                                <div key={si} style={styles.sourceCard}>
-                                  <div style={styles.sourceFileName}>
-                                    <FileText size={12} />
-                                    {src.filename || src.doc_name || 'Document'}
-                                  </div>
-                                  {src.page && (
-                                    <div style={styles.sourcePageBadge}>Page {src.page}</div>
-                                  )}
-                                  {(src.snippet || src.text) && (
-                                    <div style={styles.sourceExcerpt}>
-                                      {(src.snippet || src.text || '').slice(0, 200)}...
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                        <div style={styles.sourcePills}>
+                          {msg.sources.map((src, si) => (
+                            <button
+                              key={si}
+                              onClick={() => setSelectedSource(src)}
+                              style={styles.sourcePill}
+                              title={src.excerpt}
+                            >
+                              <span style={styles.pillNum}>{src.index || si + 1}</span>
+                              <FileText size={10} />
+                              <span style={styles.pillName}>{src.document}</span>
+                              {src.page && <span style={styles.pillPage}>p.{src.page}</span>}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </>
@@ -470,456 +734,155 @@ export default function Chat() {
         )}
 
         {/* ── Input Bar ── */}
-        <div style={styles.inputBarContainer}>
+        <div style={styles.inputBarWrap}>
           <div style={styles.inputBar}>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              style={styles.attachBtn}
-              title="Attach file"
-              id="attach-file-btn"
-            >
-              <Paperclip size={18} />
+            <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
+              <Paperclip size={17} />
             </button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png"
-              onChange={handleFileAttach}
-            />
+            <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png" onChange={handleFileAttach} />
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about your documents..."
+              placeholder="Ask a question, or type 'create a PPT about…', 'generate a quiz', 'summarize'…"
               rows={1}
-              style={styles.inputTextarea}
+              style={styles.textarea}
               id="chat-input"
             />
             <button
               onClick={handleSend}
               disabled={!input.trim() || isStreaming}
-              style={{
-                ...styles.sendBtn,
-                opacity: (!input.trim() || isStreaming) ? 0.4 : 1,
-              }}
+              style={{ ...styles.sendBtn, opacity: (!input.trim() || isStreaming) ? 0.4 : 1 }}
               id="send-btn"
             >
-              {isStreaming ? (
-                <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-              ) : (
-                <Send size={18} />
-              )}
+              {isStreaming
+                ? <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
+                : <Send size={17} />
+              }
             </button>
           </div>
-          <div style={styles.inputDisclaimer}>
-            AGRA processes all queries locally. No data leaves this system.
+          <div style={styles.disclaimer}>
+            AGRA processes all queries locally — zero telemetry, zero cloud.
           </div>
         </div>
       </main>
+
+      {/* ── Source Side Panel ── */}
+      {selectedSource && (
+        <SourcePanel
+          source={selectedSource}
+          onClose={() => setSelectedSource(null)}
+          apiUrl={apiUrl}
+        />
+      )}
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════
    STYLES
-   ═══════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════ */
+
 const styles = {
-  layout: {
-    display: 'flex',
-    height: '100vh',
-    overflow: 'hidden',
-  },
+  layout: { display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg-page)' },
 
-  /* ── Sidebar ── */
-  sidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#0a0e1a',
-    borderRight: '1px solid var(--border)',
-    transition: 'width 0.2s ease, min-width 0.2s ease',
-    overflow: 'hidden',
-  },
-  sidebarHeader: {
-    padding: '18px 16px 12px',
-    borderBottom: '1px solid var(--border)',
-  },
-  logoGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  logoIcon: {
-    width: 36,
-    height: 36,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '10px',
-    background: 'rgba(74, 139, 255, 0.12)',
-    flexShrink: 0,
-  },
-  logoText: {
-    fontSize: '16px',
-    fontWeight: 800,
-    color: '#fff',
-    letterSpacing: '1.5px',
-  },
-  logoSub: {
-    fontSize: '10px',
-    color: 'var(--text-muted)',
-    fontWeight: 500,
-    letterSpacing: '0.5px',
-  },
-  newChatBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    margin: '12px 12px 8px',
-    padding: '10px 14px',
-    background: 'var(--primary)',
-    color: '#fff',
-    borderRadius: 'var(--radius-md)',
-    fontSize: '13px',
-    fontWeight: 600,
-    border: 'none',
-    justifyContent: 'center',
-  },
-  sessionList: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '4px 8px',
-  },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '30px 16px',
-    color: 'var(--text-muted)',
-    fontSize: '12px',
-  },
-  sessionItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '9px 12px',
-    borderRadius: 'var(--radius-sm)',
-    cursor: 'pointer',
-    fontSize: '13px',
-    color: 'var(--text-secondary)',
-    transition: 'background 0.15s, border-left 0.15s',
-    marginBottom: '2px',
-  },
-  sessionTitle: {
-    flex: 1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  sessionDeleteBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 20,
-    height: 20,
-    borderRadius: '50%',
-    background: 'transparent',
-    color: 'var(--text-muted)',
-    opacity: 0,
-    transition: 'opacity 0.15s',
-    border: 'none',
-  },
-  navSection: {
-    padding: '8px 8px',
-    borderTop: '1px solid var(--border)',
-  },
-  navLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '9px 14px',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '13px',
-    color: 'var(--text-secondary)',
-    textDecoration: 'none',
-    transition: 'background 0.15s, color 0.15s',
-  },
-  sidebarFooter: {
-    padding: '12px',
-    borderTop: '1px solid var(--border)',
-  },
-  userInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '6px 4px',
-    marginBottom: '6px',
-  },
-  userAvatar: {
-    width: 28,
-    height: 28,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%',
-    background: 'rgba(74, 139, 255, 0.15)',
-    color: 'var(--primary)',
-    flexShrink: 0,
-  },
-  userName: {
-    fontSize: '12px',
-    color: 'var(--text-secondary)',
-    fontWeight: 500,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  logoutBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    width: '100%',
-    padding: '8px 12px',
-    background: 'transparent',
-    color: 'var(--accent-red)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '12px',
-    fontWeight: 500,
-    border: 'none',
-    transition: 'background 0.15s',
-  },
+  /* Sidebar */
+  sidebar: { display: 'flex', flexDirection: 'column', background: '#0a0e1a', borderRight: '1px solid var(--border)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden' },
+  sidebarHeader: { padding: '14px 12px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  logoGroup: { display: 'flex', alignItems: 'center', gap: '9px' },
+  logoIcon: { width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: 'rgba(74,139,255,0.12)', flexShrink: 0 },
+  logoText: { fontSize: '15px', fontWeight: 800, color: '#fff', letterSpacing: '1.5px' },
+  logoSub: { fontSize: '9px', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.3px' },
+  collapseBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex' },
+  newChatBtn: { display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 10px 6px', padding: '9px 12px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, border: 'none', justifyContent: 'center', cursor: 'pointer' },
+  sessionList: { flex: 1, overflowY: 'auto', padding: '4px 6px' },
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '28px 14px', color: 'var(--text-muted)', fontSize: '12px' },
+  sessionItem: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', transition: 'background 0.15s', marginBottom: '1px' },
+  sessionTitle: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  sessionDeleteBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', opacity: 0, transition: 'opacity 0.15s', cursor: 'pointer' },
+  navSection: { padding: '6px 6px', borderTop: '1px solid var(--border)' },
+  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none', transition: 'background 0.15s' },
+  sidebarFooter: { padding: '10px', borderTop: '1px solid var(--border)' },
+  userInfo: { display: 'flex', alignItems: 'center', gap: '7px', padding: '5px 4px', marginBottom: '5px' },
+  userAvatar: { width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.15)', color: 'var(--primary)', flexShrink: 0 },
+  userName: { fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logoutBtn: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%', padding: '7px 10px', background: 'transparent', color: 'var(--accent-red)', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 500, border: 'none', cursor: 'pointer' },
 
-  /* ── Main ── */
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    position: 'relative',
-  },
+  /* Main */
+  main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' },
 
-  /* ── Welcome ── */
-  welcome: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '40px 24px',
-    textAlign: 'center',
-    animation: 'fadeIn 0.5s ease-out',
-  },
-  welcomeIcon: {
-    width: 80,
-    height: 80,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%',
-    background: 'rgba(74, 139, 255, 0.08)',
-    border: '1px solid rgba(74, 139, 255, 0.2)',
-    marginBottom: '20px',
-  },
-  welcomeTitle: {
-    fontSize: '28px',
-    fontWeight: 700,
-    color: '#fff',
-    marginBottom: '10px',
-    background: 'linear-gradient(135deg, #fff, #4a8bff)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  welcomeDesc: {
-    fontSize: '14px',
-    color: 'var(--text-secondary)',
-    maxWidth: '520px',
-    lineHeight: '1.7',
-    marginBottom: '36px',
-  },
-  suggestionsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '10px',
-    maxWidth: '580px',
-    width: '100%',
-  },
-  suggestionCard: {
-    padding: '14px 16px',
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-md)',
-    color: 'var(--text-secondary)',
-    fontSize: '13px',
-    textAlign: 'left',
-    cursor: 'pointer',
-    lineHeight: '1.5',
-    transition: 'border-color 0.15s, background 0.15s, color 0.15s',
-  },
+  /* Welcome */
+  welcome: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' },
+  welcomeIcon: { width: 72, height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.08)', border: '1px solid rgba(74,139,255,0.2)', marginBottom: '18px' },
+  welcomeTitle: { fontSize: '26px', fontWeight: 700, color: '#fff', marginBottom: '10px', background: 'linear-gradient(135deg, #fff, #4a8bff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  welcomeDesc: { fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '480px', lineHeight: '1.7', marginBottom: '32px' },
+  suggestionsGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '10px', maxWidth: '560px', width: '100%' },
+  suggestionCard: { padding: '13px 15px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'left', cursor: 'pointer', lineHeight: '1.5', transition: 'border-color 0.15s, background 0.15s', display: 'flex', alignItems: 'flex-start', gap: '8px' },
+  suggestionIcon: { flexShrink: 0, marginTop: '2px', opacity: 0.6 },
 
-  /* ── Messages ── */
-  messagesContainer: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '24px 24px 16px',
-  },
-  messageBubbleRow: {
-    display: 'flex',
-    gap: '10px',
-    marginBottom: '16px',
-    alignItems: 'flex-start',
-  },
-  aiAvatar: {
-    width: 32,
-    height: 32,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '50%',
-    background: 'rgba(74, 139, 255, 0.12)',
-    flexShrink: 0,
-    marginTop: '4px',
-  },
-  messageBubble: {
-    maxWidth: '72%',
-    borderRadius: 'var(--radius-lg)',
-    padding: '12px 16px',
-    fontSize: '14px',
-    lineHeight: '1.6',
-  },
-  userBubble: {
-    background: '#1a3a7a',
-    color: '#e4ecff',
-    borderBottomRightRadius: '4px',
-  },
-  aiBubble: {
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border)',
-    color: 'var(--text-primary)',
-    borderBottomLeftRadius: '4px',
-  },
-  typingCursor: {
-    display: 'inline-block',
-    color: 'var(--primary)',
-    animation: 'typingBlink 0.8s infinite',
-    marginLeft: '2px',
-    fontSize: '16px',
-  },
+  /* Messages */
+  messagesContainer: { flex: 1, overflowY: 'auto', padding: '20px 20px 10px' },
+  msgRow: { display: 'flex', gap: '10px', marginBottom: '14px', alignItems: 'flex-start' },
+  aiAvatar: { width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.12)', flexShrink: 0, marginTop: '4px' },
+  bubble: { maxWidth: '76%', borderRadius: 'var(--radius-lg)', padding: '11px 15px', fontSize: '14px', lineHeight: '1.65' },
+  userBubble: { background: '#1a3a7a', color: '#e4ecff', borderBottomRightRadius: '4px' },
+  aiBubble: { background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderBottomLeftRadius: '4px' },
+  cursor: { display: 'inline-block', color: 'var(--primary)', animation: 'typingBlink 0.8s infinite', marginLeft: '2px', fontSize: '15px' },
 
-  /* ── Sources ── */
-  sourcesSection: {
-    marginTop: '12px',
-    borderTop: '1px solid var(--border)',
-    paddingTop: '8px',
-  },
-  sourcesToggle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    background: 'transparent',
-    color: 'var(--primary)',
-    fontSize: '12px',
-    fontWeight: 600,
-    padding: '4px 0',
-    border: 'none',
-  },
-  sourcesGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '8px',
-    marginTop: '8px',
-  },
-  sourceCard: {
-    background: 'rgba(74, 139, 255, 0.06)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-sm)',
-    padding: '10px',
-    fontSize: '11px',
-  },
-  sourceFileName: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    fontWeight: 600,
-    color: 'var(--text-primary)',
-    marginBottom: '4px',
-  },
-  sourcePageBadge: {
-    display: 'inline-block',
-    background: 'rgba(74, 139, 255, 0.15)',
-    color: 'var(--primary)',
-    padding: '1px 6px',
-    borderRadius: '4px',
-    fontSize: '10px',
-    fontWeight: 600,
-    marginBottom: '4px',
-  },
-  sourceExcerpt: {
-    color: 'var(--text-muted)',
-    fontSize: '11px',
-    lineHeight: '1.5',
-  },
+  /* Perplexity Citation Pills */
+  sourcePills: { display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border)' },
+  sourcePill: { display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', background: 'rgba(74,139,255,0.06)', border: '1px solid rgba(74,139,255,0.2)', borderRadius: '20px', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer', transition: 'background 0.15s, border-color 0.15s', fontFamily: 'var(--font-sans)' },
+  pillNum: { width: '16px', height: '16px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'var(--primary)', color: '#fff', fontSize: '9px', fontWeight: 700, flexShrink: 0 },
+  pillName: { maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  pillPage: { color: 'var(--text-muted)', fontSize: '10px' },
 
-  /* ── Input Bar ── */
-  inputBarContainer: {
-    padding: '12px 24px 16px',
-    borderTop: '1px solid var(--border)',
-    background: 'var(--bg-page)',
-  },
-  inputBar: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: '8px',
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-lg)',
-    padding: '6px 8px',
-    transition: 'border-color 0.15s',
-  },
-  attachBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 38,
-    height: 38,
-    borderRadius: 'var(--radius-md)',
-    background: 'transparent',
-    color: 'var(--text-muted)',
-    border: 'none',
-    flexShrink: 0,
-  },
-  inputTextarea: {
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-primary)',
-    fontSize: '14px',
-    resize: 'none',
-    padding: '9px 4px',
-    lineHeight: '1.5',
-    outline: 'none',
-    fontFamily: 'var(--font-sans)',
-    maxHeight: '120px',
-    minHeight: '38px',
-  },
-  sendBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 38,
-    height: 38,
-    borderRadius: 'var(--radius-md)',
-    background: 'var(--primary)',
-    color: '#fff',
-    border: 'none',
-    flexShrink: 0,
-    transition: 'opacity 0.15s, transform 0.1s',
-  },
-  inputDisclaimer: {
-    fontSize: '11px',
-    color: 'var(--text-muted)',
-    textAlign: 'center',
-    marginTop: '8px',
-  },
+  /* Input */
+  inputBarWrap: { padding: '10px 20px 14px', borderTop: '1px solid var(--border)', background: 'var(--bg-page)' },
+  inputBar: { display: 'flex', alignItems: 'flex-end', gap: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '5px 7px', transition: 'border-color 0.15s' },
+  attachBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', flexShrink: 0 },
+  textarea: { flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '14px', resize: 'none', padding: '8px 4px', lineHeight: '1.5', outline: 'none', fontFamily: 'var(--font-sans)', maxHeight: '120px', minHeight: '36px' },
+  sendBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'opacity 0.15s' },
+  disclaimer: { fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px' },
+};
+
+/* ── Quiz sub-styles ── */
+const quizStyles = {
+  container: { marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '10px' },
+  header: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' },
+  headerText: { fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', flex: 1 },
+  badge: { fontSize: '11px', color: 'var(--text-muted)', background: 'rgba(124,110,247,0.1)', padding: '2px 8px', borderRadius: '10px', border: '1px solid rgba(124,110,247,0.2)' },
+  question: { marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' },
+  questionText: { margin: '0 0 10px', fontSize: '13px', color: 'var(--text-primary)', lineHeight: '1.5' },
+  options: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  option: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid', fontSize: '13px', textAlign: 'left', cursor: 'pointer', transition: 'all 0.15s', fontFamily: 'var(--font-sans)' },
+  optKey: { width: '22px', height: '22px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(255,255,255,0.08)', fontWeight: 700, fontSize: '11px', flexShrink: 0 },
+  explanation: { display: 'flex', alignItems: 'flex-start', marginTop: '8px', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' },
+  revealBtn: { marginTop: '8px', padding: '5px 12px', background: 'rgba(74,139,255,0.1)', border: '1px solid rgba(74,139,255,0.25)', borderRadius: '20px', color: 'var(--primary)', fontSize: '12px', cursor: 'pointer', fontFamily: 'var(--font-sans)' },
+  details: { marginTop: '8px' },
+  summary: { fontSize: '12px', color: 'var(--primary)', cursor: 'pointer', padding: '4px 0' },
+  modelAnswer: { fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px', padding: '8px', background: 'rgba(52,211,153,0.06)', borderRadius: '6px', border: '1px solid rgba(52,211,153,0.15)' },
+};
+
+/* ── PPT card styles ── */
+const pptStyles = {
+  card: { display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', padding: '12px 14px', background: 'rgba(74,139,255,0.06)', border: '1px solid rgba(74,139,255,0.2)', borderRadius: 'var(--radius-md)' },
+  icon: { width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '10px', background: 'rgba(74,139,255,0.1)', flexShrink: 0 },
+  info: { flex: 1, minWidth: 0 },
+  title: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  meta: { fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' },
+  dlBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none', flexShrink: 0, transition: 'opacity 0.15s' },
+};
+
+/* ── Source side panel ── */
+const panelStyles = {
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'flex-end' },
+  panel: { width: '360px', maxWidth: '90vw', background: '#0d1220', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '0', animation: 'slideInRight 0.2s ease' },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid var(--border)' },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 },
+  filename: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  page: { padding: '2px 7px', background: 'rgba(74,139,255,0.15)', color: 'var(--primary)', borderRadius: '4px', fontSize: '11px', fontWeight: 600, flexShrink: 0 },
+  closeBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: '6px', display: 'flex', flexShrink: 0 },
+  excerpt: { flex: 1, padding: '16px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7', overflowY: 'auto', whiteSpace: 'pre-wrap' },
+  downloadBtn: { display: 'flex', alignItems: 'center', gap: '7px', margin: '12px 16px 16px', padding: '10px 16px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, textDecoration: 'none', justifyContent: 'center', transition: 'opacity 0.15s' },
 };

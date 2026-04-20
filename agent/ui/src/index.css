@@ -262,3 +262,55 @@ input::placeholder, textarea::placeholder {
   background: var(--bg-card);
   font-weight: 600;
 }
+
+/* ── Inline Citation Chips ── */
+.cite-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  cursor: pointer;
+  margin: 0 2px;
+  vertical-align: super;
+  line-height: 1;
+  transition: background 0.15s, transform 0.1s;
+  user-select: none;
+}
+
+.cite-chip:hover {
+  background: var(--primary-hover);
+  transform: scale(1.2);
+}
+
+/* ── Source Panel slide-in ── */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Nav link hover ── */
+a.nav-link:hover,
+a[href]:hover {
+  background: rgba(74, 139, 255, 0.06);
+  color: var(--text-primary);
+}
+
+/* ── Session item delete button show on hover ── */
+div:hover > button[title="Delete"] {
+  opacity: 1 !important;
+}
+
+/* ── Source pill hover ── */
+button:hover[style*="border-radius: 20px"] {
+  background: rgba(74, 139, 255, 0.12) !important;
+  border-color: rgba(74, 139, 255, 0.4) !important;
+  color: var(--text-primary) !important;
+}
+

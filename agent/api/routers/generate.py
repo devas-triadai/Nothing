@@ -4,6 +4,7 @@ AGRA Phase 2 — Router: Content Generation (PPT, Summary, Quiz)
 
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -25,6 +26,23 @@ router = APIRouter()
 
 _OUTPUTS_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _clean_json(raw: str) -> str:
+    """
+    Strip markdown code fences from LLM output before JSON parsing.
+
+    Gemma 4 (and most instruction-tuned LLMs) wrap JSON in:
+        ```json\n{...}\n```
+    or:
+        ```\n[...]\n```
+
+    This helper removes those fences and returns the bare JSON string.
+    """
+    # Remove ```json ... ``` or ``` ... ``` fences
+    cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
+    return cleaned.strip()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -86,14 +104,24 @@ Return valid JSON only, no markdown formatting:"""
 
     raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.4)
 
-    # Parse JSON from response
+    # Parse JSON from response — strip markdown fences first
     try:
-        # Extract JSON array from response
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
+        cleaned = _clean_json(raw)
+        start = cleaned.find("[")
+        end = cleaned.rfind("]") + 1
         if start == -1 or end == 0:
-            raise ValueError("No JSON array found")
-        slides_data = json.loads(raw[start:end])
+            # Try object wrapper fallback
+            start = cleaned.find("{")
+            end = cleaned.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise ValueError("No JSON array or object found in LLM response")
+            wrapper = json.loads(cleaned[start:end])
+            # Some models return {"slides": [...]}
+            slides_data = wrapper.get("slides", list(wrapper.values())[0] if wrapper else [])
+        else:
+            slides_data = json.loads(cleaned[start:end])
+        if not isinstance(slides_data, list) or len(slides_data) == 0:
+            raise ValueError("Expected a non-empty JSON array of slides")
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("Failed to parse slide JSON: %s\nRaw: %s", e, raw[:500])
         raise HTTPException(status_code=500, detail="Failed to generate slide structure. Please try again.")
@@ -255,12 +283,22 @@ Return ONLY valid JSON in this exact format:
     raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.5)
 
     try:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        quiz_data = json.loads(raw[start:end])
-    except (json.JSONDecodeError, ValueError):
-        logger.error("Failed to parse quiz JSON: %s", raw[:500])
-        raise HTTPException(status_code=500, detail="Failed to generate quiz. Please try again.")
+        cleaned = _clean_json(raw)
+        start = cleaned.find("{")
+        end = cleaned.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON object found in LLM response")
+        quiz_data = json.loads(cleaned[start:end])
+        # Validate minimal structure
+        if not isinstance(quiz_data, dict):
+            raise ValueError("Quiz response is not a JSON object")
+        if "mcq" not in quiz_data:
+            quiz_data["mcq"] = []
+        if "short_answer" not in quiz_data:
+            quiz_data["short_answer"] = []
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error("Failed to parse quiz JSON: %s\nRaw (first 800 chars): %s", e, raw[:800])
+        raise HTTPException(status_code=500, detail=f"Failed to generate quiz ({e}). Please try again.")
 
     # Build DOCX
     job_id = str(uuid.uuid4())

@@ -6,8 +6,9 @@ Exposes two main flows: document ingestion and question answering.
 
 import json
 import logging
+import re
 import time
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional
 
 import httpx
 
@@ -25,16 +26,81 @@ _REFUSAL = (
     "have been uploaded."
 )
 
+# ── Intent patterns ──
+_INTENT_PPT = re.compile(
+    r'\b(creat|generat|build|make|prepar)e?\b.{0,40}\b(ppt|powerpoint|presentation|slides?)\b'
+    r'|\b(ppt|powerpoint|presentation|slides?)\b.{0,40}\b(about|on|for|regard)\b',
+    re.IGNORECASE,
+)
+_INTENT_QUIZ = re.compile(
+    r'\b(creat|generat|build|make)e?\b.{0,40}\b(quiz|assessment|test|questions?)\b'
+    r'|\b(quiz|test me|assess)\b',
+    re.IGNORECASE,
+)
+_INTENT_SUMMARY = re.compile(
+    r'\b(summar|summarise|summarize|give me a summary|executive summary|brief|overview)\b',
+    re.IGNORECASE,
+)
+
+
+def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
+    """
+    Detect if the user wants to generate content (PPT/quiz/summary).
+    Returns a dict with type and extracted params, or None for normal Q&A.
+    """
+    q = question.strip()
+    if _INTENT_PPT.search(q):
+        # Extract topic: everything after 'about/on/for/regarding'
+        topic_match = re.search(
+            r'(?:about|on|for|regarding|titled?)\s+["\']?(.+?)["\']?\s*$',
+            q, re.IGNORECASE
+        )
+        topic = topic_match.group(1).strip() if topic_match else q
+        # Clean up topic — remove trigger words
+        topic = re.sub(
+            r'^(creat|generat|build|make|prepar)e?\s+(a\s+)?(ppt|powerpoint|presentation|slides?)\s*',
+            '', topic, flags=re.IGNORECASE
+        ).strip() or q
+        return {"type": "ppt", "topic": topic, "num_slides": 10}
+    if _INTENT_QUIZ.search(q):
+        return {"type": "quiz", "num_mcq": 5, "num_short_answer": 3}
+    if _INTENT_SUMMARY.search(q):
+        return {"type": "summary", "summary_type": "executive"}
+    return None
+
+
+def _get_all_doc_ids() -> List[str]:
+    """Get all unique doc_ids currently indexed in the vector store."""
+    store = get_store()
+    seen = set()
+    offset = None
+    while True:
+        results, offset = store.client.scroll(
+            collection_name="agra_docs",
+            limit=500,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for pt in results:
+            did = pt.payload.get("metadata", {}).get("doc_id", "")
+            if did:
+                seen.add(did)
+        if offset is None:
+            break
+    return list(seen)
+
 # ── System prompt template ──
 _SYSTEM_PROMPT = """You are AGRA, the AI assistant for Indian Coast Guard Headquarters, New Delhi.
 You answer questions ONLY based on the provided context documents.
 
 RULES:
 1. Answer using ONLY the information in the provided context chunks below.
-2. Always cite your sources using [Source: filename, Page X] format at the point where you use the information.
-3. If the context does not contain enough information, say so clearly — NEVER fabricate or hallucinate information.
-4. Be concise, professional, and precise.
-5. Use structured formatting (headings, bullet points) when appropriate.
+2. Cite sources inline using numbered superscript notation, e.g. [1], [2], immediately after the relevant sentence.
+3. Each context chunk below is numbered — use that number as the citation reference.
+4. If the context does not contain enough information, say so clearly — NEVER fabricate or hallucinate information.
+5. Be concise, professional, and precise.
+6. Use structured formatting (headings, bullet points) when appropriate.
 {house_rules}
 ---
 CONTEXT DOCUMENTS:
@@ -43,32 +109,32 @@ CONTEXT DOCUMENTS:
 
 
 def _format_context(chunks: List[Dict[str, Any]]) -> str:
-    """Format retrieved chunks into a numbered context block for the prompt."""
+    """Format retrieved chunks into NUMBERED context blocks for the prompt.
+    The number [N] is what the LLM should use for inline citations.
+    """
     lines = []
     for i, c in enumerate(chunks, 1):
         meta = c.get("metadata", {})
         fname = meta.get("filename", "Unknown")
         page = meta.get("page", "?")
-        lines.append(f"[{i}] Source: {fname}, Page {page}")
+        lines.append(f"[{i}] {fname} — Page {page}")
         lines.append(c["text"])
         lines.append("")
     return "\n".join(lines)
 
 
-def _format_sources(chunks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """Build the sources list for the response footer."""
-    seen = set()
+def _format_sources(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build the numbered sources list for the response, including doc_id for linking."""
     sources = []
-    for c in chunks:
+    for i, c in enumerate(chunks, 1):
         meta = c.get("metadata", {})
-        key = f"{meta.get('filename', '')}|{meta.get('page', '')}"
-        if key not in seen:
-            seen.add(key)
-            sources.append({
-                "document": meta.get("filename", "Unknown"),
-                "page": meta.get("page", "?"),
-                "excerpt": c["text"][:200] + ("…" if len(c["text"]) > 200 else ""),
-            })
+        sources.append({
+            "index": i,                                      # Matches [N] in text
+            "document": meta.get("filename", "Unknown"),
+            "page": meta.get("page", "?"),
+            "doc_id": meta.get("doc_id", ""),               # For download link
+            "excerpt": c["text"][:250] + ("…" if len(c["text"]) > 250 else ""),
+        })
     return sources
 
 
@@ -186,13 +252,40 @@ async def query_pipeline(
     user_id: int,
     token: str = "",
     doc_id_filter: Optional[str] = None,
-) -> Generator[Dict[str, Any], None, None]:
+) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Full RAG query: embed → hybrid search → rerank → build prompt → stream LLM.
     Yields SSE events: {"token": str} for each token, then {"done": true, "sources": [...]}.
     """
     start_time = time.time()
     store = get_store()
+
+    # ── 0. Intent detection — check for PPT/quiz/summary requests ──
+    intent = _detect_intent(question)
+    if intent:
+        # Get available doc_ids (use filter if set, else all)
+        if doc_id_filter:
+            doc_ids = [doc_id_filter]
+        else:
+            doc_ids = _get_all_doc_ids()
+
+        if not doc_ids:
+            yield {"token": "No documents are indexed yet. Please upload documents first."}
+            yield {"done": True, "sources": [], "intent": intent["type"]}
+            return
+
+        # Signal intent to the frontend with doc context
+        yield {
+            "intent": intent["type"],
+            "intent_params": {
+                **intent,
+                "doc_ids": doc_ids,
+                "doc_id": doc_ids[0],  # Primary doc for summary/quiz
+            },
+            "done": True,
+            "sources": [],
+        }
+        return
 
     # 1. Embed the question
     query_emb = embedder.embed_query(question)
@@ -239,14 +332,8 @@ async def query_pipeline(
         full_response.append(tok)
         yield {"token": tok}
 
-    # 7. Append sources footer
+    # 7. Build structured sources (no inline text footer — UI handles display)
     sources = _format_sources(top_chunks)
-    source_text = "\n\n**Sources:**\n"
-    for s in sources:
-        source_text += f"- {s['document']}, Page {s['page']}\n"
-
-    yield {"token": source_text}
-    full_response.append(source_text)
 
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
