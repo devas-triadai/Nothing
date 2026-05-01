@@ -12,8 +12,13 @@ from app.routers.auth import require_superadmin
 
 router = APIRouter()
 
-# Directory for uploaded files (in air-gapped env, use a mounted volume)
-UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/agra_uploads")
+# Directory for uploaded files — persistent across pod restarts
+# Uses same agra_data dir as the database
+from pathlib import Path as _Path
+_DATA_DIR = _Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = _Path(__file__).resolve().parent.parent.parent / "agra_data"
+UPLOAD_DIR = str(_DATA_DIR / "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 

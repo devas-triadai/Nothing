@@ -1,0 +1,74 @@
+INTERNATIONAL MARITIME ORGANIZATION (IMO)
+INTERNATIONAL CONVENTION FOR THE PREVENTION OF POLLUTION FROM SHIPS (MARPOL)
+ANNEX VI: REGULATIONS FOR THE PREVENTION OF AIR POLLUTION FROM SHIPS
+
+CHAPTER 1 — GENERAL
+
+Regulation 1 — Application
+1. This Annex applies to all ships, except where expressly provided otherwise.
+2. The regulations in this Annex shall apply to all areas of the sea, including port areas.
+
+Regulation 2 — Definitions
+1. "Air pollutants" means substances emitted from ships into the atmosphere that may result in air quality degradation.
+2. "Emission Control Area (ECA)" means a designated area where stricter emission standards apply.
+3. "Sulphur content" means the proportion of sulphur contained in any fuel oil by weight.
+4. "NOx Technical Code" means the Technical Code on Control of Emission of Nitrogen Oxides from Marine Diesel Engines.
+
+CHAPTER 2 — SURVEY, CERTIFICATION AND MEANS OF CONTROL
+
+Regulation 5 — Surveys
+1. Every ship of 400 gross tonnage and above shall be subject to an initial survey before being put into service.
+2. Subsequent surveys shall take place at intervals not exceeding 5 years.
+3. An International Air Pollution Prevention (IAPP) Certificate shall be issued after a satisfactory survey.
+
+CHAPTER 3 — REQUIREMENTS FOR CONTROL OF EMISSIONS FROM SHIPS
+
+Regulation 12 — Ozone Depleting Substances
+1. Any deliberate emissions of ozone depleting substances shall be prohibited.
+2. Installations containing ozone depleting substances shall be prohibited on ships constructed after 19 May 2005.
+3. Halon shall not be used on any ship.
+4. New installations containing hydrochlorofluorocarbons (HCFCs) shall be prohibited on ships constructed after 1 January 2020.
+
+Regulation 13 — Nitrogen Oxides (NOx)
+1. Tier I: NOx emission limit of 17.0 g/kWh (engine speed < 130 rpm) for ships constructed from 1 January 2000 to 1 January 2011.
+2. Tier II: NOx emission limit of 14.4 g/kWh (engine speed < 130 rpm) for ships constructed on or after 1 January 2011.
+3. Tier III: NOx emission limit of 3.4 g/kWh (engine speed < 130 rpm) for ships operating in ECAs constructed on or after 1 January 2016.
+4. For engines with speed 130 ≤ n < 2000 rpm: Tier I limit = 45 × n^(-0.2) g/kWh; Tier II limit = 44 × n^(-0.23) g/kWh; Tier III limit = 9 × n^(-0.2) g/kWh.
+
+Regulation 14 — Sulphur Oxides (SOx) and Particulate Matter
+1. Global sulphur cap: 0.50% m/m from 1 January 2020 (previously 3.50%).
+2. ECA sulphur limit: 0.10% m/m from 1 January 2015.
+3. Ships may use equivalent means of compliance (e.g., exhaust gas cleaning systems / scrubbers).
+4. Fuel oil suppliers shall ensure the sulphur content is documented and does not exceed applicable limits.
+
+Regulation 18 — Fuel Oil Quality
+1. Fuel oil for combustion purposes delivered to ships shall comply with the applicable sulphur content requirements.
+2. The supplier shall provide a bunker delivery note and a sample of the fuel oil delivered.
+3. The bunker delivery note shall contain: (a) name and IMO number of the receiving ship; (b) port; (c) date of commencement of delivery; (d) name, address and telephone of supplier; (e) product name; (f) quantity; (g) density at 15°C; (h) sulphur content.
+
+CHAPTER 4 — REGULATIONS ON ENERGY EFFICIENCY FOR SHIPS
+
+Regulation 21 — Required EEDI (Energy Efficiency Design Index)
+1. Every new ship shall achieve an EEDI not exceeding the reference line value × (1 - X/100).
+2. Phase 0 (2013-2015): Reference line baseline.
+3. Phase 1 (2015-2020): 10% reduction required.
+4. Phase 2 (2020-2025): 20% reduction required.
+5. Phase 3 (2025 onwards): 30% reduction required.
+6. EEDI = (CO2 emission / Transport work) measured in grams of CO2 per tonne-nautical mile.
+
+Regulation 22 — Required SEEMP (Ship Energy Efficiency Management Plan)
+1. Each ship shall keep on board a Ship Energy Efficiency Management Plan (SEEMP).
+2. The SEEMP shall include:
+   (a) ship-specific measures to improve energy efficiency;
+   (b) a method for voluntary reporting to IMO of fuel oil consumption data;
+   (c) operational measures including weather routing and voyage optimization.
+
+Regulation 22A — Collection and Reporting of Ship Fuel Oil Consumption Data
+1. Each ship of 5,000 gross tonnage and above shall collect consumption data for each type of fuel oil used.
+2. Data shall include: total fuel oil consumption, distance travelled, and hours underway.
+3. The Administration shall issue a Statement of Compliance confirming data has been reported.
+
+Regulation 23 — Required CII (Carbon Intensity Indicator)
+1. From 1 January 2023, ships of 5,000 gross tonnage and above shall calculate their annual operational CII.
+2. CII rating from A (best) to E (worst). Ships rated D for three consecutive years or E for any year shall submit a corrective action plan.
+3. The annual operational CII is calculated as: CII = (Total CO2 emissions) / (DWT × Distance sailed).

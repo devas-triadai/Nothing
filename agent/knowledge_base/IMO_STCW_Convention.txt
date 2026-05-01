@@ -1,0 +1,85 @@
+INTERNATIONAL MARITIME ORGANIZATION (IMO)
+INTERNATIONAL CONVENTION ON STANDARDS OF TRAINING, CERTIFICATION AND WATCHKEEPING FOR SEAFARERS (STCW), 1978, AS AMENDED
+
+CHAPTER I — GENERAL PROVISIONS
+
+Regulation I/1 — Definitions and Clarifications
+1. "Convention" means the International Convention on Standards of Training, Certification and Watchkeeping for Seafarers, 1978, as amended.
+2. "Administration" means the Government of the State whose flag the ship is entitled to fly.
+3. "Certificate" means a valid document issued by or under the authority of the Administration.
+4. "Certificated" means properly holding a certificate.
+5. "Officer" means a member of the crew, other than the master, designated as such by national law or regulations.
+6. "Deck officer" means an officer qualified in accordance with the provisions of chapter II of the Convention.
+7. "Chief mate" means the officer next in rank to the master and upon whom the command of the ship will fall in the event of the incapacity of the master.
+
+Regulation I/2 — Certificates and Endorsements
+1. Certificates shall be issued only by the Administration.
+2. Certificates shall be in the form set out in section A-I/2 of the STCW Code.
+3. The Administration may authorize certificates issued by another Party.
+
+CHAPTER II — MASTER AND DECK DEPARTMENT
+
+Regulation II/1 — Mandatory Minimum Requirements for Officers in Charge of a Navigational Watch
+1. Every officer in charge of a navigational watch shall:
+   (a) be not less than 18 years of age;
+   (b) have approved seagoing service of not less than 12 months;
+   (c) have completed approved education and training and meet the standard of competence specified in section A-II/1.
+2. Competence areas include:
+   (a) Plan and conduct a passage and determine position;
+   (b) Maintain a safe navigational watch;
+   (c) Use radar and ARPA to maintain safety of navigation;
+   (d) Use ECDIS to maintain safety of navigation;
+   (e) Respond to emergencies;
+   (f) Respond to a distress signal at sea;
+   (g) Manoeuvre the ship.
+
+Regulation II/2 — Mandatory Minimum Requirements for Certification of Masters and Chief Mates
+1. Every master and chief mate on a seagoing ship of 500 gross tonnage or more shall hold a certificate.
+2. Every candidate for certification shall:
+   (a) meet the requirements for certification as officer in charge of a navigational watch;
+   (b) have approved seagoing service of not less than 12 months as officer in charge of a navigational watch.
+3. Masters of ships of 3,000 gross tonnage or more shall have not less than 36 months approved seagoing service.
+
+CHAPTER III — ENGINE DEPARTMENT
+
+Regulation III/1 — Mandatory Minimum Requirements for Officers in Charge of an Engineering Watch
+1. Every officer in charge of an engineering watch shall:
+   (a) be not less than 18 years of age;
+   (b) have not less than 6 months approved seagoing service in the engine department;
+   (c) have completed approved education and training of not less than 30 months.
+2. Competence areas include:
+   (a) Maintain a safe engineering watch;
+   (b) Operate main and auxiliary machinery and associated control systems;
+   (c) Operate fuel, lubrication, ballast and other pumping systems;
+   (d) Operate electrical, electronic and control systems.
+
+Regulation III/2 — Mandatory Minimum Requirements for Certification of Chief Engineer Officers and Second Engineer Officers
+1. Every chief engineer officer and every second engineer officer on a seagoing ship powered by main propulsion machinery of 3,000 kW propulsion power or more shall hold an appropriate certificate.
+2. Every candidate for certification as chief engineer officer shall have not less than 36 months approved seagoing service of which not less than 12 months have been served as second engineer officer.
+
+CHAPTER V — SPECIAL TRAINING REQUIREMENTS FOR PERSONNEL ON CERTAIN TYPES OF SHIPS
+
+Regulation V/1-1 — Mandatory Minimum Requirements for Training and Qualifications of Masters and Officers on Oil Tankers
+1. Officers and ratings assigned specific duties related to cargo or cargo equipment on oil tankers shall have completed an approved oil tanker familiarization course.
+2. Masters, chief mates, chief engineers, second engineers and any person with immediate responsibility for loading, discharging, care in transit, handling of cargo, tank cleaning or other cargo-related operations on oil tankers shall hold a certificate in advanced training for oil tanker cargo operations.
+
+Regulation V/1-2 — Mandatory Minimum Requirements for Training and Qualifications of Masters, Officers and Ratings on Chemical Tankers
+1. Similar requirements as V/1-1 but for chemical tanker operations.
+2. Personnel shall have knowledge of the hazards associated with chemical cargoes and the appropriate emergency response procedures.
+
+CHAPTER VI — EMERGENCY, OCCUPATIONAL SAFETY, SECURITY, MEDICAL CARE AND SURVIVAL FUNCTIONS
+
+Regulation VI/1 — Mandatory Minimum Requirements for Safety Familiarization and Basic Training
+1. Seafarers shall receive approved basic safety training in:
+   (a) Personal survival techniques;
+   (b) Fire prevention and fire fighting;
+   (c) Elementary first aid;
+   (d) Personal safety and social responsibilities.
+2. Refresher training shall be undertaken at intervals not exceeding 5 years.
+
+Regulation VI/6 — Mandatory Minimum Requirements for Security-Related Training and Instruction
+1. Ship Security Officer training shall include:
+   (a) maintenance and supervision of the implementation of a ship security plan;
+   (b) assessment of security risk, threat and vulnerability;
+   (c) conducting ship security assessments;
+   (d) methods of physical searches and non-intrusive inspections.

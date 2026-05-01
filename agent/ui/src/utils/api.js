@@ -1,21 +1,25 @@
 /**
  * AGRA Agent — API Client
  * Centralized axios-based API client.
+ * Ports are configurable via VITE_ env vars.
  */
 
 import axios from 'axios';
 import { getToken, logout } from './auth';
 
+const AGENT_API_PORT = import.meta.env.VITE_AGENT_API_PORT || '8005';
+const AGENT_UI_PORT = import.meta.env.VITE_AGENT_UI_PORT || '7860';
+
 export function getApiUrl(path = '') {
   const isBrowser = typeof window !== 'undefined';
   if (isBrowser && window.location.hostname.includes('runpod.net')) {
-    return window.location.origin.replace('7860', '8005') + path;
+    return window.location.origin.replace(AGENT_UI_PORT, AGENT_API_PORT) + path;
   }
   const podId = import.meta.env.VITE_POD_ID || '';
   if (podId && podId !== 'your-runpod-pod-id-here') {
-    return `https://${podId}-8005.proxy.runpod.net${path}`;
+    return `https://${podId}-${AGENT_API_PORT}.proxy.runpod.net${path}`;
   }
-  return `http://localhost:8005${path}`;
+  return `http://localhost:${AGENT_API_PORT}${path}`;
 }
 
 const api = axios.create({

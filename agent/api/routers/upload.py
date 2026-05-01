@@ -21,7 +21,11 @@ logger = logging.getLogger("agra.upload")
 
 router = APIRouter()
 
-_UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+import os as _os
+_DATA_DIR = Path(_os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_UPLOADS_DIR = _DATA_DIR / "uploads"
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 _ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png"}

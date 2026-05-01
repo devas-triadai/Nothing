@@ -1,0 +1,74 @@
+INTERNATIONAL MARITIME ORGANIZATION (IMO)
+INTERNATIONAL CONVENTION FOR THE SAFETY OF LIFE AT SEA (SOLAS)
+CHAPTER II-1: CONSTRUCTION — STRUCTURE, SUBDIVISION AND STABILITY, MACHINERY AND ELECTRICAL INSTALLATIONS
+
+PART A — GENERAL
+
+Regulation 1 — Application
+1. Unless expressly provided otherwise, this chapter shall apply to ships the keels of which are laid or which are at a similar stage of construction on or after 1 January 2009.
+2. For the purpose of this chapter, the term "similar stage of construction" means the stage at which construction identifiable with a specific ship begins and assembly of that ship has commenced comprising at least 50 tonnes or 1 percent of the estimated mass of all structural material, whichever is the less.
+
+Regulation 2 — Definitions
+1. "Subdivision load line" means a waterline used in determining the subdivision of the ship.
+2. "Deepest subdivision load line" is the waterline which corresponds to the greatest draught permitted by the subdivision requirements which are applicable.
+3. "Length of the ship" means the length measured between perpendiculars taken at the extremities of the deepest subdivision load line.
+4. "Breadth of the ship" means the extreme moulded breadth at or below the deepest subdivision load line.
+5. "Draught" means the vertical distance from the moulded baseline at midships to the subdivision load line in question.
+6. "Bulkhead deck" means the uppermost deck up to which the transverse watertight bulkheads and the ship's side are carried.
+7. "Margin line" is a line drawn at least 76 mm below the upper surface of the bulkhead deck at side.
+
+PART B — SUBDIVISION, STABILITY AND RELATED ARRANGEMENTS
+
+Regulation 5 — Subdivision and Damage Stability
+1. Ships of 80 m in length and above shall comply with the probabilistic method of determination of the subdivision and damage stability.
+2. The attained subdivision index A shall not be less than the required subdivision index R.
+3. Required subdivision index R = 1 - (128 / (Ls + 152)) for passenger ships where Ls is the subdivision length.
+4. Required subdivision index R = 1 - (128 / (Ls + 152))^(1/3) for cargo ships.
+
+Regulation 6 — Required Subdivision Index R
+1. The degree of subdivision to be provided shall be determined by the required subdivision index R.
+2. For passenger ships: R = 1 - (128 / (Ls + 152)), where Ls is the subdivision length of the ship in metres.
+3. For cargo ships: R = 1 - (128 / (Ls + 152))^(1/3).
+
+Regulation 7 — Attained Subdivision Index
+1. The attained subdivision index A shall be calculated by the formula: A = Σ pi × si for all cases of flooding.
+2. pi is the probability that only the compartment or group of compartments under consideration may be flooded.
+3. si is the probability of survival after flooding the compartment or group of compartments under consideration.
+
+PART C — MACHINERY INSTALLATIONS
+
+Regulation 26 — General Requirements
+1. The machinery, boilers and other pressure vessels, associated piping systems and fittings shall be of a design and construction adequate for the service for which they are intended.
+2. They shall be installed and protected so as to reduce to a minimum any danger to persons on board.
+3. Due regard shall be paid to the materials used in the construction of essential components.
+
+Regulation 27 — Bilge Pumping Arrangements
+1. An efficient bilge pumping arrangement shall be provided, capable of pumping from and draining any watertight compartment.
+2. At least two power bilge pumps shall be provided, one of which may be driven by the main engines.
+3. The diameter d (in mm) of the main bilge pipe shall be calculated by: d = 25 + 1.68 × √(L(B+D)), where L, B, and D are in metres.
+
+PART D — ELECTRICAL INSTALLATIONS
+
+Regulation 40 — Emergency Source of Electrical Power
+1. A self-contained emergency source of electrical power shall be provided.
+2. The emergency source of electrical power shall be capable of operating for at least 36 hours for passenger ships and 18 hours for cargo ships.
+3. The emergency source may be either: (a) an accumulator (battery) or (b) a generator with independent fuel supply and starting system.
+4. Emergency lighting shall be arranged to provide illumination of the embarkation areas, alleyways, stairways, and machinery spaces.
+
+PART E — ADDITIONAL REQUIREMENTS FOR PERIODICALLY UNATTENDED MACHINERY SPACES
+
+Regulation 46 — Fire Protection
+1. Means shall be provided to detect and give alarms at an early stage in case of fire in periodically unattended machinery spaces.
+2. A fixed fire-extinguishing system shall be provided in all machinery spaces.
+3. The system shall be operable from outside the protected space.
+
+Regulation 47 — Flooding Protection
+1. Bilge level detectors shall be installed in all compartments that are not permanently attended.
+2. An alarm shall be given at the navigating bridge when bilge water reaches a predetermined level.
+3. Any valve serving a sea inlet or discharge below the waterline shall be automatically controlled.
+
+CHAPTER II-1 APPENDIX — PROBABILISTIC DAMAGE STABILITY
+1. The probabilistic concept assesses the probability of survival after collision damage.
+2. It considers the contribution of each watertight compartment to the overall safety of the ship.
+3. The calculation methodology provides a rational approach accounting for the actual probability of flooding.
+4. Ships must demonstrate compliance through detailed calculations at the design stage and verify at construction.

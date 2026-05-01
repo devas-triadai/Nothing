@@ -22,9 +22,15 @@ from qdrant_client.models import (
 )
 from rank_bm25 import BM25Okapi
 
+import os
+
 logger = logging.getLogger("agra.vector_store")
 
-_STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "qdrant_storage"
+# Persistent storage — survives RunPod restarts
+_DATA_DIR = Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_STORAGE_DIR = _DATA_DIR / "qdrant_storage"
 _COLLECTION = "agra_docs"
 _VECTOR_DIM = 1024
 _BM25_WEIGHT = 0.4

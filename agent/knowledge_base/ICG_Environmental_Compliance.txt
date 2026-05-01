@@ -1,0 +1,57 @@
+INDIAN COAST GUARD (ICG)
+ENVIRONMENTAL COMPLIANCE REGULATIONS
+ICG/ENV/COMP/2024
+
+CHAPTER 1 — COASTAL ZONE MANAGEMENT
+
+Section 1.1 — Coastal Regulation Zone (CRZ) Framework
+1. The ICG enforces the Coastal Regulation Zone Notification issued under the Environment (Protection) Act, 1986.
+2. CRZ categories: CRZ-I (ecologically sensitive), CRZ-II (developed urban areas), CRZ-III (rural areas), CRZ-IV (water area from LTL to 12 nm).
+3. No new construction is permitted within 200 metres of the High Tide Line (HTL) in CRZ-III areas.
+
+Section 1.2 — Marine Protected Areas (MPAs)
+1. The ICG monitors and enforces regulations in designated Marine Protected Areas.
+2. Prohibited activities in MPAs: (a) anchoring except in emergencies; (b) discharge of any waste; (c) bottom trawling; (d) collection of marine organisms.
+3. Buffer zone: A 1 km buffer zone around all MPAs shall be patrolled regularly.
+
+CHAPTER 2 — SHIP-GENERATED WASTE MANAGEMENT
+
+Section 2.1 — Garbage Management Plan
+1. Every vessel of 100 gross tonnage and above and every vessel certified to carry 15 or more persons shall carry a Garbage Management Plan.
+2. Garbage categories under MARPOL Annex V: (A) plastics; (B) food waste; (C) domestic waste; (D) cooking oil; (E) incinerator ash; (F) operational waste; (G) cargo residues; (H) animal carcasses; (I) fishing gear.
+3. Discharge of plastics into the sea is PROHIBITED at all times.
+4. Discharge of food waste: Permitted when comminuted or ground, not less than 3 nautical miles from nearest land; permitted when not comminuted, not less than 12 nm from nearest land.
+
+Section 2.2 — Sewage Discharge Standards
+1. Ships shall not discharge sewage within 3 nm of the nearest land unless the ship has in operation an approved sewage treatment plant certified to meet the resolution MEPC.227(64) standard.
+2. Between 3 nm and 12 nm: Sewage may be discharged if comminuted and disinfected using an approved system.
+3. Beyond 12 nm: Untreated sewage may be discharged at a moderate rate while the ship is proceeding en route at not less than 4 knots.
+
+Section 2.3 — Ballast Water Management
+1. All ships shall comply with the International Convention for the Control and Management of Ships' Ballast Water and Sediments (BWM Convention).
+2. From 2024, all ships shall meet the D-2 standard (performance standard): discharge less than 10 viable organisms per cubic metre (≥50 μm) and less than 10 viable organisms per millilitre (10-50 μm).
+3. Ballast water exchange (D-1 standard): At least 200 nm from nearest land and in water at least 200 metres deep; achieving 95% volumetric exchange.
+
+CHAPTER 3 — EMISSION MONITORING AND ENFORCEMENT
+
+Section 3.1 — Sulphur Content Verification
+1. ICG enforcement vessels shall carry portable sulphur analyzers for fuel sampling during inspections.
+2. Sample collection procedure: (a) collect sample at fuel manifold connection; (b) seal and label with vessel name, date, and sampler's signature; (c) retain on-board sample for minimum 12 months.
+3. Non-compliant vessels shall be reported to the Flag State and may be detained until compliant fuel is obtained.
+
+Section 3.2 — Carbon Intensity Monitoring
+1. The ICG tracks CII ratings of vessels calling at Indian ports.
+2. Vessels with CII rating of D for 3 consecutive years or E for any year shall submit a corrective action plan.
+3. Port State Control inspectors may verify SEEMP Part III compliance during inspections.
+
+CHAPTER 4 — MARINE BIODIVERSITY PROTECTION
+
+Section 4.1 — Endangered Species Protection
+1. The ICG enforces the Wildlife Protection Act, 1972 in territorial waters.
+2. Protected marine species include: whale shark, dugong, sea turtles (all species), seahorses, and all cetaceans.
+3. Penalty for harming protected species: Up to 7 years imprisonment and/or fine.
+
+Section 4.2 — Anti-Poaching Operations
+1. The ICG conducts anti-poaching patrols in the EEZ to protect marine biodiversity.
+2. Unauthorized fishing by foreign vessels in the EEZ is prohibited under the Maritime Zones of India Act, 1981.
+3. Fishing gear specifications: mesh size not less than 20 mm for trawl nets; gill nets not exceeding 2.5 km total length.

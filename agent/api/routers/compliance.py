@@ -26,7 +26,11 @@ logger = logging.getLogger("agra.compliance")
 
 router = APIRouter()
 
-_OUTPUTS_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
+import os as _os
+_DATA_DIR = Path(_os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_OUTPUTS_DIR = _DATA_DIR / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 

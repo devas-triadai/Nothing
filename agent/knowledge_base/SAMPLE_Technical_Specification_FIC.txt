@@ -1,0 +1,135 @@
+INDIAN COAST GUARD (ICG)
+TECHNICAL SPECIFICATION — FAST INTERCEPTOR CRAFT (FIC)
+DOCUMENT NO: ICG/TECH/FIC/SPEC/2024
+CLASSIFICATION: RESTRICTED
+
+1. INTRODUCTION
+
+1.1 Purpose
+This document defines the technical specifications for Fast Interceptor Craft (FIC) for the Indian Coast Guard. The FIC is designed for high-speed interception, anti-smuggling operations, and close-shore patrol duties in the territorial waters and contiguous zone of India.
+
+1.2 Operational Role
+(a) High-speed pursuit and interception of suspect vessels
+(b) Anti-smuggling and counter-narcotics operations
+(c) Close-shore patrol and surveillance
+(d) VIP escort duties
+(e) Limited SAR role in coastal waters
+
+2. PRINCIPAL CHARACTERISTICS
+
+2.1 Dimensions
+- Length Overall (LOA): 28.0 metres
+- Beam (moulded): 5.8 metres
+- Depth (moulded): 3.2 metres
+- Design Draught: 1.5 metres
+- Full Load Displacement: 110 tonnes
+- Light Ship Displacement: 85 tonnes
+
+2.2 Hull Form
+- Type: Deep-V hull with strakes for spray deflection
+- Material: Marine-grade aluminium alloy 5083-H321 (hull) and 6082-T6 (superstructure)
+- Bottom deadrise angle: 18 degrees at transom; 50 degrees at bow
+- Hull design to be validated through CFD analysis and model testing at NSTL
+
+2.3 Performance
+- Maximum Speed: ≥ 35 knots in Sea State 2 at full load displacement
+- Cruising Speed: 15 knots
+- Sprint Speed: ≥ 42 knots at light displacement
+- Range: ≥ 500 nautical miles at 15 knots
+- Endurance: ≥ 72 hours (3 days)
+- Seakeeping: Operable in Sea State 4; survivable in Sea State 6
+
+3. PROPULSION SYSTEM
+
+3.1 Main Engines
+- Type: 3 × high-speed marine diesel engines
+- Power: Each rated ≥ 2,200 kW at 2,300 rpm (continuous rating)
+- Certification: IMO Tier III NOx compliant
+- Starting: Electric start with redundant battery banks
+
+3.2 Propulsion
+- Type: 3 × water-jet propulsion units
+- Material: Stainless steel impellers
+- Steering: Hydraulic bucket and deflector arrangement for each jet
+- Reverse thrust: Full astern available through bucket deflection
+- Intake: Flush-type intake with debris guard
+
+3.3 Fuel System
+- Fuel Type: F-76 (NATO) / HSD (Indian standard)
+- Fuel Capacity: 12,000 litres (in 4 separate tanks for trim management)
+- Fuel filtration: Dual-stage with 2-micron final filter and water separator
+
+4. AUXILIARY SYSTEMS
+
+4.1 Electrical
+- Generators: 2 × 100 kW diesel generators (230/400V, 50 Hz, 3-phase)
+- Battery Bank: 2 × 24V banks for engine starting and emergency power
+- Shore Power: 440V shore connection with automatic changeover
+
+4.2 Navigation Equipment
+- Radar: 1 × X-band navigation radar with ARPA capability
+- GPS: 2 × DGPS receivers with integrated plotter
+- AIS: Class A transponder
+- Echo Sounder: Digital with shallow water alarm
+- Speed Log: Electromagnetic water speed log
+- Compass: 1 × fibre-optic gyrocompass; 1 × magnetic compass
+
+4.3 Communication
+- VHF: 2 × fixed VHF-DSC sets; 2 × portable VHF
+- HF: 1 × HF-DSC radio (150W)
+- SATCOM: 1 × mini-M SATCOM terminal
+- EPIRB: 1 × float-free 406 MHz
+- SART: 2 × AIS-SART
+
+5. WEAPONS
+
+5.1 Primary Weapon
+- 1 × 12.7 mm heavy machine gun on forward powered mount
+- Stabilized mount with remote control from bridge
+- Ammunition stowage: 2,000 rounds
+
+5.2 Secondary Weapons
+- 2 × 7.62 mm general purpose machine guns (port and starboard wing positions)
+- Small arms: 6 × 5.56 mm assault rifles; 2 × 9 mm pistols
+- Small arms locker: Secured, ventilated, humidity-controlled
+
+6. CREW AND ACCOMMODATION
+
+6.1 Complement
+- Total: 2 officers + 18 sailors = 20 persons
+- Bridge crew: 1 officer + 2 sailors per watch
+- Engine room: Unmanned with bridge control (alarm monitoring)
+
+6.2 Accommodation Standards
+- Officer cabin: 1 × double berth cabin with en-suite head
+- Sailors: 2 × 6-berth cabins + 1 × 6-berth cabin
+- Mess/galley: Combined mess for 12 persons with pantry
+- Air conditioning: Split-type units for all accommodation spaces
+
+7. SAFETY EQUIPMENT
+
+7.1 Life-Saving
+- Liferafts: 2 × 12-person inflatable liferafts (HRU-fitted)
+- Life jackets: 24 (20 + 20% spare)
+- Immersion suits: 20
+- Lifebuoys: 4 (2 with self-igniting lights, 2 with buoyant line)
+
+7.2 Fire Fighting
+- Fire detection: Addressable smoke/heat detection system
+- Fixed system: FM-200 (HFC-227ea) in engine room
+- Portable: 6 × CO2 (5 kg), 4 × DCP (9 kg), 2 × foam (9 litre)
+- Fire pump: 1 × engine-driven + 1 × electric fire pump
+
+8. CONSTRUCTION STANDARDS
+
+8.1 Classification
+- To be built under classification rules of Indian Register of Shipping (IRS)
+- Classification notation: ✠100 A1 (HSC), ✠LMC, (UMS)
+- Material testing: All structural aluminium to be certified with mill certificates
+- Welding: Qualified welders per IRS/AWS D1.2 standards
+- NDT: 100% radiography of critical joints; 20% of non-critical joints
+
+8.2 Delivery Schedule
+- First vessel: 24 months from contract
+- Subsequent vessels: 4-month intervals
+- Total programme (8 vessels): 52 months

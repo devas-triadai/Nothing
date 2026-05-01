@@ -26,7 +26,11 @@ logger = logging.getLogger("agra.generate")
 
 router = APIRouter()
 
-_OUTPUTS_DIR = Path(__file__).resolve().parent.parent.parent / "outputs"
+import os as _os
+_DATA_DIR = Path(_os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_OUTPUTS_DIR = _DATA_DIR / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -47,9 +51,43 @@ def _clean_json(raw: str) -> str:
     return cleaned.strip()
 
 
-# ═══════════════════════════════════════════════════════════════
-#  PPT GENERATION
-# ═══════════════════════════════════════════════════════════════
+# ── Master LLM System Prompt for Intelligent Slide Design ──
+_PPT_SYSTEM_PROMPT = """You are an elite PowerPoint architect for Indian Coast Guard presentations.
+
+You MUST analyze the content and decide the BEST visual layout for each slide.
+DO NOT use only bullet slides — use a MIX of layouts to create engaging, professional presentations.
+
+AVAILABLE LAYOUTS (use all types where appropriate):
+1. "title"          — First slide only. Fields: title, subtitle
+2. "section_header" — Section transition. Fields: title, subtitle
+3. "bullets"        — Standard content. Fields: title, bullets (list of 3-6 strings), notes
+4. "two_column"     — Comparison/pros-cons. Fields: title, left_column {header, items[]}, right_column {header, items[]}, notes
+5. "table"          — Data tables. Fields: title, table_data {headers[], rows[[]]}, notes
+6. "diagram"        — Process flow/architecture/hierarchy. Fields: title, diagram_data {type, nodes[], edges[]}, notes
+   Diagram types: "flowchart", "hierarchy", "block_diagram", "cycle"
+   Node shapes: "rounded_rect", "rect", "diamond", "oval", "hexagon", "cylinder"
+   Each node: {"id": "A", "label": "text", "shape": "rounded_rect"}
+   Each edge: {"from": "A", "to": "B", "label": "optional text"}
+7. "chart"          — Data visualization. Fields: title, chart_data {type, title, data {labels[], values[]}}, notes
+   Chart types: "bar_chart", "pie_chart", "line_chart", "comparison_bar"
+   For comparison_bar: data {labels[], groups[{name, values[]}]}
+8. "image"          — Image/diagram from documents. Fields: title, caption, notes
+9. "thank_you"      — Last slide. Fields: title, subtitle
+
+LAYOUT SELECTION RULES:
+- If content describes a PROCESS or WORKFLOW → use "diagram" with type "flowchart"
+- If content describes an ORGANIZATION or HIERARCHY → use "diagram" with type "hierarchy"
+- If content describes a SYSTEM ARCHITECTURE → use "diagram" with type "block_diagram"
+- If content has NUMERICAL DATA or STATISTICS → use "chart"
+- If content COMPARES two things → use "two_column"
+- If content has STRUCTURED DATA with multiple attributes → use "table"
+- If content references existing IMAGES or DIAGRAMS → use "image"
+- Use "section_header" between major topic transitions
+- The LAST slide must be "thank_you"
+- AIM for at least 40% non-bullet slides
+
+Return ONLY a valid JSON array. No markdown. No explanations."""
+
 
 class PPTRequest(BaseModel):
     topic: str = Field(..., min_length=1)
@@ -70,9 +108,10 @@ async def generate_ppt(
 ):
     """
     Generate a PowerPoint presentation from RAG context.
+    Intelligently selects slide layouts based on content analysis.
+    Extracts images from uploaded documents when available.
     Returns the .pptx file as a download.
     """
-    # Extract raw token for usage logging
     auth_header_token = ""
     if request:
         auth_h = request.headers.get("authorization", "")
@@ -80,7 +119,7 @@ async def generate_ppt(
     store = get_store()
     start_time = time.time()
 
-    # Gather context from specified documents (or all)
+    # ── 1. Gather context from documents ──
     context_chunks = []
     if body.doc_ids:
         for did in body.doc_ids:
@@ -92,60 +131,79 @@ async def generate_ppt(
 
     context_text = "\n\n".join(c["text"][:500] for c in context_chunks[:15])
 
-    # Build prompt — revision mode vs new generation
-    if body.revision_prompt and body.previous_slides_json:
-        prompt = f"""You previously generated a PowerPoint presentation about: {body.topic}
+    # ── 2. Extract images from uploaded documents ──
+    extracted_images = []
+    try:
+        from api.generators.image_extractor import get_best_images_for_topic
+        doc_ids_for_images = body.doc_ids if body.doc_ids else list({
+            c.get("metadata", {}).get("doc_id", "") for c in context_chunks if c.get("metadata", {}).get("doc_id")
+        })
+        if doc_ids_for_images:
+            extracted_images = get_best_images_for_topic(doc_ids_for_images, max_total=5)
+            logger.info("Extracted %d images from documents for PPT.", len(extracted_images))
+    except Exception as e:
+        logger.debug("Image extraction skipped: %s", e)
 
-Here are the current slides (JSON):
+    has_images_hint = ""
+    if extracted_images:
+        has_images_hint = f"""
+NOTE: {len(extracted_images)} images/diagrams were found in the source documents.
+Include {min(len(extracted_images), 3)} slides with "layout": "image" to display them.
+Place image slides near relevant content sections."""
+
+    # ── 3. Build LLM prompt ──
+    if body.revision_prompt and body.previous_slides_json:
+        prompt = f"""You previously generated a PowerPoint about: {body.topic}
+
+Current slides (JSON):
 {body.previous_slides_json}
 
-The user wants the following changes (this will be version v{body.version}):
+User revision request (this becomes version v{body.version}):
 {body.revision_prompt}
 
-Additional context from documents:
+Additional context:
 {context_text}
+{has_images_hint}
 
-Return ONLY an updated JSON array of slide objects with the requested changes applied.
-Each slide must have: "title", "bullets" (list of 3-5 strings), "notes" (string).
-Return valid JSON only, no markdown formatting:"""
+Return ONLY an updated JSON array with all layout fields preserved and changes applied."""
     else:
-        prompt = f"""Create a structured PowerPoint presentation with exactly {body.num_slides} slides about: {body.topic}
+        prompt = f"""Create a professional PowerPoint with exactly {body.num_slides} slides about: {body.topic}
 
-Based on this context:
+DOCUMENT CONTEXT:
 {context_text}
 
 {f'Style notes: {body.style_notes}' if body.style_notes else ''}
+{has_images_hint}
 
-Return ONLY a JSON array of slide objects. Each slide must have:
-- "title": slide title string
-- "bullets": list of 3-5 bullet point strings
-- "notes": speaker notes string
+Requirements:
+- Slide 1 MUST be "layout": "title"
+- Last slide MUST be "layout": "thank_you"
+- Use at least 2 different non-bullet layouts (diagrams, charts, tables, two_column)
+- Include a diagram if the content describes any process, system, or hierarchy
+- Include a chart if there is any numerical/statistical data
+- Include section_header slides between major topic shifts
+- Every slide must have "layout", "title", and layout-specific fields
 
-The first slide should be a title slide with the presentation title and subtitle.
-The last slide should be a summary/conclusion slide.
-
-Return valid JSON only, no markdown formatting:"""
+Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     messages = [
-        {"role": "system", "content": "You are a presentation expert. Return only valid JSON."},
+        {"role": "system", "content": _PPT_SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
     ]
 
     raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.4)
 
-    # Parse JSON from response — strip markdown fences first
+    # ── 4. Parse and validate slide JSON ──
     try:
         cleaned = _clean_json(raw)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1
         if start == -1 or end == 0:
-            # Try object wrapper fallback
             start = cleaned.find("{")
             end = cleaned.rfind("}") + 1
             if start == -1 or end == 0:
                 raise ValueError("No JSON array or object found in LLM response")
             wrapper = json.loads(cleaned[start:end])
-            # Some models return {"slides": [...]}
             slides_data = wrapper.get("slides", list(wrapper.values())[0] if wrapper else [])
         else:
             slides_data = json.loads(cleaned[start:end])
@@ -155,15 +213,30 @@ Return valid JSON only, no markdown formatting:"""
         logger.error("Failed to parse slide JSON: %s\nRaw: %s", e, raw[:500])
         raise HTTPException(status_code=500, detail="Failed to generate slide structure. Please try again.")
 
-    # Build PPTX
+    # ── 5. Validate layout fields and add defaults ──
+    valid_layouts = {"title", "section_header", "bullets", "two_column", "table", "diagram", "chart", "image", "thank_you"}
+    for sd in slides_data:
+        layout = sd.get("layout", "bullets")
+        if layout not in valid_layouts:
+            sd["layout"] = "bullets"
+        # Ensure bullets exist as fallback
+        if "bullets" not in sd:
+            sd["bullets"] = []
+
+    # ── 6. Build PPTX ──
     job_id = str(uuid.uuid4())
     version_label = f"_v{body.version}" if body.version > 1 else ""
     safe_topic = body.topic[:30].replace(' ', '_')
     output_filename = f"{job_id}.pptx"
     output_path = _OUTPUTS_DIR / output_filename
-    build_pptx(slides_data, str(output_path), title=body.topic)
+    build_pptx(
+        slides_data,
+        str(output_path),
+        title=body.topic,
+        extracted_images=extracted_images,
+    )
 
-    logger.info("Generated PPT v%d: %s (%d slides)", body.version, output_path.name, len(slides_data))
+    logger.info("Generated PPT v%d: %s (%d slides, %d doc images)", body.version, output_path.name, len(slides_data), len(extracted_images))
 
     elapsed_ms = (time.time() - start_time) * 1000
     log_usage(

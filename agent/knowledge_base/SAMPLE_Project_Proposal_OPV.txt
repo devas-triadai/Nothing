@@ -1,0 +1,112 @@
+INDIAN COAST GUARD (ICG)
+PROJECT PROPOSAL — OFFSHORE PATROL VESSEL CLASS (BATCH-IV)
+DOCUMENT NO: ICG/PROJ/OPV-IV/2024
+CLASSIFICATION: RESTRICTED
+
+1. PROJECT OVERVIEW
+
+1.1 Objective
+The Indian Coast Guard proposes the acquisition of 8 (eight) Offshore Patrol Vessels (OPVs) under Batch-IV programme to replace aging Vishwast-class vessels and enhance maritime surveillance capability in the Indian Exclusive Economic Zone (EEZ) and approaches to island territories.
+
+1.2 Strategic Need
+(a) India's EEZ of 2.02 million sq km requires continuous surveillance for:
+    - Anti-smuggling and counter-narcotics operations
+    - Anti-piracy patrol
+    - Search and Rescue (SAR) operations
+    - Fisheries protection
+    - Oil spill response
+    - Coastal security operations
+(b) Current fleet analysis indicates a shortfall of 12 OPVs by 2028.
+(c) The Batch-IV OPV programme addresses this capability gap.
+
+2. TECHNICAL SPECIFICATIONS
+
+2.1 Principal Dimensions
+- Length Overall (LOA): 98.0 metres
+- Length Between Perpendiculars (LBP): 90.0 metres
+- Beam (moulded): 14.6 metres
+- Depth (moulded): 7.5 metres
+- Design Draught: 3.8 metres
+- Full Load Displacement: 2,350 tonnes
+
+2.2 Performance Requirements
+- Maximum Speed: ≥ 25 knots at full load displacement
+- Cruising Speed: 14 knots
+- Range: ≥ 6,500 nautical miles at 14 knots
+- Endurance: ≥ 25 days
+- Seakeeping: Capable of operating in Sea State 5; survivable in Sea State 8
+
+2.3 Propulsion System
+- Configuration: CODAD (Combined Diesel And Diesel)
+- Main Engines: 2 × medium-speed diesel engines, each rated ≥ 6,500 kW at 750 rpm
+- Gearbox: 2 × reduction gearbox with PTO for shaft generator
+- Propellers: 2 × controllable pitch propellers (CPP)
+- Bow Thruster: 1 × 350 kW retractable bow thruster for harbour manoeuvring
+
+2.4 Auxiliary Systems
+- Diesel Generators: 3 × 850 kW @ 450V, 60 Hz
+- Emergency Generator: 1 × 200 kW
+- Fresh Water Generators: 2 × reverse osmosis units, each producing ≥ 10 tonnes/day
+- Air Conditioning: Centralized chilled water system for full complement in tropical conditions (ambient 45°C, seawater 32°C)
+
+2.5 Accommodation
+- Total Complement: 14 officers + 106 sailors = 120 persons
+- Officer cabins: Single berth for CO, XO, and HODs; double berth for remaining officers
+- Sailors: 4-berth cabins with en-suite facilities
+- Mess facilities: Officers' mess (seating 20), CPOs' mess (seating 30), sailors' mess (seating 60)
+- Hospital: 2-bed sick bay with operating theatre capability
+
+3. WEAPONS AND SENSORS
+
+3.1 Weapon Systems
+- 1 × 30 mm CRN 91 automatic gun (forward)
+- 2 × 12.7 mm SRCG (Stabilized Remote Controlled Gun) (port and starboard)
+- Provision for fitting 2 × shoulder-launched Surface-to-Air Missiles
+
+3.2 Sensor Suite
+- 3D Air/Surface Search Radar: Range ≥ 100 km
+- Navigation Radar: 2 × (X-band and S-band)
+- Electro-Optical Director (EOD): Day TV camera, thermal imager, laser range finder
+- Automatic Identification System (AIS): Class A transponder
+- Communication: HF, VHF, UHF, SATCOM (INMARSAT Fleet Broadband and VSAT)
+
+3.3 Aviation Facilities
+- Flight Deck: Capable of operating ALH Dhruv (10.5 tonnes MTOW)
+- Helicopter Hangar: Enclosed hangar for 1 × ALH
+- HELO Grid: RAS (Replenishment at Sea) capable
+- Aviation fuel capacity: 5 tonnes JP-5
+
+4. POLLUTION RESPONSE CAPABILITY
+
+4.1 Oil Spill Response Equipment
+- Containment Boom: 500 metres (inflatable, offshore type)
+- Skimmer System: 1 × oleophilic disc skimmer (capacity 50 m³/hour)
+- Recovered Oil Storage: 100 m³ dedicated storage tanks
+- Dispersant Spray System: Ship-mounted spray arm and helicopter-mounted spray kit
+- Monitoring: Oil-in-water monitor and infrared camera for oil detection
+
+5. CONSTRUCTION AND DELIVERY SCHEDULE
+
+5.1 Build Programme
+- Shipyard: To be selected through competitive bidding (indigenous construction mandatory)
+- Lead Ship: Delivery within 42 months from contract signing
+- Follow-on Ships: Delivery at 6-month intervals
+- All 8 ships: Complete delivery within 78 months
+
+5.2 Quality Assurance
+- Classification: IRS class with ICG oversight
+- Shock qualification: Grade A for combat systems, Grade B for auxiliary systems
+- Noise and vibration: Comply with ISO 6954:2000 for habitability
+
+6. BUDGET ESTIMATE
+
+6.1 Cost Breakdown (per vessel, approximate)
+- Hull and Structure: ₹180 Crore
+- Propulsion and Machinery: ₹250 Crore
+- Electrical and Electronics: ₹100 Crore
+- Weapons and Sensors: ₹150 Crore
+- Navigation and Communication: ₹80 Crore
+- Outfitting and Accommodation: ₹60 Crore
+- Design and Engineering: ₹40 Crore
+- Total per vessel: ₹860 Crore (approximately)
+- Programme total (8 vessels): ₹6,880 Crore (approximately)

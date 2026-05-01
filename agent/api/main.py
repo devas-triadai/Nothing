@@ -29,7 +29,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agra.agent")
 
-_OUTPUTS_DIR = Path(__file__).resolve().parent.parent / "outputs"
+_DATA_DIR = Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent / "agra_data"
+_OUTPUTS_DIR = _DATA_DIR / "outputs"
+_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -39,7 +43,8 @@ async def lifespan(app: FastAPI):
     Shutdown: Release resources.
     """
     logger.info("╔══════════════════════════════════════════════════════════╗")
-    logger.info("║   AGRA Phase 2 — Agent API starting on port 8001       ║")
+    _port = os.getenv("AGENT_API_PORT", "8005")
+    logger.info("║   AGRA Phase 2 — Agent API starting on port %s       ║", _port)
     logger.info("╚══════════════════════════════════════════════════════════╝")
 
     # ── 1. Init agent-local database ──
@@ -69,6 +74,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("━━━ All models loaded. Agent API ready. ━━━")
 
+    # ── 6. Auto-ingest built-in knowledge base (background) ──
+    from api.utils.auto_ingest import start_auto_ingest_background
+    start_auto_ingest_background()
+
+
     yield
 
     logger.info("Agent API shutting down — releasing resources.")
@@ -88,21 +98,25 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ── CORS ──
+# ── CORS ── (ports from env vars)
+_UI_PORT = os.getenv("AGENT_UI_PORT", "7860")
+_ADMIN_PORT = os.getenv("ADMIN_PORT", "3000")
+_BACKEND_PORT = os.getenv("BACKEND_PORT", "8000")
+
 ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://0.0.0.0:3000",
-    "http://localhost:7860",
-    "http://0.0.0.0:7860",
-    "http://localhost:8000",
+    f"http://localhost:{_ADMIN_PORT}",
+    f"http://0.0.0.0:{_ADMIN_PORT}",
+    f"http://localhost:{_UI_PORT}",
+    f"http://0.0.0.0:{_UI_PORT}",
+    f"http://localhost:{_BACKEND_PORT}",
 ]
 
 RUNPOD_POD_ID = os.getenv("RUNPOD_POD_ID", "")
 if RUNPOD_POD_ID:
     ALLOWED_ORIGINS.extend([
-        f"https://{RUNPOD_POD_ID}-3000.proxy.runpod.net",
-        f"https://{RUNPOD_POD_ID}-7860.proxy.runpod.net",
-        f"https://{RUNPOD_POD_ID}-8000.proxy.runpod.net",
+        f"https://{RUNPOD_POD_ID}-{_ADMIN_PORT}.proxy.runpod.net",
+        f"https://{RUNPOD_POD_ID}-{_UI_PORT}.proxy.runpod.net",
+        f"https://{RUNPOD_POD_ID}-{_BACKEND_PORT}.proxy.runpod.net",
     ])
 
 app.add_middleware(
@@ -130,7 +144,7 @@ async def root():
         "service": "AGRA Agent API",
         "version": "2.0.0",
         "status": "operational",
-        "port": 8001,
+        "port": int(os.getenv("AGENT_API_PORT", "8005")),
         "capabilities": [
             "document_qa",
             "ppt_generation",
@@ -218,7 +232,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",
-        port=8001,
+        port=int(os.getenv("AGENT_API_PORT", "8005")),
         reload=True,
         log_level="info",
     )

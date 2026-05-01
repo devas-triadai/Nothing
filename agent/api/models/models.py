@@ -14,7 +14,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "agent.db"
+import os
+
+_DATA_DIR = Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+_DB_PATH = _DATA_DIR / "agent.db"
 _DB_URL = f"sqlite:///{_DB_PATH}"
 
 engine = create_engine(_DB_URL, echo=False, connect_args={"check_same_thread": False})

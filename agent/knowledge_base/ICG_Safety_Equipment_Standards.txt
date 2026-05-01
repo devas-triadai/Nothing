@@ -1,0 +1,76 @@
+INDIAN COAST GUARD (ICG)
+SAFETY EQUIPMENT STANDARDS
+ICG/SAFETY/EQ/2024
+
+CHAPTER 1 — LIFE-SAVING APPLIANCES
+
+Section 1.1 — Lifeboat Requirements
+1. Every Coast Guard vessel of 500 GT and above shall carry lifeboats with total capacity for 100% of persons on board.
+2. Lifeboat types: (a) Totally enclosed lifeboats for OPVs; (b) Partially enclosed lifeboats for FPVs; (c) Rigid inflatable boats (RIBs) for interceptor boats.
+3. Lifeboat capacity: Minimum 6 persons, maximum 150 persons. Each seat shall provide at least 430 mm width.
+4. Launching arrangements: Free-fall or davit-launched. Davit-launched lifeboats shall be capable of being launched within 10 minutes.
+
+Section 1.2 — Liferaft Requirements
+1. Inflatable liferafts shall comply with SOLAS Chapter III and LSA Code requirements.
+2. Capacity: Available for 100% of persons on board (in addition to lifeboats on passenger vessels).
+3. Servicing intervals: Annual servicing at an approved service station.
+4. Float-free arrangements: All liferafts shall be fitted with a hydrostatic release unit (HRU) for automatic deployment.
+
+Section 1.3 — Personal Life-Saving Equipment
+1. Life jackets: One for each person on board plus 10% additional for visitors/passengers.
+2. Life jacket performance: Shall turn an unconscious person from face-down to face-up position within 5 seconds.
+3. Immersion suits: Required on all vessels operating in water temperatures below 15°C.
+4. Thermal protective aids (TPAs): 10% of complement or 2 units, whichever is greater.
+
+Section 1.4 — Visual and Audible Distress Signals
+1. Minimum equipment per vessel: 12 parachute rockets, 6 hand flares, 4 buoyant smoke signals.
+2. Parachute rockets: Shall reach minimum 300 metres height and burn for minimum 40 seconds.
+3. Hand flares: Burn time minimum 1 minute, visible at 5 nautical miles.
+4. Expiry: All pyrotechnics shall be replaced before expiry date (maximum 3 years from manufacture).
+
+CHAPTER 2 — FIRE SAFETY EQUIPMENT
+
+Section 2.1 — Structural Fire Protection
+1. All vessels shall comply with SOLAS Chapter II-2 fire protection requirements.
+2. Fire zones: Main vertical zones shall not exceed 40 metres in length.
+3. Bulkhead and deck insulation: A-60 class divisions between machinery spaces and accommodation; A-15 between accommodation areas.
+4. Escape routes: Two means of escape from all spaces; corridors minimum 900 mm width.
+
+Section 2.2 — Fire Detection and Alarm Systems
+1. All enclosed spaces shall be fitted with automatic fire detection systems.
+2. Detector types: (a) Smoke detectors in accommodation and service spaces; (b) Heat detectors in galleys and laundries; (c) Flame detectors in machinery spaces.
+3. Fire alarm system: Audible and visual alarms throughout the vessel; central alarm panel on the bridge.
+4. Manual call points: Located at all exit points, maximum 20 metres apart in corridors.
+
+Section 2.3 — Fixed Fire-Extinguishing Systems
+1. Machinery spaces: CO2 or clean agent (HFC-227ea or FK-5-1-12) fixed system.
+2. CO2 system capacity: Sufficient to provide 40% of the gross volume of the largest machinery space.
+3. Clean agent systems: Concentration as per manufacturer's specification for Class B fires.
+4. Water spray systems: In vehicle spaces, ro-ro spaces, and helicopter decks.
+5. System activation: Remote operation from outside the protected space; audible pre-discharge alarm for minimum 20 seconds.
+
+Section 2.4 — Portable Fire-Fighting Equipment
+1. Fire extinguishers: Minimum 1 per 200 square metres of accommodation area.
+2. Types: (a) 9-litre water for accommodation; (b) 9 kg CO2 for electrical spaces; (c) 9 kg dry chemical powder for machinery spaces.
+3. Fire hoses: Minimum 2 fire hoses available for any part of the vessel; nozzle capable of producing jet and spray patterns.
+4. Fireman's outfits: Minimum 2 sets on vessels over 500 GT; 4 sets on vessels over 2,000 GT. Each set includes breathing apparatus (minimum 30-minute capacity), fireproof suit, helmet, boots, and axe.
+
+CHAPTER 3 — NAVIGATION SAFETY EQUIPMENT
+
+Section 3.1 — Navigation Equipment Requirements
+1. Radar: Two independent radar systems (X-band and S-band) on vessels over 500 GT.
+2. AIS: Class A transponder on all vessels over 300 GT.
+3. GMDSS: Equipment as per the vessel's sea area of operation (A1, A2, A3, or A4).
+4. ECDIS: Electronic Chart Display and Information System with approved chart data.
+5. Echo sounder: Capable of measuring depth to at least 200 metres.
+6. Speed log: Dual-axis water speed log on vessels over 500 GT.
+7. Gyro compass: On all vessels over 500 GT, with minimum 2 repeaters.
+8. Magnetic compass: Maintained as backup on all vessels.
+
+Section 3.2 — Communication Equipment
+1. VHF: Minimum 3 VHF sets (bridge, emergency, portable).
+2. MF/HF: On vessels operating beyond A1 sea areas.
+3. INMARSAT: Fleet Broadband terminal on OPVs and larger vessels.
+4. EPIRB: 406 MHz COSPAS-SARSAT EPIRB, float-free mounted.
+5. SART: 2 radar transponder SARTs or AIS-SARTs.
+6. NAVTEX: For reception of maritime safety information.

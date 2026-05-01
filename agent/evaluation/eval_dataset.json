@@ -1,0 +1,212 @@
+[
+  {
+    "id": "q01",
+    "question": "What is the required subdivision index R for a cargo ship with subdivision length of 200 metres?",
+    "ground_truth": "For cargo ships, R = 1 - (128 / (Ls + 152))^(1/3). With Ls = 200m: R = 1 - (128/352)^(1/3) = 1 - 0.364^(1/3) ≈ 1 - 0.714 = 0.286.",
+    "expected_source": "IMO_SOLAS_Chapter_II-1.txt",
+    "category": "SOLAS"
+  },
+  {
+    "id": "q02",
+    "question": "What is the minimum emergency power duration for passenger ships under SOLAS?",
+    "ground_truth": "The emergency source of electrical power shall be capable of operating for at least 36 hours for passenger ships and 18 hours for cargo ships.",
+    "expected_source": "IMO_SOLAS_Chapter_II-1.txt",
+    "category": "SOLAS"
+  },
+  {
+    "id": "q03",
+    "question": "What is the formula for calculating bilge pipe diameter?",
+    "ground_truth": "The diameter d (in mm) of the main bilge pipe shall be calculated by: d = 25 + 1.68 × √(L(B+D)), where L, B, and D are in metres.",
+    "expected_source": "IMO_SOLAS_Chapter_II-1.txt",
+    "category": "SOLAS"
+  },
+  {
+    "id": "q04",
+    "question": "What is the maximum oil content allowed in oily mixture discharge?",
+    "ground_truth": "The oil content of the effluent must not exceed 15 parts per million. The oil filtering equipment shall ensure this limit and be provided with alarm arrangements and automatic stopping devices.",
+    "expected_source": "IMO_MARPOL_Annex_I.txt",
+    "category": "MARPOL"
+  },
+  {
+    "id": "q05",
+    "question": "What are the double hull requirements for oil tankers?",
+    "ground_truth": "Every oil tanker of 5,000 tonnes deadweight and above ordered after 6 July 1993 shall be fitted with a double hull. The minimum bottom distance w = B/15 or 2.0 m (lesser), not less than 1.0 m. Side distance w = 0.5 + DW/20,000 or 2.0 m (lesser), not less than 1.0 m.",
+    "expected_source": "IMO_MARPOL_Annex_I.txt",
+    "category": "MARPOL"
+  },
+  {
+    "id": "q06",
+    "question": "What is a SOPEP and who must carry one?",
+    "ground_truth": "A Shipboard Oil Pollution Emergency Plan (SOPEP) must be carried by every oil tanker of 150 GT and above and every non-tanker ship of 400 GT and above. It must include reporting procedures, contact lists, immediate action descriptions, and coordination procedures.",
+    "expected_source": "IMO_MARPOL_Annex_I.txt",
+    "category": "MARPOL"
+  },
+  {
+    "id": "q07",
+    "question": "What is the global sulphur cap for marine fuels after 2020?",
+    "ground_truth": "The global sulphur cap is 0.50% m/m from 1 January 2020 (previously 3.50%). In Emission Control Areas (ECAs), the limit is 0.10% m/m from 1 January 2015.",
+    "expected_source": "IMO_MARPOL_Annex_VI.txt",
+    "category": "MARPOL_VI"
+  },
+  {
+    "id": "q08",
+    "question": "What are the NOx Tier III emission limits?",
+    "ground_truth": "Tier III NOx emission limit is 3.4 g/kWh for engine speed < 130 rpm, applicable to ships operating in ECAs constructed on or after 1 January 2016. For engines with speed 130 ≤ n < 2000 rpm: Tier III limit = 9 × n^(-0.2) g/kWh.",
+    "expected_source": "IMO_MARPOL_Annex_VI.txt",
+    "category": "MARPOL_VI"
+  },
+  {
+    "id": "q09",
+    "question": "What is CII and what happens if a ship gets a bad rating?",
+    "ground_truth": "CII is the Carbon Intensity Indicator calculated as total CO2 emissions divided by DWT × distance sailed. Ships rated D for three consecutive years or E for any year must submit a corrective action plan. Ratings range from A (best) to E (worst).",
+    "expected_source": "IMO_MARPOL_Annex_VI.txt",
+    "category": "MARPOL_VI"
+  },
+  {
+    "id": "q10",
+    "question": "What EEDI reduction is required in Phase 3?",
+    "ground_truth": "Phase 3 (2025 onwards) requires 30% reduction from the reference line baseline. EEDI is measured in grams of CO2 per tonne-nautical mile.",
+    "expected_source": "IMO_MARPOL_Annex_VI.txt",
+    "category": "MARPOL_VI"
+  },
+  {
+    "id": "q11",
+    "question": "What is the minimum seagoing service required for an officer in charge of a navigational watch?",
+    "ground_truth": "Every officer in charge of a navigational watch shall have approved seagoing service of not less than 12 months, be not less than 18 years of age, and have completed approved education and training meeting section A-II/1 standards.",
+    "expected_source": "IMO_STCW_Convention.txt",
+    "category": "STCW"
+  },
+  {
+    "id": "q12",
+    "question": "What seagoing service is needed to become a master of a 3000 GT ship?",
+    "ground_truth": "Masters of ships of 3,000 gross tonnage or more shall have not less than 36 months approved seagoing service.",
+    "expected_source": "IMO_STCW_Convention.txt",
+    "category": "STCW"
+  },
+  {
+    "id": "q13",
+    "question": "What basic safety training must all seafarers receive?",
+    "ground_truth": "All seafarers must receive approved basic safety training in: personal survival techniques, fire prevention and fire fighting, elementary first aid, and personal safety and social responsibilities. Refresher training at intervals not exceeding 5 years.",
+    "expected_source": "IMO_STCW_Convention.txt",
+    "category": "STCW"
+  },
+  {
+    "id": "q14",
+    "question": "What are the SAR alert phase categories?",
+    "ground_truth": "Three categories: UNCERTAINTY PHASE (INCERFA) - vessel overdue; ALERT PHASE (ALERFA) - contact attempts failed; DISTRESS PHASE (DETRESFA) - vessel considered to be in distress after all attempts unsuccessful.",
+    "expected_source": "ICG_SOPs_Maritime_Operations.txt",
+    "category": "ICG_OPS"
+  },
+  {
+    "id": "q15",
+    "question": "What search patterns does the ICG use for SAR operations?",
+    "ground_truth": "Search patterns include: expanding square search for small areas with known datum; sector search for well-defined datum; parallel track search for large areas; creeping line ahead for moderate size areas.",
+    "expected_source": "ICG_SOPs_Maritime_Operations.txt",
+    "category": "ICG_OPS"
+  },
+  {
+    "id": "q16",
+    "question": "What are the oil spill response tiers?",
+    "ground_truth": "Tier 1 (Minor): Up to 10 tonnes - local response. Tier 2 (Medium): 10-1000 tonnes - regional coordination. Tier 3 (Major): Over 1000 tonnes - national/international activation under NOS-DCP.",
+    "expected_source": "ICG_SOPs_Maritime_Operations.txt",
+    "category": "ICG_OPS"
+  },
+  {
+    "id": "q17",
+    "question": "What minimum Tier 1 oil spill equipment must each Coast Guard station maintain?",
+    "ground_truth": "200 metres of containment boom, 1 portable skimmer system, 5 tonnes of dispersant, and PPE for 10 personnel. Equipment shall be tested and maintained quarterly.",
+    "expected_source": "ICG_SOPs_Maritime_Operations.txt",
+    "category": "ICG_OPS"
+  },
+  {
+    "id": "q18",
+    "question": "What are the ICG ship categories and their speed requirements?",
+    "ground_truth": "OPV ≥ 23 knots, FPV ≥ 28 knots, IB ≥ 35 knots. Categories include: OPV (90-105m), FPV (48-50m), Interceptor Boat (28-30m), ACV, Pollution Control Vessel, Dornier Aircraft, and ALH.",
+    "expected_source": "ICG_Vessel_Classification_Rules.txt",
+    "category": "ICG_CLASS"
+  },
+  {
+    "id": "q19",
+    "question": "What is the maximum allowable hull plating diminution?",
+    "ground_truth": "General corrosion: 20% of original thickness for vessels up to 15 years, 15% for vessels over 15 years. Localized pitting: maximum 25% of original thickness. Critical structural members: maximum 10%.",
+    "expected_source": "ICG_Vessel_Classification_Rules.txt",
+    "category": "ICG_CLASS"
+  },
+  {
+    "id": "q20",
+    "question": "What is the ballast water D-2 discharge standard?",
+    "ground_truth": "D-2 performance standard: discharge less than 10 viable organisms per cubic metre (≥50 μm) and less than 10 viable organisms per millilitre (10-50 μm). All ships must meet this from 2024.",
+    "expected_source": "ICG_Environmental_Compliance.txt",
+    "category": "ICG_ENV"
+  },
+  {
+    "id": "q21",
+    "question": "When can dispersants be used for oil spills?",
+    "ground_truth": "Dispersant use requires ICG NCP coordinator authorization. Conditions: mechanical recovery not feasible, net environmental benefit analysis favors it, and the oil type is amenable to dispersant application.",
+    "expected_source": "ICG_Environmental_Compliance.txt",
+    "category": "ICG_ENV"
+  },
+  {
+    "id": "q22",
+    "question": "What are the garbage discharge rules for plastics at sea?",
+    "ground_truth": "Discharge of plastics into the sea is PROHIBITED at all times under MARPOL Annex V. Food waste may be discharged comminuted ≥3nm from land or uncomminuted ≥12nm from land.",
+    "expected_source": "ICG_Environmental_Compliance.txt",
+    "category": "ICG_ENV"
+  },
+  {
+    "id": "q23",
+    "question": "How many fireman's outfits are required on a 2500 GT vessel?",
+    "ground_truth": "Minimum 4 sets on vessels over 2,000 GT. Each set includes: breathing apparatus (minimum 30-minute capacity), fireproof suit, helmet, boots, and axe.",
+    "expected_source": "ICG_Safety_Equipment_Standards.txt",
+    "category": "ICG_SAFETY"
+  },
+  {
+    "id": "q24",
+    "question": "What are the lifeboat launching time requirements?",
+    "ground_truth": "Davit-launched lifeboats shall be capable of being launched within 10 minutes. Minimum capacity 6 persons, maximum 150 persons. Each seat provides at least 430 mm width.",
+    "expected_source": "ICG_Safety_Equipment_Standards.txt",
+    "category": "ICG_SAFETY"
+  },
+  {
+    "id": "q25",
+    "question": "What radar equipment is needed on a 600 GT vessel?",
+    "ground_truth": "Two independent radar systems (X-band and S-band) on vessels over 500 GT. Also required: Class A AIS, ECDIS, echo sounder (200m depth), dual-axis speed log, and gyro compass with 2+ repeaters.",
+    "expected_source": "ICG_Safety_Equipment_Standards.txt",
+    "category": "ICG_SAFETY"
+  },
+  {
+    "id": "q26",
+    "question": "What are the grounds for ship detention under port state control?",
+    "ground_truth": "Grounds include: inoperative fire detection/extinguishing, non-functional navigation equipment, insufficient/unqualified crew, structural deficiencies, missing/expired certificates, and oil pollution prevention equipment failure. Detention notified to Flag State within 24 hours.",
+    "expected_source": "ICG_Port_State_Control_Guidelines.txt",
+    "category": "ICG_PSC"
+  },
+  {
+    "id": "q27",
+    "question": "What is the IO MOU inspection target for port state control?",
+    "ground_truth": "Each member state shall inspect at least 15% of individual foreign ships entering its ports annually. India is a member of the Indian Ocean MOU on Port State Control.",
+    "expected_source": "ICG_Port_State_Control_Guidelines.txt",
+    "category": "ICG_PSC"
+  },
+  {
+    "id": "q28",
+    "question": "What are the specifications of the Batch-IV OPV?",
+    "ground_truth": "LOA 98m, beam 14.6m, displacement 2,350 tonnes, max speed ≥25 knots, range ≥6,500 nm at 14 knots, endurance ≥25 days, CODAD propulsion with 2×6,500 kW engines, crew of 120 persons, helicopter-capable.",
+    "expected_source": "SAMPLE_Project_Proposal_OPV.txt",
+    "category": "PROJECT"
+  },
+  {
+    "id": "q29",
+    "question": "What is the cost estimate per OPV in the Batch-IV programme?",
+    "ground_truth": "Approximately ₹860 Crore per vessel. Programme total for 8 vessels is ₹6,880 Crore. Breakdown: Hull ₹180Cr, Propulsion ₹250Cr, Electronics ₹100Cr, Weapons ₹150Cr, Navigation ₹80Cr, Outfitting ₹60Cr, Design ₹40Cr.",
+    "expected_source": "SAMPLE_Project_Proposal_OPV.txt",
+    "category": "PROJECT"
+  },
+  {
+    "id": "q30",
+    "question": "What is the maximum speed of the Fast Interceptor Craft and what propulsion does it use?",
+    "ground_truth": "Maximum speed ≥35 knots in Sea State 2 at full load, sprint speed ≥42 knots at light displacement. Uses 3 × water-jet propulsion units driven by 3 × 2,200 kW high-speed marine diesel engines. Hull is aluminium alloy 5083-H321.",
+    "expected_source": "SAMPLE_Technical_Specification_FIC.txt",
+    "category": "PROJECT"
+  }
+]

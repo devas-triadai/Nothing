@@ -10,6 +10,8 @@ import re
 import time
 from typing import Any, AsyncGenerator, Dict, Generator, List, Optional
 
+import os
+
 import httpx
 
 from api.rag import embedder, chunker, reranker, ocr
@@ -18,8 +20,7 @@ from api.rag import llm as llm_engine
 
 logger = logging.getLogger("agra.pipeline")
 
-_ADMIN_BASE = "http://localhost:8000"
-_SIMILARITY_THRESHOLD = 0.35
+_ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", "http://localhost:8000")
 _REFUSAL = (
     "I could not find relevant information in the knowledge base to answer "
     "your question. Please try rephrasing or ensure the relevant documents "
@@ -287,33 +288,66 @@ async def query_pipeline(
         }
         return
 
-    # 1. Embed the question
-    query_emb = embedder.embed_query(question)
+    # ── 1. Query Rewriting (Priority 1) ──
+    from api.rag.query_rewriter import rewrite_query
+    rewritten = rewrite_query(question, session_history)
 
-    # 2. Hybrid search (dense + BM25) → top 10
+    # 2. Embed the REWRITTEN query (original kept for LLM prompt)
+    query_emb = embedder.embed_query(rewritten)
+
+    # 3. Hybrid search (dense + BM25) → top 10
     candidates = store.hybrid_search(
-        query_text=question,
+        query_text=rewritten,
         query_embedding=query_emb,
         top_k=10,
         doc_id_filter=doc_id_filter,
     )
 
-    if not candidates:
+    # ── 4. CRAG-Style Retry Loop (Priority 3) ──
+    # Three-tier threshold: CONFIDENT → proceed; RETRY → rewrite & search again; REFUSE
+    _CONFIDENT_THRESHOLD = 0.50
+    _RETRY_THRESHOLD = 0.25
+
+    max_score = max((c.get("combined_score", 0) for c in candidates), default=0)
+
+    if not candidates or max_score < _RETRY_THRESHOLD:
+        # Below retry threshold — refuse immediately
         yield {"token": _REFUSAL}
         yield {"done": True, "sources": []}
         return
 
-    # 3. Check similarity threshold
-    max_score = max(c.get("combined_score", 0) for c in candidates)
-    if max_score < _SIMILARITY_THRESHOLD:
-        yield {"token": _REFUSAL}
-        yield {"done": True, "sources": []}
-        return
+    if max_score < _CONFIDENT_THRESHOLD:
+        # Borderline — CRAG retry with broader rewritten query
+        logger.info(
+            "CRAG retry triggered: max_score=%.3f < %.3f (confident). Rewriting...",
+            max_score, _CONFIDENT_THRESHOLD,
+        )
+        retry_query = rewrite_query(question, session_history, feedback="low_relevance")
+        retry_emb = embedder.embed_query(retry_query)
+        retry_candidates = store.hybrid_search(
+            query_text=retry_query,
+            query_embedding=retry_emb,
+            top_k=10,
+            doc_id_filter=doc_id_filter,
+        )
+        retry_max = max((c.get("combined_score", 0) for c in retry_candidates), default=0)
+        if retry_max > max_score:
+            logger.info("CRAG retry improved: %.3f → %.3f", max_score, retry_max)
+            candidates = retry_candidates
+            max_score = retry_max
+        else:
+            logger.info("CRAG retry did not improve (%.3f ≤ %.3f), using original.", retry_max, max_score)
 
-    # 4. Rerank → top 5
+        # After retry, still below refuse threshold? Give up.
+        if max_score < _RETRY_THRESHOLD:
+            yield {"token": _REFUSAL}
+            yield {"done": True, "sources": []}
+            return
+
+    # 5. Rerank → top 5
     top_chunks = reranker.rerank(question, candidates, top_k=5)
 
-    # 5. Build prompt
+    # 6. Build prompt
     house_rules = await _fetch_house_rules(token)
     context_str = _format_context(top_chunks)
     system_msg = _SYSTEM_PROMPT.format(house_rules=house_rules, context=context_str)
@@ -326,18 +360,18 @@ async def query_pipeline(
 
     messages.append({"role": "user", "content": question})
 
-    # 6. Stream LLM response
+    # 7. Stream LLM response
     full_response = []
     for tok in llm_engine.stream_generate(messages, max_tokens=2048):
         full_response.append(tok)
         yield {"token": tok}
 
-    # 7. Build structured sources (no inline text footer — UI handles display)
+    # 8. Build structured sources (no inline text footer — UI handles display)
     sources = _format_sources(top_chunks)
 
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
-    # 8. Log usage to admin backend
+    # 9. Log usage to admin backend
     if token:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:

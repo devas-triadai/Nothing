@@ -1,0 +1,59 @@
+INDIAN COAST GUARD (ICG)
+VESSEL CLASSIFICATION AND SURVEY RULES
+ICG/TECH/CLASS/2024
+
+CHAPTER 1 — CLASSIFICATION FRAMEWORK
+
+Section 1.1 — Classification Societies
+1. The Indian Coast Guard recognizes classification surveys conducted by Indian Register of Shipping (IRS) and other IACS member societies.
+2. Classification surveys cover: hull structure, machinery, electrical installations, and safety equipment.
+3. Ships shall maintain their class throughout their operational life.
+
+Section 1.2 — Ship Categories for ICG
+1. Offshore Patrol Vessel (OPV): 90-105 metres, 2,200-2,400 tonnes displacement.
+2. Fast Patrol Vessel (FPV): 48-50 metres, 300-350 tonnes displacement.
+3. Interceptor Boat (IB): 28-30 metres, 100-120 tonnes displacement.
+4. Air Cushion Vehicle (ACV): For shallow water and amphibious operations.
+5. Pollution Control Vessel (PCV): Equipped with oil spill recovery systems.
+6. Dornier Aircraft: Maritime surveillance aircraft.
+7. Advanced Light Helicopter (ALH): For SAR and coastal patrol operations.
+
+CHAPTER 2 — SURVEY REQUIREMENTS
+
+Section 2.1 — Periodic Survey Schedule
+1. Annual Survey: Visual inspection of hull, machinery, and safety equipment conducted annually.
+2. Intermediate Survey: Detailed inspection at 2.5 years including thickness measurement of hull plating.
+3. Special Survey: Comprehensive survey at 5-year intervals including dry-docking and ultrasonic thickness gauging.
+4. Bottom Survey: Hull bottom inspection in dry dock at intervals not exceeding 5 years (2.5 years for vessels over 15 years old).
+
+Section 2.2 — Hull Survey Standards
+1. Minimum hull plating thickness: Original as-built minus maximum allowable diminution.
+2. Allowable diminution for general corrosion: 20% of original thickness for vessels up to 15 years; 15% for vessels over 15 years.
+3. Localized corrosion: Maximum pitting depth not to exceed 25% of original thickness.
+4. Critical structural members (keel, frames, longitudinals): Maximum diminution of 10%.
+
+Section 2.3 — Machinery Survey Standards
+1. Main engines: Crankshaft deflection readings shall be taken at each survey.
+2. Maximum allowable crankshaft deflection: ±0.03 mm per 100 mm of stroke for 4-stroke engines; ±0.05 mm per 100 mm for 2-stroke engines.
+3. Turbochargers: Complete overhaul at intervals recommended by manufacturer or 8,000 operating hours.
+4. Steering gear: Complete functional test including emergency operation at each annual survey.
+
+Section 2.4 — Electrical Survey Standards
+1. Insulation resistance of all circuits shall be measured at each survey.
+2. Minimum acceptable insulation resistance: 1 MΩ for circuits above 100V; 0.5 MΩ for circuits below 100V.
+3. Emergency generator: Load test at each annual survey demonstrating 100% rated load for minimum 2 hours.
+4. Navigation lights: All navigation lights and signals shall be tested at each survey.
+
+CHAPTER 3 — DESIGN STANDARDS FOR NEW BUILDS
+
+Section 3.1 — Structural Design
+1. All new ICG vessels shall be designed to meet or exceed IRS classification rules.
+2. Design loads shall account for North Indian Ocean sea state conditions up to Sea State 6.
+3. Fatigue life calculation shall demonstrate minimum 25-year service life for primary structure.
+4. Vibration analysis: Forced vibration levels shall not exceed 4 mm/s at 1x and 2x propeller blade passing frequency.
+
+Section 3.2 — Machinery Selection Criteria
+1. Main propulsion: Preference for combined diesel or gas turbine (CODOG/CODAD) for OPVs.
+2. Speed requirements: OPV ≥ 23 knots; FPV ≥ 28 knots; IB ≥ 35 knots.
+3. Range requirements: OPV ≥ 5,000 nautical miles at 14 knots; FPV ≥ 2,000 nm at 14 knots.
+4. Endurance: OPV ≥ 20 days; FPV ≥ 7 days; IB ≥ 3 days.

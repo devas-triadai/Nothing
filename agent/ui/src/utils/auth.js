@@ -66,14 +66,16 @@ export function authHeaders() {
  * Get the dashboard login URL based on environment.
  */
 export function getDashboardUrl(path = '/login') {
+  const adminPort = import.meta.env.VITE_ADMIN_PORT || '3000';
+  const uiPort = import.meta.env.VITE_AGENT_UI_PORT || '7860';
   if (typeof window !== 'undefined' && window.location.hostname.includes('runpod.net')) {
-    return window.location.origin.replace('7860', '3000') + path;
+    return window.location.origin.replace(uiPort, adminPort) + path;
   }
   const podId = import.meta.env.VITE_POD_ID || '';
   if (podId && podId !== 'your-runpod-pod-id-here') {
-    return `https://${podId}-3000.proxy.runpod.net${path}`;
+    return `https://${podId}-${adminPort}.proxy.runpod.net${path}`;
   }
-  return `http://localhost:3000${path}`;
+  return `http://localhost:${adminPort}${path}`;
 }
 
 /**

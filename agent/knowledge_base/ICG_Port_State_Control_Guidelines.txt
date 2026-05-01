@@ -1,0 +1,87 @@
+INDIAN COAST GUARD (ICG)
+PORT STATE CONTROL GUIDELINES
+ICG/PSC/GL/2024
+
+CHAPTER 1 — PORT STATE CONTROL FRAMEWORK
+
+Section 1.1 — Authority and Mandate
+1. The Indian Coast Guard exercises Port State Control (PSC) authority under the Merchant Shipping Act, 1958 and relevant IMO conventions.
+2. India is a member of the Indian Ocean Memorandum of Understanding (IO MOU) on Port State Control.
+3. The IO MOU inspection target: Each member state shall inspect at least 15% of individual foreign ships entering its ports annually.
+
+Section 1.2 — Selection Criteria for Inspection
+1. Ship Targeting System: Vessels are prioritized based on a risk-based targeting system.
+2. Priority I (mandatory inspection): Ships not inspected in last 6 months; ships with known deficiencies; ships from flag states on the black/grey list.
+3. Priority II (may be inspected): Ships with outstanding recommendations; ships of a type subject to PSC concentration inspection campaigns.
+4. Override factors: Ship involved in incident; crew complaint; information from other parties.
+
+CHAPTER 2 — INSPECTION PROCEDURES
+
+Section 2.1 — Initial Inspection
+1. The PSC inspector (PSCI) shall examine:
+   (a) Validity of certificates and documents;
+   (b) Overall condition of the ship;
+   (c) Competence of crew;
+   (d) Compliance with applicable conventions.
+2. Certificates to be verified: (a) International Tonnage Certificate; (b) International Load Line Certificate; (c) Safety Construction Certificate; (d) Safety Equipment Certificate; (e) Safety Radio Certificate; (f) IOPP Certificate; (g) ISM Code Document of Compliance and Safety Management Certificate; (h) ISPS Code International Ship Security Certificate; (i) IAPP Certificate; (j) BWM Certificate.
+
+Section 2.2 — Expanded Inspection
+1. An expanded inspection shall be triggered when clear grounds exist that the condition of the ship or its equipment does not correspond substantially with the particulars of any of the certificates.
+2. Clear grounds include: (a) absence of required equipment; (b) evidence of deficiency in safety equipment; (c) absence of working oil discharge monitoring system; (d) absence of valid certificates; (e) crew unable to communicate with each other or with PSC inspector.
+
+Section 2.3 — Detailed Inspection
+1. A detailed inspection involves examination of specific areas: (a) structural condition; (b) fire safety measures; (c) ISM compliance; (d) working and living conditions; (e) navigation safety equipment.
+2. Each area shall be assessed against the relevant convention requirements.
+
+CHAPTER 3 — DEFICIENCY CODES AND ACTIONS
+
+Section 3.1 — Deficiency Classification
+1. Deficiency codes follow the IMO/IO MOU harmonized system.
+2. Major categories:
+   (a) 01000 — Certificates and documentation;
+   (b) 02000 — Structural condition;
+   (c) 03000 — Water/weathertight integrity;
+   (d) 04000 — Emergency systems;
+   (e) 05000 — Radio communications;
+   (f) 06000 — Cargo operations;
+   (g) 07000 — Fire safety;
+   (h) 08000 — Alarms;
+   (i) 09000 — Working and living conditions;
+   (j) 10000 — Safety of navigation;
+   (k) 11000 — Life-saving appliances;
+   (l) 12000 — Dangerous goods;
+   (m) 13000 — Propulsion and auxiliary machinery;
+   (n) 14000 — Pollution prevention;
+   (o) 15000 — ISM;
+   (p) 16000 — ISPS;
+   (q) 17000 — Other.
+
+Section 3.2 — Action Codes
+1. Code 10 — Deficiency rectified
+2. Code 15 — Rectify deficiency at next port
+3. Code 16 — Rectify within 14 days
+4. Code 17 — Master informed
+5. Code 30 — Detainable deficiency (ship detained until rectified)
+6. Code 40 — Next port of call informed
+7. Code 45 — Referred to flag State
+8. Code 50 — Ship banned from operating
+9. Code 85 — Investigation of possible contravention
+
+Section 3.3 — Detention Criteria
+1. A ship shall be detained when deficiencies are sufficiently serious to merit a port State control officer returning to the ship to verify that they have been rectified before the ship sails.
+2. Grounds for detention include:
+   (a) Inoperative fire detection or extinguishing equipment;
+   (b) Non-functional navigation equipment (radar, gyro, steering);
+   (c) Insufficient or unqualified crew;
+   (d) Structural deficiencies affecting seaworthiness;
+   (e) Missing or expired certificates;
+   (f) Oil pollution prevention equipment failure.
+3. Detention notification: Flag State, next port of call, and IO MOU secretariat shall be notified within 24 hours.
+
+CHAPTER 4 — CONCENTRATED INSPECTION CAMPAIGNS (CIC)
+
+Section 4.1 — Annual CIC Topics
+1. The IO MOU conducts one Concentrated Inspection Campaign per year focusing on a specific topic.
+2. Recent CIC topics include: STCW compliance, stability instruments, fire safety, ballast water management, MARPOL Annex VI compliance.
+3. During CICs, all inspected ships shall be checked for compliance with the campaign questionnaire in addition to the normal inspection scope.
+4. CIC results are reported to the IO MOU secretariat and published in the annual report.

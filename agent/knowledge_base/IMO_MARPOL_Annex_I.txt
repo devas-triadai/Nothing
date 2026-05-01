@@ -1,0 +1,72 @@
+INTERNATIONAL MARITIME ORGANIZATION (IMO)
+INTERNATIONAL CONVENTION FOR THE PREVENTION OF POLLUTION FROM SHIPS (MARPOL)
+ANNEX I: REGULATIONS FOR THE PREVENTION OF POLLUTION BY OIL
+
+CHAPTER 1 — GENERAL
+
+Regulation 1 — Definitions
+1. "Oil" means petroleum in any form including crude oil, fuel oil, sludge, oil refuse and refined products.
+2. "Oily mixture" means a mixture with any oil content.
+3. "Oil tanker" means a ship constructed or adapted primarily to carry oil in bulk in its cargo spaces.
+4. "Crude oil tanker" means an oil tanker engaged in the trade of carrying crude oil.
+5. "Product carrier" means an oil tanker engaged in the trade of carrying oil other than crude oil.
+
+Regulation 2 — Application
+1. Unless expressly provided otherwise, this Annex applies to all ships.
+2. In ships other than oil tankers fitted with cargo spaces which are constructed and utilized to carry oil in bulk of an aggregate capacity of 200 cubic metres or more, the requirements of regulations 16, 26, 29, 30, 31, 32, 34 and 36 shall apply.
+
+CHAPTER 2 — SURVEYS AND CERTIFICATION
+
+Regulation 6 — Issue of Certificates
+1. An International Oil Pollution Prevention Certificate shall be issued to any oil tanker of 150 gross tonnage and above.
+2. An International Oil Pollution Prevention Certificate shall be issued to ships of 400 gross tonnage and above other than oil tankers.
+3. The certificate shall be valid for a period not exceeding 5 years.
+
+CHAPTER 3 — REQUIREMENTS FOR MACHINERY SPACES
+
+Regulation 14 — Oil Filtering Equipment
+1. Any ship of 400 gross tonnage and above shall be fitted with oil filtering equipment.
+2. The equipment shall ensure that any oily mixture discharged into the sea has an oil content not exceeding 15 parts per million.
+3. The system shall be provided with alarm arrangements and automatic stopping devices when the oil content of the effluent exceeds 15 ppm.
+
+Regulation 15 — Control of Discharge of Oil
+1. Any discharge into the sea of oil or oily mixtures from ships shall be prohibited except when:
+   (a) the ship is proceeding en route;
+   (b) the oily mixture is processed through oil filtering equipment;
+   (c) the oil content of the effluent does not exceed 15 parts per million;
+   (d) the oily mixture does not originate from cargo pump-room bilges on oil tankers;
+   (e) the oily mixture is not mixed with oil cargo residues.
+
+CHAPTER 4 — REQUIREMENTS FOR THE CARGO AREA OF OIL TANKERS
+
+Regulation 18 — Segregated Ballast Tanks
+1. Every new crude oil tanker of 20,000 tonnes deadweight and above and every new product carrier of 30,000 tonnes deadweight and above shall be provided with segregated ballast tanks.
+2. The capacity of the segregated ballast tanks shall be so determined that the ship may operate safely on ballast voyages without recourse to the use of oil tanks for water ballast.
+
+Regulation 19 — Double Hull and Double Bottom Requirements
+1. Every oil tanker of 5,000 tonnes deadweight and above ordered after 6 July 1993 shall be fitted with a double hull.
+2. The minimum distance between the inner and outer hull plating (w) at the bottom shall be: w = B/15 or 2.0 m, whichever is the lesser, but not less than 1.0 m.
+3. The minimum distance at the side (w) shall be: w = 0.5 + DW/20,000 metres, or 2.0 m, whichever is the lesser, but not less than 1.0 m.
+
+Regulation 20 — Intact Stability
+1. Every oil tanker shall comply with intact stability criteria at all stages of any voyage.
+2. The initial metacentric height (GM0) in the loaded departure condition shall not be less than 0.15 m.
+3. The righting lever GZ shall be positive up to an angle of heel of at least 30 degrees.
+4. The area under the GZ curve shall not be less than 0.055 metre-radians up to 30 degrees.
+5. The maximum GZ shall occur at an angle of heel not less than 25 degrees.
+
+CHAPTER 5 — PREVENTION OF POLLUTION ARISING FROM AN OIL POLLUTION INCIDENT
+
+Regulation 37 — Shipboard Oil Pollution Emergency Plan
+1. Every oil tanker of 150 gross tonnage and above and every ship other than an oil tanker of 400 gross tonnage and above shall carry on board a Shipboard Oil Pollution Emergency Plan (SOPEP).
+2. Such plan shall consist at least of:
+   (a) the procedure to be followed to report an oil pollution incident;
+   (b) the list of authorities or persons to be contacted in the event of an incident;
+   (c) a detailed description of the action to be taken immediately by persons on board;
+   (d) the procedures and point of contact for coordinating shipboard action with national and local authorities.
+
+Regulation 38 — Reception Facilities
+1. The Government of each Party undertakes to ensure the provision of adequate reception facilities for:
+   (a) oily residues and oily mixtures retained on board at ports and terminals;
+   (b) residues remaining from oil filtering equipment.
+2. Each Party shall notify the Organization of all cases where facilities are alleged to be inadequate.
