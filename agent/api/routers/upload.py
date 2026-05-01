@@ -50,12 +50,11 @@ async def upload_document(
             detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(_ALLOWED_EXTENSIONS)}",
         )
 
-    # Check for duplicates by filename
-    existing_files = list(_UPLOADS_DIR.glob(f"*_{filename}"))
-    if existing_files:
+    # Check for duplicates by filename in Qdrant (not just disk, to allow retries if crashed)
+    if get_store().document_exists(filename):
         raise HTTPException(
             status_code=409,
-            detail=f"Document '{filename}' has already been uploaded.",
+            detail=f"Document '{filename}' has already been successfully ingested.",
         )
 
     # Read and validate size

@@ -253,6 +253,22 @@ class VectorStore:
         combined.sort(key=lambda x: x["combined_score"], reverse=True)
         return combined[:top_k]
 
+    def document_exists(self, filename: str) -> bool:
+        """Check if a document with the given filename exists in the store."""
+        try:
+            res, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="metadata.filename", match=MatchValue(value=filename))]
+                ),
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+            return len(res) > 0
+        except Exception:
+            return False
+
     def delete_document(self, doc_id: str) -> int:
         """Delete all chunks belonging to a document. Returns count deleted."""
         # Find matching point IDs

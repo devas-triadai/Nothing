@@ -261,6 +261,10 @@ async def query_pipeline(
     start_time = time.time()
     store = get_store()
 
+    # Force FastAPI to flush HTTP headers immediately to prevent proxy timeouts
+    yield {"token": ""}
+    await asyncio.sleep(0)
+
     # ── 0. Intent detection — check for PPT/quiz/summary requests ──
     intent = _detect_intent(question)
     if intent:
