@@ -9,7 +9,7 @@ import {
   ArrowLeft, Presentation, FileText, HelpCircle, Download,
   Loader2, CheckCircle2, Sliders, BookOpen,
 } from 'lucide-react';
-import api from '../utils/api';
+import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -223,7 +223,7 @@ function SummaryGenerator({ documents }) {
     let accumulated = '';
 
     connectStream(
-      '/api/agent/generate/summary',
+      getApiUrl('/api/agent/generate/summary'),
       { doc_id: selectedDoc, summary_type: summaryType },
       (data) => {
         if (data.token) {

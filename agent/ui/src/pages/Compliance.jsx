@@ -10,7 +10,7 @@ import {
   XCircle, HelpCircle, Loader2, Download, ChevronRight,
   Search, FileText,
 } from 'lucide-react';
-import api from '../utils/api';
+import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 
 const VERDICT_CONFIG = {
@@ -73,7 +73,7 @@ export default function CompliancePage() {
     setError('');
 
     connectStream(
-      '/api/agent/compliance/check',
+      getApiUrl('/api/agent/compliance/check'),
       {
         subject_doc_id: subjectDocId,
         standard_doc_ids: standardDocIds,
