@@ -63,7 +63,22 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
             r'^(creat|generat|build|make|prepar)e?\s+(a\s+)?(ppt|powerpoint|presentation|slides?)\s*',
             '', topic, flags=re.IGNORECASE
         ).strip() or q
-        return {"type": "ppt", "topic": topic, "num_slides": 10}
+        
+        # Extract number of slides if mentioned (e.g., "5 slides")
+        num_slides = 10
+        slides_match = re.search(r'(\d+)\s*slides?', q, re.IGNORECASE)
+        if slides_match:
+            try:
+                num_slides = int(slides_match.group(1))
+            except ValueError:
+                pass
+                
+        # Remove "of 5 slides" or "for 5 slides" from the topic so it doesn't end up in the PPT title
+        topic = re.sub(r'\b(?:of|for|with)?\s*\d+\s*slides?\b', '', topic, flags=re.IGNORECASE).strip()
+        # Clean up any trailing prepositions or spaces
+        topic = re.sub(r'\s+(?:of|for|with|regarding|on|about)\s*$', '', topic, flags=re.IGNORECASE).strip()
+        
+        return {"type": "ppt", "topic": topic, "num_slides": max(3, min(num_slides, 25))}
     if _INTENT_QUIZ.search(q):
         return {"type": "quiz", "num_mcq": 5, "num_short_answer": 3}
     if _INTENT_SUMMARY.search(q):

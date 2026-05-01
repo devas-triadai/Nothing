@@ -54,7 +54,12 @@ def _ocr_image_bytes(image_bytes: bytes) -> str:
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     img_array = np.array(img)
     ocr = _get_paddle_ocr()
-    results = ocr.ocr(img_array)
+    try:
+        results = ocr.ocr(img_array)
+    except Exception as e:
+        logger.error("PaddleOCR failed to process image (likely PIR attribute error): %s", e)
+        return ""
+        
     if not results or not results[0]:
         return ""
     lines = []

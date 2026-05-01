@@ -486,9 +486,12 @@ export default function Chat() {
     );
   };
 
+  // Derive streaming state from current session's last message to allow multi-tasking
+  const isSessionStreaming = messages.length > 0 && messages[messages.length - 1].streaming === true;
+
   const handleSend = async () => {
     const question = input.trim();
-    if (!question || isStreaming) return;
+    if (!question || isSessionStreaming) return;
 
     const userMsg = { role: 'user', content: question, timestamp: Date.now() };
     const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
@@ -895,11 +898,11 @@ export default function Chat() {
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming}
-              style={{ ...styles.sendBtn, opacity: (!input.trim() || isStreaming) ? 0.4 : 1 }}
+              disabled={!input.trim() || isSessionStreaming}
+              style={{ ...styles.sendBtn, opacity: (!input.trim() || isSessionStreaming) ? 0.4 : 1 }}
               id="send-btn"
             >
-              {isStreaming
+              {isSessionStreaming
                 ? <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
                 : <Send size={17} />
               }
