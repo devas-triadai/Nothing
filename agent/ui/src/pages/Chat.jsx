@@ -166,7 +166,7 @@ function PPTCard({ filename, slides, downloadUrl, topic, version }) {
       </div>
       <a
         href={downloadUrl}
-        download
+        download={filename || "Presentation.pptx"}
         style={pptStyles.dlBtn}
         target="_blank"
         rel="noopener noreferrer"
@@ -190,7 +190,7 @@ function SummaryCard({ filename, downloadUrl }) {
         <div style={pptStyles.meta}>{filename} · Word Document</div>
       </div>
       {downloadUrl && (
-        <a href={downloadUrl} download style={{ ...pptStyles.dlBtn, background: '#34d399' }}>
+        <a href={downloadUrl} download={filename || "Summary.docx"} style={{ ...pptStyles.dlBtn, background: '#34d399' }}>
           <Download size={14} />
           Download
         </a>

@@ -30,8 +30,8 @@ _REFUSAL = (
 
 # ── Intent patterns ──
 _INTENT_PPT = re.compile(
-    r'\b(creat|generat|build|make|prepar)e?\b.{0,40}\b(ppt|powerpoint|presentation|slides?)\b'
-    r'|\b(ppt|powerpoint|presentation|slides?)\b.{0,40}\b(about|on|for|regard)\b',
+    r'\b(creat|generat|build|make|prepar|add|updat|revis|chang|modify)e?\b.{0,50}\b(ppt|powerpoint|presentation|slides?)\b'
+    r'|\b(ppt|powerpoint|presentation|slides?)\b.{0,50}\b(about|on|for|regard|with|of)\b',
     re.IGNORECASE,
 )
 _INTENT_QUIZ = re.compile(
