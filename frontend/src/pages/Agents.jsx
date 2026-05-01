@@ -71,10 +71,10 @@ export default function Agents() {
     const token = localStorage.getItem('agra_token') || '';
     let targetUrl = `${window.location.protocol}//${window.location.hostname}:7860`
     if (window.location.hostname.includes('runpod.net')) {
-      // Auto-detect Agent UI port from current origin
       const agentPort = '7860'
-      targetUrl = window.location.origin.replace(/:\d+/, ':' + agentPort)
-      if (!window.location.origin.includes(':')) {
+      if (window.location.origin.match(/:\d+/)) {
+        targetUrl = window.location.origin.replace(/:\d+/, ':' + agentPort)
+      } else {
         // RunPod proxy URL format: <pod-id>-<port>.proxy.runpod.net
         targetUrl = window.location.origin.replace(/\d{4}(?=\.proxy)/, agentPort)
       }
