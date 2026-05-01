@@ -32,12 +32,13 @@ def _get_paddle_ocr():
         os.environ["FLAGS_use_mkldnn"] = "0"
         from paddleocr import PaddleOCR
         try:
-            # PaddleOCR v3+ minimal API
+            # Try passing legacy kwargs for older versions
             _paddle_ocr = PaddleOCR(use_angle_cls=True, use_gpu=False, enable_mkldnn=False, lang="en")
-        except TypeError as e:
-            logger.warning("PaddleOCR init with use_angle_cls failed (%s), retrying bare init.", e)
+        except Exception as e:
+            logger.warning("PaddleOCR init with legacy args failed (%s), retrying with v3 minimal API.", e)
             try:
-                _paddle_ocr = PaddleOCR(use_gpu=False, enable_mkldnn=False, lang="en")
+                # PaddleOCR v3+ minimal API (use_gpu/enable_mkldnn are removed)
+                _paddle_ocr = PaddleOCR(use_angle_cls=True, lang="en")
             except Exception as e2:
                 logger.error("PaddleOCR could not be initialised: %s", e2)
                 raise
