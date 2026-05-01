@@ -19,6 +19,9 @@ export function getApiUrl(path = '') {
   if (podId && podId !== 'your-runpod-pod-id-here') {
     return `https://${podId}-${AGENT_API_PORT}.proxy.runpod.net${path}`;
   }
+  if (isBrowser) {
+    return `${window.location.protocol}//${window.location.hostname}:${AGENT_API_PORT}${path}`;
+  }
   return `http://localhost:${AGENT_API_PORT}${path}`;
 }
 

@@ -69,7 +69,7 @@ export default function Agents() {
 
   const openAgentUI = () => {
     const token = localStorage.getItem('agra_token') || '';
-    let targetUrl = 'http://localhost:7860'
+    let targetUrl = `${window.location.protocol}//${window.location.hostname}:7860`
     if (window.location.hostname.includes('runpod.net')) {
       // Auto-detect Agent UI port from current origin
       const agentPort = '7860'

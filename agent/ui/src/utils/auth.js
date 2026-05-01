@@ -75,6 +75,9 @@ export function getDashboardUrl(path = '/login') {
   if (podId && podId !== 'your-runpod-pod-id-here') {
     return `https://${podId}-${adminPort}.proxy.runpod.net${path}`;
   }
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${adminPort}${path}`;
+  }
   return `http://localhost:${adminPort}${path}`;
 }
 
