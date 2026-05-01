@@ -7,17 +7,23 @@ import Generate from './pages/Generate';
 import Compliance from './pages/Compliance';
 
 function ProtectedRoute({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlToken = params.get('token');
-    if (urlToken) {
+    
+    if (urlToken && urlToken !== 'null' && urlToken !== '') {
       setToken(urlToken);
       setIsAuthenticated(true);
       window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (!getToken()) {
-      window.location.href = getDashboardUrl('/login');
+    } else {
+      const storedToken = getToken();
+      if (storedToken && storedToken !== 'null' && storedToken !== '') {
+        setIsAuthenticated(true);
+      } else {
+        window.location.href = getDashboardUrl('/login');
+      }
     }
   }, []);
 

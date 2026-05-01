@@ -51,7 +51,7 @@ export default function Settings() {
 
   const fetchSettings = async () => {
     try {
-      const data = await apiFetch('/settings');
+      const data = await apiFetch('/settings/');
       if (data?.notifications) setNotifications(data.notifications);
     } catch (err) {
       console.error('Settings fetch error:', err);
