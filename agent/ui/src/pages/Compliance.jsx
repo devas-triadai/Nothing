@@ -387,7 +387,7 @@ const styles = {
   title: {
     fontSize: '22px',
     fontWeight: 700,
-    color: '#fff',
+    color: 'var(--text-heading)',
     margin: 0,
   },
   subtitle: {
@@ -446,7 +446,7 @@ const styles = {
     gap: '10px',
     fontSize: '18px',
     fontWeight: 700,
-    color: '#fff',
+    color: 'var(--text-heading)',
     marginBottom: '8px',
   },
   stepDesc: {
@@ -600,7 +600,7 @@ const styles = {
     display: 'flex',
     gap: '16px',
     padding: '16px',
-    background: '#0d1528',
+    background: 'var(--bg-surface)',
     borderRadius: 'var(--radius-md)',
     marginBottom: '16px',
     justifyContent: 'center',

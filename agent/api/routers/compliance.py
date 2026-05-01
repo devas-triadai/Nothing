@@ -6,16 +6,18 @@ Clause-by-clause analysis against ingested standards.
 import json
 import logging
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from docx import Document as DocxDocument
 
 from api.utils.auth_check import get_current_user
+from api.utils.usage_logger import log_usage
 from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
 from api.rag.reranker import rerank
@@ -45,11 +47,17 @@ class ComplianceRequest(BaseModel):
 async def compliance_check(
     body: ComplianceRequest,
     user: dict = Depends(get_current_user),
+    request: Request = None,
 ):
     """
     Run clause-by-clause compliance analysis.
     Returns SSE stream of findings, then a .docx report download link.
     """
+    compliance_start = time.time()
+    auth_tok = ""
+    if request:
+        ah = request.headers.get("authorization", "")
+        auth_tok = ah.replace("Bearer ", "") if ah else ""
     store = get_store()
 
     # Load subject document chunks
@@ -176,6 +184,10 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
         doc.save(str(docx_path))
 
         yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'unverifiable': unverifiable}})}\n\n"
+
+        # Log usage
+        elapsed_ms = (time.time() - compliance_start) * 1000
+        log_usage(action_type="compliance", module="compliance", token=auth_tok, response_time_ms=elapsed_ms)
 
     return StreamingResponse(
         event_stream(),

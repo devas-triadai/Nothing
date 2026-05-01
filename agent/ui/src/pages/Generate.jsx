@@ -526,7 +526,7 @@ const styles = {
   title: {
     fontSize: '22px',
     fontWeight: 700,
-    color: '#fff',
+    color: 'var(--text-heading)',
     margin: 0,
   },
   subtitle: {
@@ -747,7 +747,7 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     padding: '10px 16px',
-    background: '#0d1528',
+    background: 'var(--bg-surface)',
     borderBottom: '1px solid var(--border)',
     fontSize: '13px',
     fontWeight: 600,

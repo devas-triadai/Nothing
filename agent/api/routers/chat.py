@@ -6,6 +6,7 @@ SSE-streamed conversational Q&A with RAG citations.
 import json
 import logging
 import asyncio
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -13,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.utils.auth_check import get_current_user
+from api.utils.usage_logger import log_usage
 from api.rag.pipeline import query_pipeline
 
 logger = logging.getLogger("agra.chat")
@@ -54,6 +56,8 @@ async def chat(
     history = [{"role": m.role, "content": m.content} for m in body.history]
 
     async def event_stream():
+        start_time = time.time()
+        token_count = 0
         try:
             async for event in _async_query_wrapper(
                 question=body.question,
@@ -62,10 +66,21 @@ async def chat(
                 token=raw_token,
                 doc_id_filter=body.doc_id,
             ):
+                if 'token' in event:
+                    token_count += 1
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             logger.error("Chat stream error: %s", e, exc_info=True)
             yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+        finally:
+            elapsed_ms = (time.time() - start_time) * 1000
+            log_usage(
+                action_type="chat",
+                module="rag",
+                token=raw_token,
+                response_time_ms=elapsed_ms,
+                output_tokens=token_count,
+            )
 
     return StreamingResponse(
         event_stream(),

@@ -10,12 +10,26 @@ import {
   MessageSquare, Plus, Send, Paperclip, ChevronDown, ChevronRight,
   Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
-  ExternalLink, ChevronLeft,
+  ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard,
 } from 'lucide-react';
-import { getToken, getUser, decodeToken, logout } from '../utils/auth';
+import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
 import { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
+import { useTheme } from '../utils/ThemeContext';
+
+// ── Timestamp formatter ──
+function formatTimestamp(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' +
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 const SESSIONS_KEY = 'agra_chat_sessions';
 const ACTIVE_KEY = 'agra_active_session';
@@ -133,13 +147,22 @@ function InlineQuiz({ quiz }) {
 }
 
 // ── PPT Card Component ──
-function PPTCard({ filename, slides, downloadUrl, topic }) {
+function PPTCard({ filename, slides, downloadUrl, topic, version }) {
   return (
     <div style={pptStyles.card}>
-      <div style={pptStyles.icon}><Presentation size={28} color="#4a8bff" /></div>
+      <div style={pptStyles.icon}><Presentation size={28} color="var(--primary)" /></div>
       <div style={pptStyles.info}>
-        <div style={pptStyles.title}>{topic || filename}</div>
-        <div style={pptStyles.meta}>{slides} slides · PowerPoint Presentation</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={pptStyles.title}>{topic || filename}</span>
+          {version && version > 1 && (
+            <span style={{
+              fontSize: '10px', fontWeight: 700, color: '#fff',
+              background: 'var(--primary)', borderRadius: '4px',
+              padding: '1px 5px', lineHeight: '1.4',
+            }}>v{version}</span>
+          )}
+        </div>
+        <div style={pptStyles.meta}>{slides} slides · PowerPoint Presentation{version && version > 1 ? ` · Revision ${version}` : ''}</div>
       </div>
       <a
         href={downloadUrl}
@@ -176,29 +199,87 @@ function SummaryCard({ filename, downloadUrl }) {
   );
 }
 
-// ── Source Side Panel ──
+// ── Source Side Panel with Citation Highlighting ──
 function SourcePanel({ source, onClose, apiUrl }) {
   if (!source) return null;
   const downloadHref = source.doc_id
     ? `${apiUrl}/api/agent/download/${source.doc_id}`
     : null;
+  const isPDF = source.document?.toLowerCase().endsWith('.pdf');
+  const pdfViewUrl = downloadHref && isPDF
+    ? `${downloadHref}#page=${source.page || 1}`
+    : null;
+
+  // Highlight matching keywords from excerpt in the displayed text
+  const highlightExcerpt = (text) => {
+    if (!text) return '';
+    // Find sentences/phrases to highlight (first 3 significant phrases)
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20).slice(0, 3);
+    let html = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    for (const sent of sentences) {
+      const escaped = sent.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (escaped.length > 15) {
+        html = html.replace(
+          new RegExp(`(${escaped.slice(0, 60)})`, 'gi'),
+          '<mark style="background:rgba(74,139,255,0.2);color:inherit;padding:1px 2px;border-radius:2px">$1</mark>'
+        );
+      }
+    }
+    return html;
+  };
+
   return (
     <div style={panelStyles.overlay} onClick={onClose}>
       <div style={panelStyles.panel} onClick={e => e.stopPropagation()}>
         <div style={panelStyles.header}>
           <div style={panelStyles.headerLeft}>
-            <FileText size={16} color="#4a8bff" />
+            <FileText size={16} color="var(--primary)" />
             <span style={panelStyles.filename}>{source.document}</span>
             {source.page && <span style={panelStyles.page}>Page {source.page}</span>}
           </div>
           <button onClick={onClose} style={panelStyles.closeBtn}><X size={16} /></button>
         </div>
-        <div style={panelStyles.excerpt}>{source.excerpt}</div>
+
+        {/* PDF Preview */}
+        {pdfViewUrl && (
+          <div style={{ flex: '0 0 auto', borderBottom: '1px solid var(--border)' }}>
+            <iframe
+              src={pdfViewUrl}
+              title="PDF Preview"
+              style={{
+                width: '100%', height: '300px', border: 'none',
+                background: 'var(--bg-surface)',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Highlighted Excerpt */}
+        <div style={panelStyles.excerptSection}>
+          <div style={panelStyles.excerptLabel}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Referenced Excerpt
+            </span>
+          </div>
+          <div
+            style={panelStyles.excerpt}
+            dangerouslySetInnerHTML={{ __html: highlightExcerpt(source.excerpt) }}
+          />
+        </div>
+
         {downloadHref && (
-          <a href={downloadHref} download style={panelStyles.downloadBtn} target="_blank" rel="noopener noreferrer">
-            <Download size={14} />
-            Download document
-          </a>
+          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+            <a href={downloadHref} download style={panelStyles.downloadBtn} target="_blank" rel="noopener noreferrer">
+              <Download size={14} />
+              Download full document
+            </a>
+            {isPDF && source.page && (
+              <a href={pdfViewUrl} target="_blank" rel="noopener noreferrer" style={{ ...panelStyles.downloadBtn, background: 'transparent', color: 'var(--primary)', border: '1px solid var(--primary)', marginTop: '6px' }}>
+                <ExternalLink size={14} />
+                Open at page {source.page}
+              </a>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -216,20 +297,41 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
+  const [bgTasks, setBgTasks] = useState([]); // background generation tasks
+
+  // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
+  const [pptHistory, setPptHistory] = useState({});
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
+  const activeSessionIdRef = useRef(activeSessionId);
 
   const token = getToken();
   const user = token ? (getUser() || decodeToken(token)) : null;
   const isSuperAdmin = user?.role === 'super_admin';
   const apiUrl = getApiUrl('');
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Keep activeSessionIdRef in sync
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  // Abort active stream when switching sessions (session isolation)
+  useEffect(() => {
+    return () => {
+      if (streamRef.current?.abort) {
+        streamRef.current.abort();
+      }
+      streamRef.current = null;
+    };
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -277,20 +379,47 @@ export default function Chat() {
 
     try {
       if (type === 'ppt') {
+        // Determine version from PPT history
+        const sessHistory = pptHistory[activeSessionIdRef.current];
+        const isRevision = sessHistory && sessHistory.topic?.toLowerCase() === topic?.toLowerCase();
+        const version = isRevision ? (sessHistory.version || 1) + 1 : 1;
+        const prevSlides = isRevision ? sessHistory.slidesJson : null;
+        const revisionPrompt = isRevision ? originalQuestion : null;
+
+        const requestBody = {
+          topic,
+          num_slides: num_slides || 10,
+          doc_ids,
+          version,
+          ...(revisionPrompt && { revision_prompt: revisionPrompt }),
+          ...(prevSlides && { previous_slides_json: prevSlides }),
+        };
+
         const res = await fetch(getApiUrl('/api/agent/generate/ppt'), {
           method: 'POST',
           headers: { ...authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic, num_slides: num_slides || 10, doc_ids }),
+          body: JSON.stringify(requestBody),
         });
         if (!res.ok) throw new Error(`PPT generation failed: ${res.status}`);
+
+        // Extract slides JSON from response header for version tracking
+        const slidesJson = res.headers.get('X-Slides-JSON') || null;
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
+        const versionLabel = version > 1 ? ` v${version}` : '';
         const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
-          || `AGRA_${topic.slice(0, 30)}.pptx`;
+          || `AGRA_${topic.slice(0, 30)}${version > 1 ? '_v' + version : ''}.pptx`;
+
+        // Update PPT history for this session
+        setPptHistory(prev => ({
+          ...prev,
+          [activeSessionIdRef.current]: { topic, version, slidesJson },
+        }));
+
         return {
           role: 'assistant',
-          content: `I've generated a PowerPoint presentation on **${topic}**.`,
-          ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10 },
+          content: `I've generated a PowerPoint presentation${versionLabel} on **${topic}**.${version > 1 ? '\n\n_This is a revised version based on your feedback._' : ''}`,
+          ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10, version },
           sources: [],
           timestamp: Date.now(),
         };
@@ -398,8 +527,9 @@ export default function Chat() {
     streamRef.current = connectStream(
       getApiUrl('/api/agent/chat'),
       { question, history, session_id: sessId },
-      // onToken
+      // onToken — guarded with session ID
       (data) => {
+        if (activeSessionIdRef.current !== sessId) return; // session isolation guard
         if (data.token) {
           accumulatedText += data.token;
           setMessages(prev => {
@@ -410,8 +540,9 @@ export default function Chat() {
           });
         }
       },
-      // onDone
+      // onDone — guarded with session ID
       async (data) => {
+        if (activeSessionIdRef.current !== sessId) return; // session isolation guard
         // Check for intent signal
         if (data.intent) {
           const intentType = data.intent;
@@ -490,8 +621,9 @@ export default function Chat() {
           return copy;
         });
       },
-      // onError
+      // onError — guarded
       (err) => {
+        if (activeSessionIdRef.current !== sessId) return; // session isolation guard
         setIsStreaming(false);
         setMessages(prev => {
           const copy = [...prev];
@@ -554,7 +686,7 @@ export default function Chat() {
       <aside style={{ ...styles.sidebar, width: sidebarCollapsed ? '60px' : '260px', minWidth: sidebarCollapsed ? '60px' : '260px' }}>
         <div style={styles.sidebarHeader}>
           <div style={styles.logoGroup}>
-            <div style={styles.logoIcon}><ShieldCheck size={20} color="#4a8bff" /></div>
+            <div style={styles.logoIcon}><ShieldCheck size={20} color="var(--primary)" /></div>
             {!sidebarCollapsed && (
               <div>
                 <div style={styles.logoText}>AGRA</div>
@@ -562,9 +694,14 @@ export default function Chat() {
               </div>
             )}
           </div>
-          <button onClick={() => setSidebarCollapsed(p => !p)} style={styles.collapseBtn} title="Toggle sidebar">
-            {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-          </button>
+          <div style={{ display: 'flex', gap: '2px' }}>
+            <button onClick={toggleTheme} style={styles.collapseBtn} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+            <button onClick={() => setSidebarCollapsed(p => !p)} style={styles.collapseBtn} title="Toggle sidebar">
+              {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            </button>
+          </div>
         </div>
 
         <button onClick={createNewChat} style={styles.newChatBtn} id="new-chat-btn">
@@ -605,6 +742,7 @@ export default function Chat() {
         <div style={styles.navSection}>
           <Link to="/upload" style={styles.navLink}><Upload size={15} />{!sidebarCollapsed && <span>Documents</span>}</Link>
           <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>Compliance</span>}</Link>
+          <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>Dashboard</span>}</a>
         </div>
 
         <div style={styles.sidebarFooter}>
@@ -625,7 +763,7 @@ export default function Chat() {
       <main style={styles.main}>
         {messages.length === 0 ? (
           <div style={styles.welcome}>
-            <div style={styles.welcomeIcon}><Sparkles size={36} color="#4a8bff" /></div>
+            <div style={styles.welcomeIcon}><Sparkles size={36} color="var(--primary)" /></div>
             <h1 style={styles.welcomeTitle}>AGRA Intelligence Agent</h1>
             <p style={styles.welcomeDesc}>
               Ask questions, generate presentations, create quizzes, or get summaries — all from your uploaded documents.
@@ -659,7 +797,7 @@ export default function Chat() {
                 }}
               >
                 {msg.role === 'assistant' && (
-                  <div style={styles.aiAvatar}><Bot size={15} color="#4a8bff" /></div>
+                  <div style={styles.aiAvatar}><Bot size={15} color="var(--primary)" /></div>
                 )}
                 <div style={{
                   ...styles.bubble,
@@ -690,6 +828,7 @@ export default function Chat() {
                           slides={msg.ppt.slides}
                           downloadUrl={msg.ppt.downloadUrl}
                           topic={msg.ppt.topic}
+                          version={msg.ppt.version}
                         />
                       )}
 
@@ -725,6 +864,10 @@ export default function Chat() {
                     </>
                   ) : (
                     <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                  )}
+                  {/* Timestamp */}
+                  {msg.timestamp && (
+                    <div style={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
                   )}
                 </div>
               </div>
@@ -788,11 +931,11 @@ const styles = {
   layout: { display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg-page)' },
 
   /* Sidebar */
-  sidebar: { display: 'flex', flexDirection: 'column', background: '#0a0e1a', borderRight: '1px solid var(--border)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden' },
+  sidebar: { display: 'flex', flexDirection: 'column', background: 'var(--sidebar-bg)', borderRight: '1px solid var(--sidebar-border)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden' },
   sidebarHeader: { padding: '14px 12px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   logoGroup: { display: 'flex', alignItems: 'center', gap: '9px' },
   logoIcon: { width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: 'rgba(74,139,255,0.12)', flexShrink: 0 },
-  logoText: { fontSize: '15px', fontWeight: 800, color: '#fff', letterSpacing: '1.5px' },
+  logoText: { fontSize: '15px', fontWeight: 800, color: 'var(--text-heading)', letterSpacing: '1.5px' },
   logoSub: { fontSize: '9px', color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '0.3px' },
   collapseBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex' },
   newChatBtn: { display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 10px 6px', padding: '9px 12px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, border: 'none', justifyContent: 'center', cursor: 'pointer' },
@@ -815,7 +958,7 @@ const styles = {
   /* Welcome */
   welcome: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' },
   welcomeIcon: { width: 72, height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.08)', border: '1px solid rgba(74,139,255,0.2)', marginBottom: '18px' },
-  welcomeTitle: { fontSize: '26px', fontWeight: 700, color: '#fff', marginBottom: '10px', background: 'linear-gradient(135deg, #fff, #4a8bff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  welcomeTitle: { fontSize: '26px', fontWeight: 700, color: 'var(--text-heading)', marginBottom: '10px', background: 'linear-gradient(135deg, var(--text-heading), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   welcomeDesc: { fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '480px', lineHeight: '1.7', marginBottom: '32px' },
   suggestionsGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '10px', maxWidth: '560px', width: '100%' },
   suggestionCard: { padding: '13px 15px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'left', cursor: 'pointer', lineHeight: '1.5', transition: 'border-color 0.15s, background 0.15s', display: 'flex', alignItems: 'flex-start', gap: '8px' },
@@ -826,9 +969,10 @@ const styles = {
   msgRow: { display: 'flex', gap: '10px', marginBottom: '14px', alignItems: 'flex-start' },
   aiAvatar: { width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.12)', flexShrink: 0, marginTop: '4px' },
   bubble: { maxWidth: '76%', borderRadius: 'var(--radius-lg)', padding: '11px 15px', fontSize: '14px', lineHeight: '1.65' },
-  userBubble: { background: '#1a3a7a', color: '#e4ecff', borderBottomRightRadius: '4px' },
-  aiBubble: { background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderBottomLeftRadius: '4px' },
+  userBubble: { background: 'var(--user-bubble-bg)', color: 'var(--user-bubble-color)', borderBottomRightRadius: '4px' },
+  aiBubble: { background: 'var(--ai-bubble-bg)', border: '1px solid var(--ai-bubble-border)', color: 'var(--text-primary)', borderBottomLeftRadius: '4px' },
   cursor: { display: 'inline-block', color: 'var(--primary)', animation: 'typingBlink 0.8s infinite', marginLeft: '2px', fontSize: '15px' },
+  timestamp: { fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '2px' },
 
   /* Perplexity Citation Pills */
   sourcePills: { display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border)' },
@@ -877,12 +1021,14 @@ const pptStyles = {
 /* ── Source side panel ── */
 const panelStyles = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', justifyContent: 'flex-end' },
-  panel: { width: '360px', maxWidth: '90vw', background: '#0d1220', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '0', animation: 'slideInRight 0.2s ease' },
+  panel: { width: '400px', maxWidth: '90vw', background: 'var(--bg-surface)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '0', animation: 'slideInRight 0.2s ease', overflow: 'hidden' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid var(--border)' },
   headerLeft: { display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 },
   filename: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   page: { padding: '2px 7px', background: 'rgba(74,139,255,0.15)', color: 'var(--primary)', borderRadius: '4px', fontSize: '11px', fontWeight: 600, flexShrink: 0 },
   closeBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', borderRadius: '6px', display: 'flex', flexShrink: 0 },
-  excerpt: { flex: 1, padding: '16px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7', overflowY: 'auto', whiteSpace: 'pre-wrap' },
-  downloadBtn: { display: 'flex', alignItems: 'center', gap: '7px', margin: '12px 16px 16px', padding: '10px 16px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, textDecoration: 'none', justifyContent: 'center', transition: 'opacity 0.15s' },
+  excerptSection: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  excerptLabel: { padding: '10px 16px 0', flexShrink: 0 },
+  excerpt: { flex: 1, padding: '10px 16px 16px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7', overflowY: 'auto', whiteSpace: 'pre-wrap' },
+  downloadBtn: { display: 'flex', alignItems: 'center', gap: '7px', padding: '10px 16px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, textDecoration: 'none', justifyContent: 'center', transition: 'opacity 0.15s' },
 };

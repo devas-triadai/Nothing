@@ -3,11 +3,12 @@
  * Drag-drop document manager with ingestion progress and document table.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Upload as UploadIcon, FileText, Trash2, ArrowLeft, CheckCircle2,
   AlertCircle, Clock, Loader2, File, Image, X, RefreshCw, HardDrive,
+  Search, Filter, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import api, { getApiUrl } from '../utils/api';
 import { getToken } from '../utils/auth';
@@ -25,8 +26,38 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(true);
   const [uploadQueue, setUploadQueue] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [docSearch, setDocSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey] = useState('filename');
+  const [sortDir, setSortDir] = useState('asc');
   const fileInputRef = useRef(null);
   const token = getToken();
+
+  // Sort handler
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  // Filtered + sorted documents
+  const filteredDocs = useMemo(() => {
+    let list = documents.filter(d => {
+      const q = docSearch.toLowerCase();
+      if (q && !d.filename?.toLowerCase().includes(q)) return false;
+      if (statusFilter !== 'all' && d.status !== statusFilter) return false;
+      return true;
+    });
+    list.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      av = (av || '').toString().toLowerCase();
+      bv = (bv || '').toString().toLowerCase();
+      return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    return list;
+  }, [documents, docSearch, statusFilter, sortKey, sortDir]);
 
   // ── Fetch documents ──
   const fetchDocuments = useCallback(async () => {
@@ -275,7 +306,24 @@ export default function UploadPage() {
             <HardDrive size={18} />
             Indexed Documents
           </h3>
-          <span style={styles.docCount}>{documents.length} document{documents.length !== 1 ? 's' : ''}</span>
+          <span style={styles.docCount}>{filteredDocs.length} of {documents.length} document{documents.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {/* Search + Filter Toolbar */}
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '200px', padding: '8px 12px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+            <Search size={14} color="var(--text-muted)" />
+            <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="Search documents…" style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: '13px', outline: 'none' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+            <Filter size={13} color="var(--text-muted)" />
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ border: 'none', background: 'transparent', color: 'var(--text-primary)', fontSize: '13px', outline: 'none', cursor: 'pointer' }}>
+              <option value="all">All Status</option>
+              <option value="indexed">Indexed</option>
+              <option value="processing">Processing</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
         </div>
 
         <div style={styles.tableContainer}>
@@ -284,22 +332,42 @@ export default function UploadPage() {
               <Loader2 size={28} style={{ animation: 'spin 1s linear infinite' }} color="var(--primary)" />
               <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Loading documents...</span>
             </div>
-          ) : documents.length === 0 ? (
+          ) : filteredDocs.length === 0 ? (
             <div style={styles.emptyBox}>
               <FileText size={32} style={{ opacity: 0.2 }} />
-              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No documents uploaded yet</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{documents.length === 0 ? 'No documents uploaded yet' : 'No documents match your filters'}</span>
             </div>
           ) : (
             <table style={styles.table}>
               <thead>
                 <tr style={styles.tableHeadRow}>
-                  {['File', 'Type', 'Chunks', 'Pages', 'Status', ''].map(h => (
-                    <th key={h} style={styles.th}>{h}</th>
+                  {[
+                    { key: 'filename', label: 'File' },
+                    { key: 'type', label: 'Type' },
+                    { key: 'chunks', label: 'Chunks' },
+                    { key: 'page_count', label: 'Pages' },
+                    { key: 'status', label: 'Status' },
+                    { key: '_del', label: '' },
+                  ].map(col => (
+                    <th
+                      key={col.key}
+                      onClick={col.key !== '_del' ? () => handleSort(col.key) : undefined}
+                      style={{ ...styles.th, cursor: col.key !== '_del' ? 'pointer' : 'default', userSelect: 'none' }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        {col.label}
+                        {col.key !== '_del' && (
+                          sortKey === col.key
+                            ? (sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />)
+                            : <ChevronUp size={11} style={{ opacity: 0.2 }} />
+                        )}
+                      </span>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {documents.map((doc) => {
+                {filteredDocs.map((doc) => {
                   const ext = doc.filename?.split('.').pop()?.toUpperCase() || '—';
                   const statusInfo = STATUS_MAP[doc.status] || STATUS_MAP.indexed;
                   const StatusIcon = statusInfo.icon;
@@ -388,7 +456,7 @@ const styles = {
   title: {
     fontSize: '22px',
     fontWeight: 700,
-    color: '#fff',
+    color: 'var(--text-heading)',
     margin: 0,
   },
   subtitle: {
@@ -551,7 +619,7 @@ const styles = {
     borderCollapse: 'collapse',
   },
   tableHeadRow: {
-    background: '#0d1528',
+    background: 'var(--bg-surface)',
   },
   th: {
     textAlign: 'left',

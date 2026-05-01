@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { NavLink, useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../App';
 import auth from '../utils/auth';
+import { useTheme } from '../utils/ThemeContext';
 import {
   LayoutDashboard, Users, BarChart3, ScrollText,
   FileText, Bot, LogOut, Menu, X, Anchor, Shield,
-  Settings, ClipboardList
+  Settings, ClipboardList, Sun, Moon
 } from 'lucide-react';
 
 const navItems = [
@@ -23,6 +24,7 @@ export default function Layout() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { theme, toggleTheme } = useTheme();
 
   const handleLogout = async () => {
     await auth.logout();
@@ -31,12 +33,12 @@ export default function Layout() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0b1020', color: '#fff' }}>
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', color: 'var(--text-primary)' }}>
       {/* Sidebar */}
       <aside style={{
         width: sidebarOpen ? 260 : 80,
-        background: 'rgba(10, 15, 30, 0.95)',
-        borderRight: '1px solid rgba(70, 110, 255, 0.2)',
+        background: 'var(--sidebar-bg)',
+        borderRight: '1px solid var(--sidebar-border)',
         display: 'flex',
         flexDirection: 'column',
         transition: 'all 0.3s ease'
@@ -51,8 +53,8 @@ export default function Layout() {
           </div>
           {sidebarOpen && (
             <div>
-              <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '0.05em' }}>AGRA</div>
-              <div style={{ fontSize: 10, color: '#7ab4ff', fontWeight: 600 }}>SUPER ADMIN</div>
+              <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '0.05em', color: 'var(--text-heading)' }}>AGRA</div>
+              <div style={{ fontSize: 10, color: 'var(--accent-blue-light)', fontWeight: 600 }}>SUPER ADMIN</div>
             </div>
           )}
         </div>
@@ -70,11 +72,11 @@ export default function Layout() {
                 borderRadius: 8,
                 textDecoration: 'none',
                 marginBottom: 2,
-                background: isActive ? 'rgba(36, 99, 255, 0.15)' : 'transparent',
-                color: isActive ? '#7ab4ff' : '#7a90b8',
+                background: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
+                color: isActive ? 'var(--sidebar-active-color)' : 'var(--sidebar-text)',
                 fontWeight: isActive ? 600 : 400,
                 fontSize: 14,
-                borderLeft: isActive ? '3px solid #2463ff' : '3px solid transparent',
+                borderLeft: isActive ? '3px solid var(--accent-blue)' : '3px solid transparent',
                 transition: 'all 0.2s'
               })}
             >
@@ -84,7 +86,7 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
           <button
             onClick={handleLogout}
             style={{
@@ -104,17 +106,30 @@ export default function Layout() {
       <main style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
         <header style={{
           height: 64, display: 'flex', alignItems: 'center', padding: '0 24px',
-          background: 'rgba(10, 15, 30, 0.5)', borderBottom: '1px solid rgba(255,255,255,0.05)'
+          background: 'var(--header-bg)', borderBottom: '1px solid var(--header-border)'
         }}>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            style={{ background: 'none', border: 'none', color: '#7a90b8', cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', color: 'var(--sidebar-text)', cursor: 'pointer' }}
           >
             {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
           <div style={{ flex: 1 }}></div>
-          <div style={{ fontSize: 13, color: '#7a90b8' }}>
-            Welcome, <span style={{ color: '#fff', fontWeight: 600 }}>{user?.username || 'Admin'}</span>
+          <button
+            onClick={toggleTheme}
+            style={{
+              background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)',
+              cursor: 'pointer', padding: '6px 10px', borderRadius: 8, display: 'flex',
+              alignItems: 'center', gap: 6, fontSize: 13, marginRight: 16,
+              transition: 'all 0.2s'
+            }}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            {theme === 'dark' ? 'Light' : 'Dark'}
+          </button>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            Welcome, <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{user?.username || 'Admin'}</span>
           </div>
         </header>
         <div style={{ padding: 0 }}>

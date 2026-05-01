@@ -1,12 +1,87 @@
 /* ═════════════════════════════════════════════════════════════
    AGRA Agent UI — Design Tokens & Global Styles
-   Matches the admin dashboard color system exactly.
+   Dual-theme system: Light (default) + Dark.
+   Toggle via data-theme="dark" on <html>.
    ═════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* ── Light Theme (Default) ── */
 :root {
+  color-scheme: light;
+
   /* ── Core Palette ── */
+  --bg-page:       #f5f7fb;
+  --bg-card:       #ffffff;
+  --bg-card-hover: #f0f3f9;
+  --bg-surface:    #f8f9fc;
+  --bg-input:      #f0f2f7;
+
+  --border:        #e2e6ef;
+  --border-light:  #d0d6e3;
+  --border-focus:  #4a8bff;
+
+  --primary:       #4a8bff;
+  --primary-hover: #3a7af0;
+  --primary-glow:  rgba(74, 139, 255, 0.15);
+  --primary-dim:   rgba(74, 139, 255, 0.06);
+
+  --accent-green:  #16a34a;
+  --accent-red:    #dc2626;
+  --accent-amber:  #d97706;
+  --accent-grey:   #6b7a94;
+
+  /* ── Text ── */
+  --text-primary:   #1a1f2e;
+  --text-secondary: #4b5563;
+  --text-muted:     #9ca3af;
+  --text-inverse:   #ffffff;
+  --text-heading:   #0f172a;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ── Spacing ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 24px rgba(74, 139, 255, 0.08);
+
+  /* ── Transitions ── */
+  --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Sidebar ── */
+  --sidebar-bg:    #ffffff;
+  --sidebar-border: #e5e7eb;
+
+  /* ── Chat Bubbles ── */
+  --user-bubble-bg:    #4a8bff;
+  --user-bubble-color: #ffffff;
+  --ai-bubble-bg:      #f8f9fc;
+  --ai-bubble-border:  #e2e6ef;
+
+  /* ── Code ── */
+  --code-bg:       rgba(74, 139, 255, 0.08);
+  --code-color:    #3b6ce7;
+  --pre-bg:        #f1f3f8;
+
+  /* ── Scrollbar ── */
+  --scrollbar-thumb: #d0d6e3;
+  --scrollbar-hover: #b0b8ca;
+}
+
+/* ── Dark Theme ── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
   --bg-page:       #0b1020;
   --bg-card:       #111a2e;
   --bg-card-hover: #162038;
@@ -27,31 +102,31 @@
   --accent-amber:  #f0b429;
   --accent-grey:   #8899bb;
 
-  /* ── Text ── */
   --text-primary:   #e0e6f0;
   --text-secondary: #8899bb;
   --text-muted:     #556688;
   --text-inverse:   #0b1020;
+  --text-heading:   #ffffff;
 
-  /* ── Typography ── */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-
-  /* ── Spacing ── */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-
-  /* ── Shadows ── */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45);
   --shadow-glow: 0 0 24px rgba(74, 139, 255, 0.12);
 
-  /* ── Transitions ── */
-  --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --sidebar-bg:    #0a0e1a;
+  --sidebar-border: #1e2d4d;
+
+  --user-bubble-bg:    #1a3a7a;
+  --user-bubble-color: #e4ecff;
+  --ai-bubble-bg:      #111a2e;
+  --ai-bubble-border:  #1e2d4d;
+
+  --code-bg:       rgba(74, 139, 255, 0.1);
+  --code-color:    #7eb8ff;
+  --pre-bg:        #0a0e1a;
+
+  --scrollbar-thumb: #1e2d4d;
+  --scrollbar-hover: #2a3f66;
 }
 
 /* ── Reset ── */
@@ -74,6 +149,7 @@ body {
   line-height: 1.6;
   min-height: 100vh;
   overflow-x: hidden;
+  transition: background var(--transition-slow), color var(--transition-slow);
 }
 
 #root {
@@ -97,18 +173,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e2d4d;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3f66;
+  background: var(--scrollbar-hover);
 }
 
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1e2d4d transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* ── Links ── */
@@ -211,24 +287,24 @@ input::placeholder, textarea::placeholder {
 .animate-pulse      { animation: pulse 1.5s infinite; }
 
 /* ── Markdown Rendered Content ── */
-.md-content h1 { font-size: 1.5em; font-weight: 700; margin: 16px 0 8px; color: var(--text-primary); }
-.md-content h2 { font-size: 1.3em; font-weight: 600; margin: 14px 0 6px; color: var(--text-primary); }
-.md-content h3 { font-size: 1.1em; font-weight: 600; margin: 12px 0 4px; color: var(--text-primary); }
+.md-content h1 { font-size: 1.5em; font-weight: 700; margin: 16px 0 8px; color: var(--text-heading); }
+.md-content h2 { font-size: 1.3em; font-weight: 600; margin: 14px 0 6px; color: var(--text-heading); }
+.md-content h3 { font-size: 1.1em; font-weight: 600; margin: 12px 0 4px; color: var(--text-heading); }
 .md-content p  { margin: 6px 0; line-height: 1.7; }
 .md-content ul, .md-content ol { padding-left: 20px; margin: 6px 0; }
 .md-content li { margin: 3px 0; line-height: 1.6; }
-.md-content strong { color: #fff; font-weight: 600; }
+.md-content strong { color: var(--text-heading); font-weight: 600; }
 .md-content em { font-style: italic; color: var(--text-secondary); }
 .md-content code {
   font-family: var(--font-mono);
   font-size: 0.88em;
-  background: rgba(74, 139, 255, 0.1);
-  color: #7eb8ff;
+  background: var(--code-bg);
+  color: var(--code-color);
   padding: 2px 6px;
   border-radius: 4px;
 }
 .md-content pre {
-  background: #0a0e1a;
+  background: var(--pre-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 14px;
@@ -289,16 +365,10 @@ input::placeholder, textarea::placeholder {
   transform: scale(1.2);
 }
 
-/* ── Source Panel slide-in ── */
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(24px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
 /* ── Nav link hover ── */
 a.nav-link:hover,
 a[href]:hover {
-  background: rgba(74, 139, 255, 0.06);
+  background: var(--primary-dim);
   color: var(--text-primary);
 }
 
@@ -314,3 +384,7 @@ button:hover[style*="border-radius: 20px"] {
   color: var(--text-primary) !important;
 }
 
+/* ── Theme transition for key elements ── */
+body, aside, main, header, .md-content, input, textarea, select {
+  transition: background var(--transition-slow), color var(--transition-slow), border-color var(--transition-slow);
+}

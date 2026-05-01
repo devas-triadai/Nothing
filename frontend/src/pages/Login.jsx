@@ -39,15 +39,15 @@ export default function Login() {
       minHeight: '100vh',
       display: 'grid',
       placeItems: 'center',
-      background: 'linear-gradient(135deg, #0b1020 0%, #111a2e 100%)',
-      color: '#fff',
+      background: 'var(--login-bg)',
+      color: 'var(--text-primary)',
       fontFamily: 'Inter, system-ui, sans-serif'
     }}>
       <form onSubmit={handleSubmit} style={{
         width: '100%',
         maxWidth: 420,
-        background: 'rgba(10,15,30,0.85)',
-        border: '1px solid rgba(70,110,255,0.25)',
+        background: 'var(--login-card-bg)',
+        border: '1px solid var(--login-card-border)',
         borderRadius: 18,
         padding: '36px 32px',
         boxShadow: '0 24px 64px rgba(0,0,0,0.45)',
@@ -65,17 +65,17 @@ export default function Login() {
             fontSize: 24,
             marginBottom: 12
           }}>🛡️</div>
-          <h1 style={{ margin: '0 0 6px', fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px' }}>
+          <h1 style={{ margin: '0 0 6px', fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px', color: 'var(--text-heading)' }}>
             AGRA
           </h1>
-          <p style={{ margin: 0, color: '#7a90b8', fontSize: 14 }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14 }}>
             Indian Coast Guard — Super Admin Access
           </p>
         </div>
 
         {/* Username */}
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#9fb0d0', fontWeight: 500 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
             Username
           </label>
           <input
@@ -86,9 +86,9 @@ export default function Login() {
               width: '100%',
               padding: '11px 14px',
               borderRadius: 10,
-              border: '1px solid #2b3b6b',
-              background: '#0d1526',
-              color: '#fff',
+              border: '1px solid var(--login-input-border)',
+              background: 'var(--login-input-bg)',
+              color: 'var(--text-primary)',
               fontSize: 15,
               outline: 'none',
               boxSizing: 'border-box'
@@ -98,7 +98,7 @@ export default function Login() {
 
         {/* Password */}
         <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#9fb0d0', fontWeight: 500 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
             Password
           </label>
           <div style={{ position: 'relative' }}>
@@ -111,9 +111,9 @@ export default function Login() {
                 width: '100%',
                 padding: '11px 44px 11px 14px',
                 borderRadius: 10,
-                border: '1px solid #2b3b6b',
-                background: '#0d1526',
-                color: '#fff',
+                border: '1px solid var(--login-input-border)',
+                background: 'var(--login-input-bg)',
+                color: 'var(--text-primary)',
                 fontSize: 15,
                 outline: 'none',
                 boxSizing: 'border-box'
@@ -126,7 +126,7 @@ export default function Login() {
                 position: 'absolute', right: 12, top: '50%',
                 transform: 'translateY(-50%)',
                 background: 'none', border: 'none',
-                color: '#7a90b8', cursor: 'pointer', padding: 0
+                color: 'var(--text-secondary)', cursor: 'pointer', padding: 0
               }}
             >
               {showPwd ? '🙈' : '👁️'}
@@ -171,7 +171,7 @@ export default function Login() {
           {loading ? 'Signing in...' : 'Access Dashboard'}
         </button>
 
-        <p style={{ textAlign: 'center', marginTop: 20, color: '#4a5e8a', fontSize: 12 }}>
+        <p style={{ textAlign: 'center', marginTop: 20, color: 'var(--text-muted)', fontSize: 12 }}>
           Restricted access · Authorised personnel only
         </p>
       </form>

@@ -154,8 +154,8 @@ export default function Users() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
         <div>
-          <h1 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: '#fff' }}>User Management</h1>
-          <p style={{ color: '#7a90b8', margin: '4px 0 0', fontSize: '13px' }}>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: 'var(--text-heading)' }}>User Management</h1>
+          <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0', fontSize: '13px' }}>
             {total} user{total !== 1 ? 's' : ''} in the system
           </p>
         </div>
@@ -173,13 +173,13 @@ export default function Users() {
       <div style={cardStyle}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '12px', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#4a5e8a' }} />
+            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               type="text"
               placeholder="Search by name, email or username…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px 9px 38px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', color: '#fff', fontSize: '13px', outline: 'none' }}
+              style={{ width: '100%', padding: '9px 12px 9px 38px', background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', color: 'var(--text-heading)', fontSize: '13px', outline: 'none' }}
             />
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function Users() {
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 {['User', 'Role', 'Department', 'Status', 'Last Login', 'Actions'].map(h => (
-                  <th key={h} style={{ padding: '12px 18px', color: '#4a5e8a', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{h}</th>
+                  <th key={h} style={{ padding: '12px 18px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -197,7 +197,7 @@ export default function Users() {
               {loading ? (
                 <tr><td colSpan="6" style={{ padding: '48px', textAlign: 'center' }}><Spinner size={28} /></td></tr>
               ) : filteredUsers.length === 0 ? (
-                <tr><td colSpan="6" style={{ padding: '48px', textAlign: 'center', color: '#7a90b8' }}>No users found.</td></tr>
+                <tr><td colSpan="6" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>No users found.</td></tr>
               ) : (
                 filteredUsers.map((user) => {
                   const rc = roleColors[user.role] || roleColors.viewer
@@ -209,12 +209,12 @@ export default function Users() {
                     >
                       <td style={{ padding: '14px 18px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg,#1e6bff,#00c8e0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', color: '#fff', flexShrink: 0 }}>
+                          <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg,#1e6bff,#00c8e0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', color: 'var(--text-heading)', flexShrink: 0 }}>
                             {(user.full_name || user.username || 'U')[0].toUpperCase()}
                           </div>
                           <div>
-                            <div style={{ fontWeight: 600, color: '#fff', fontSize: '13px' }}>{user.full_name || user.username}</div>
-                            <div style={{ fontSize: '11px', color: '#4a5e8a' }}>@{user.username} · {user.email}</div>
+                            <div style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '13px' }}>{user.full_name || user.username}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{user.username} · {user.email}</div>
                           </div>
                         </div>
                       </td>
@@ -223,9 +223,9 @@ export default function Users() {
                           {rc.label}
                         </span>
                       </td>
-                      <td style={{ padding: '14px 18px', color: '#7a90b8', fontSize: '12px' }}>
+                      <td style={{ padding: '14px 18px', color: 'var(--text-secondary)', fontSize: '12px' }}>
                         {user.department || <span style={{ color: '#334155' }}>—</span>}
-                        {user.rank && <div style={{ fontSize: '11px', color: '#4a5e8a' }}>{user.rank}</div>}
+                        {user.rank && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{user.rank}</div>}
                       </td>
                       <td style={{ padding: '14px 18px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -235,7 +235,7 @@ export default function Users() {
                           }
                         </div>
                       </td>
-                      <td style={{ padding: '14px 18px', color: '#7a90b8', fontSize: '12px' }}>
+                      <td style={{ padding: '14px 18px', color: 'var(--text-secondary)', fontSize: '12px' }}>
                         {user.last_login ? new Date(user.last_login).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Never'}
                       </td>
                       <td style={{ padding: '14px 18px' }}>
@@ -271,7 +271,7 @@ export default function Users() {
       {showAddModal && (
         <div style={modalOverlay}>
           <div style={modalBox}>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: '0 0 20px' }}>Add New User</h2>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 20px' }}>Add New User</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[['Username *', 'username', 'text'], ['Email *', 'email', 'email'], ['Full Name *', 'full_name', 'text'], ['Password *', 'password', 'password'], ['Service Number', 'service_number', 'text'], ['Department', 'department', 'text'], ['Rank', 'rank', 'text']].map(([label, key, type]) => (
                 <input key={key} type={type} placeholder={label} value={newUser[key] || ''}
@@ -296,7 +296,7 @@ export default function Users() {
       {editUser && (
         <div style={modalOverlay}>
           <div style={modalBox}>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: '0 0 20px' }}>Edit User — @{editUser.username}</h2>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 20px' }}>Edit User — @{editUser.username}</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[['Full Name', 'full_name', 'text'], ['Email', 'email', 'email'], ['Department', 'department', 'text'], ['Rank', 'rank', 'text']].map(([label, key, type]) => (
                 <input key={key} type={type} placeholder={label} value={editUser[key] || ''}
@@ -344,12 +344,12 @@ const modalBox = {
 const inputStyle = {
   padding: '10px 14px', background: 'rgba(255,255,255,0.04)',
   border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
-  color: '#fff', fontSize: '13px', outline: 'none', width: '100%',
+  color: 'var(--text-heading)', fontSize: '13px', outline: 'none', width: '100%',
 }
 const btnStyles = {
   primary: {
     display: 'flex', alignItems: 'center', gap: '7px',
-    padding: '9px 16px', background: '#2463ff', color: '#fff',
+    padding: '9px 16px', background: 'var(--accent-blue)', color: 'var(--text-heading)',
     border: 'none', borderRadius: '9px', fontWeight: 600,
     cursor: 'pointer', fontSize: '13px',
   },
@@ -362,7 +362,7 @@ const btnStyles = {
   iconBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '30px', height: '30px', background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.06)', borderRadius: '7px',
-    color: '#7a90b8', cursor: 'pointer', transition: 'all 0.15s',
+    border: '1px solid var(--card-border)', borderRadius: '7px',
+    color: 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.15s',
   },
 }

@@ -59,8 +59,8 @@ export default function Dashboard() {
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: '32px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: '#fff' }}>Dashboard Overview</h1>
-        <p style={{ color: '#7a90b8', margin: '4px 0 0', fontSize: '14px' }}>System status and recent activity</p>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'var(--text-heading)' }}>Dashboard Overview</h1>
+        <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0', fontSize: '14px' }}>System status and recent activity</p>
       </div>
 
       <div style={{
@@ -71,8 +71,8 @@ export default function Dashboard() {
       }}>
         {statCards.map((card, i) => (
           <div key={i} style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--card-border)',
             borderRadius: '16px',
             padding: '24px',
             display: 'flex',
@@ -92,22 +92,22 @@ export default function Dashboard() {
               <card.icon size={24} />
             </div>
             <div>
-              <div style={{ fontSize: '28px', fontWeight: 700, color: '#fff' }}>{card.value}</div>
-              <div style={{ fontSize: '14px', color: '#7a90b8' }}>{card.label}</div>
+              <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text-heading)' }}>{card.value}</div>
+              <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{card.label}</div>
             </div>
           </div>
         ))}
       </div>
 
       <div style={{
-        background: 'rgba(255, 255, 255, 0.02)',
-        border: '1px solid rgba(255, 255, 255, 0.05)',
+        background: 'var(--card-bg)',
+        border: '1px solid var(--card-border)',
         borderRadius: '16px',
         padding: '24px'
       }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 20px', color: '#fff' }}>Recent Activity</h2>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 20px', color: 'var(--text-heading)' }}>Recent Activity</h2>
         {recentActivity.length === 0 ? (
-          <p style={{ color: '#4a5e8a', fontSize: '14px' }}>No recent activity to display.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No recent activity to display.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {recentActivity.map((log, i) => (
@@ -117,14 +117,14 @@ export default function Dashboard() {
                 alignItems: 'center',
                 padding: '12px 16px',
                 borderRadius: '10px',
-                background: 'rgba(255, 255, 255, 0.02)',
-                border: '1px solid rgba(255, 255, 255, 0.03)'
+                background: 'var(--card-hover)',
+                border: '1px solid var(--card-border)'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#2463ff' }}></div>
-                  <span style={{ color: '#c8d8f0', fontSize: '14px' }}>{log.action || log.event || 'System Event'}</span>
+                  <span style={{ color: 'var(--text-primary)', fontSize: '14px' }}>{log.action || log.event || 'System Event'}</span>
                 </div>
-                <span style={{ color: '#4a5e8a', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                   {log.created_at ? new Date(log.created_at).toLocaleString() : ''}
                 </span>
               </div>

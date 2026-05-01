@@ -1,10 +1,66 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* ═════════════════════════════════════════════════════════════
+   AGRA Super Admin — Design Tokens & Global Styles
+   Dual-theme: Light (default) + Dark.
+   Toggle via data-theme="dark" on <html>.
+   ═════════════════════════════════════════════════════════════ */
+
+/* ── Light Theme (Default) ── */
+:root {
+  color-scheme: light;
+
+  --bg: #f5f7fb;
+  --bg-secondary: #eef1f7;
+  --surface: #ffffff;
+  --surface-hover: #f0f3f9;
+  --border: #e2e6ef;
+  --border-light: #d0d6e3;
+  --accent-blue: #1e6bff;
+  --accent-blue-light: #3d8bff;
+  --accent-cyan: #0891b2;
+  --accent-gold: #d97706;
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-orange: #ea580c;
+  --text-primary: #1a1f2e;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --text-heading: #0f172a;
+  --sidebar-width: 240px;
+  --header-height: 56px;
+
+  /* Sidebar */
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e5e7eb;
+  --sidebar-active-bg: rgba(30, 107, 255, 0.08);
+  --sidebar-active-color: #1e6bff;
+  --sidebar-text: #4b5563;
+  --sidebar-hover: #f0f3f9;
+
+  /* Header */
+  --header-bg: rgba(255, 255, 255, 0.85);
+  --header-border: #e5e7eb;
+
+  /* Cards */
+  --card-bg: #ffffff;
+  --card-border: #e2e6ef;
+  --card-hover: #f8f9fc;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* Login */
+  --login-bg: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 50%, #f0f5ff 100%);
+  --login-card-bg: rgba(255, 255, 255, 0.92);
+  --login-card-border: rgba(30, 107, 255, 0.15);
+  --login-input-bg: #f0f2f7;
+  --login-input-border: #d0d6e3;
 }
 
-:root {
+/* ── Dark Theme ── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
   --bg: #0a0e1a;
   --bg-secondary: #0f1528;
   --surface: #141c35;
@@ -21,8 +77,36 @@
   --text-primary: #e8edf8;
   --text-secondary: #8899bb;
   --text-muted: #4a5d80;
-  --sidebar-width: 240px;
-  --header-height: 56px;
+  --text-heading: #ffffff;
+
+  --sidebar-bg: rgba(10, 15, 30, 0.95);
+  --sidebar-border: rgba(70, 110, 255, 0.2);
+  --sidebar-active-bg: rgba(36, 99, 255, 0.15);
+  --sidebar-active-color: #7ab4ff;
+  --sidebar-text: #7a90b8;
+  --sidebar-hover: rgba(36, 99, 255, 0.08);
+
+  --header-bg: rgba(10, 15, 30, 0.5);
+  --header-border: rgba(255, 255, 255, 0.05);
+
+  --card-bg: rgba(255, 255, 255, 0.02);
+  --card-border: rgba(255, 255, 255, 0.05);
+  --card-hover: rgba(255, 255, 255, 0.04);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  --login-bg: linear-gradient(135deg, #0b1020 0%, #111a2e 100%);
+  --login-card-bg: rgba(10, 15, 30, 0.85);
+  --login-card-border: rgba(70, 110, 255, 0.25);
+  --login-input-bg: #0d1526;
+  --login-input-border: #2b3b6b;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 body {
@@ -32,6 +116,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 #root {

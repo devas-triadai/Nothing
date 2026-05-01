@@ -81,16 +81,16 @@ export default function Documents() {
         marginBottom: '32px' 
       }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: '#fff' }}>Document Knowledge Base</h1>
-          <p style={{ color: '#7a90b8', margin: '4px 0 0', fontSize: '14px' }}>Manage files used for RAG and agent training</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'var(--text-heading)' }}>Document Knowledge Base</h1>
+          <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0', fontSize: '14px' }}>Manage files used for RAG and agent training</p>
         </div>
         <button onClick={() => setShowUploadModal(true)} style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
           padding: '10px 18px',
-          background: '#2463ff',
-          color: '#fff',
+          background: 'var(--accent-blue)',
+          color: 'var(--text-heading)',
           border: 'none',
           borderRadius: '10px',
           fontWeight: 600,
@@ -103,14 +103,14 @@ export default function Documents() {
       </div>
 
       <div style={{
-        background: 'rgba(255, 255, 255, 0.02)',
-        border: '1px solid rgba(255, 255, 255, 0.05)',
+        background: 'var(--card-bg)',
+        border: '1px solid var(--card-border)',
         borderRadius: '16px',
         overflow: 'hidden'
       }}>
         <div style={{
           padding: '20px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          borderBottom: '1px solid var(--border)',
           display: 'flex',
           gap: '16px'
         }}>
@@ -120,7 +120,7 @@ export default function Documents() {
               left: '14px', 
               top: '50%', 
               transform: 'translateY(-50%)', 
-              color: '#4a5e8a' 
+              color: 'var(--text-muted)' 
             }} />
             <input
               type="text"
@@ -130,10 +130,10 @@ export default function Documents() {
               style={{
                 width: '100%',
                 padding: '10px 14px 10px 42px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
+                background: 'var(--card-bg)',
+                border: '1px solid var(--card-border)',
                 borderRadius: '8px',
-                color: '#fff',
+                color: 'var(--text-heading)',
                 fontSize: '14px',
                 outline: 'none'
               }}
@@ -144,9 +144,9 @@ export default function Documents() {
             alignItems: 'center',
             gap: '8px',
             padding: '10px 16px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            color: '#7a90b8',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
+            background: 'var(--card-bg)',
+            color: 'var(--text-secondary)',
+            border: '1px solid var(--card-border)',
             borderRadius: '8px',
             cursor: 'pointer'
           }}>
@@ -158,12 +158,12 @@ export default function Documents() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                <th style={{ padding: '16px 20px', color: '#4a5e8a', fontSize: '13px', fontWeight: 600 }}>FILENAME</th>
-                <th style={{ padding: '16px 20px', color: '#4a5e8a', fontSize: '13px', fontWeight: 600 }}>SIZE</th>
-                <th style={{ padding: '16px 20px', color: '#4a5e8a', fontSize: '13px', fontWeight: 600 }}>VERSION</th>
-                <th style={{ padding: '16px 20px', color: '#4a5e8a', fontSize: '13px', fontWeight: 600 }}>UPLOADED BY</th>
-                <th style={{ padding: '16px 20px', color: '#4a5e8a', fontSize: '13px', fontWeight: 600 }}></th>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>FILENAME</th>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>SIZE</th>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>VERSION</th>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>UPLOADED BY</th>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -173,7 +173,7 @@ export default function Documents() {
                 </tr>
               ) : filteredDocs.length === 0 ? (
                 <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: '#7a90b8' }}>No documents found.</td>
+                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>No documents found.</td>
                 </tr>
               ) : (
                 filteredDocs.map((doc, i) => (
@@ -193,12 +193,12 @@ export default function Documents() {
                           <FileText size={20} />
                         </div>
                         <div>
-                          <div style={{ fontWeight: 600, color: '#fff', fontSize: '14px' }}>{doc.filename}</div>
-                          <div style={{ fontSize: '12px', color: '#4a5e8a' }}>{doc.type || 'PDF'} • {new Date(doc.created_at).toLocaleDateString()}</div>
+                          <div style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '14px' }}>{doc.filename}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{doc.type || 'PDF'} • {new Date(doc.created_at).toLocaleDateString()}</div>
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding: '16px 20px', color: '#7a90b8', fontSize: '13px' }}>
+                    <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
                       {doc.size ? (doc.size / 1024 / 1024).toFixed(2) + ' MB' : '0.5 MB'}
                     </td>
                     <td style={{ padding: '16px 20px' }}>
@@ -206,21 +206,21 @@ export default function Documents() {
                         padding: '4px 8px', 
                         borderRadius: '4px', 
                         background: 'rgba(255, 255, 255, 0.05)', 
-                        color: '#c8d8f0',
+                        color: 'var(--text-primary)',
                         fontSize: '11px',
                         fontWeight: 600
                       }}>
                         v{doc.version || '1.0'}
                       </span>
                     </td>
-                    <td style={{ padding: '16px 20px', color: '#7a90b8', fontSize: '13px' }}>
+                    <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
                       {doc.uploaded_by || 'System'}
                     </td>
                     <td style={{ padding: '16px 20px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                        <button title="View" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Eye size={18} /></button>
-                        <button title="Download" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><Download size={18} /></button>
-                        <button title="History" style={{ background: 'none', border: 'none', color: '#4a5e8a', cursor: 'pointer' }}><History size={18} /></button>
+                        <button title="View" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Eye size={18} /></button>
+                        <button title="Download" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Download size={18} /></button>
+                        <button title="History" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><History size={18} /></button>
                         <button title="Delete" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
                       </div>
                     </td>
@@ -253,7 +253,7 @@ export default function Documents() {
             width: '90%',
             maxWidth: '500px'
           }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff', margin: '0 0 24px' }}>Upload Document</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 24px' }}>Upload Document</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{
                 padding: '24px',
@@ -263,7 +263,7 @@ export default function Documents() {
                 cursor: 'pointer'
               }} onClick={() => document.getElementById('fileInput').click()}>
                 <Upload size={32} style={{ color: '#7ab4ff', marginBottom: '12px' }} />
-                <p style={{ color: '#7a90b8', fontSize: '14px', margin: 0 }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '14px', margin: 0 }}>
                   {selectedFile ? selectedFile.name : 'Click to select file'}
                 </p>
                 <input
@@ -282,7 +282,7 @@ export default function Documents() {
                   background: 'rgba(255, 255, 255, 0.05)',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
-                  color: '#fff',
+                  color: 'var(--text-heading)',
                   fontSize: '14px',
                   outline: 'none'
                 }}
@@ -297,7 +297,7 @@ export default function Documents() {
                   background: 'rgba(255, 255, 255, 0.05)',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
-                  color: '#fff',
+                  color: 'var(--text-heading)',
                   fontSize: '14px',
                   outline: 'none',
                   resize: 'none'
@@ -312,7 +312,7 @@ export default function Documents() {
                   background: 'rgba(255, 255, 255, 0.05)',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
-                  color: '#fff',
+                  color: 'var(--text-heading)',
                   fontSize: '14px',
                   outline: 'none'
                 }}
@@ -323,8 +323,8 @@ export default function Documents() {
                   style={{
                     flex: 1,
                     padding: '12px',
-                    background: '#2463ff',
-                    color: '#fff',
+                    background: 'var(--accent-blue)',
+                    color: 'var(--text-heading)',
                     border: 'none',
                     borderRadius: '8px',
                     fontWeight: 600,
@@ -344,7 +344,7 @@ export default function Documents() {
                     flex: 1,
                     padding: '12px',
                     background: 'rgba(255, 255, 255, 0.1)',
-                    color: '#fff',
+                    color: 'var(--text-heading)',
                     border: 'none',
                     borderRadius: '8px',
                     fontWeight: 600,

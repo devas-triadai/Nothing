@@ -5,15 +5,17 @@ AGRA Phase 2 — Router: Content Generation (PPT, Summary, Quiz)
 import json
 import logging
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.utils.auth_check import get_current_user
+from api.utils.usage_logger import log_usage
 from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
 from api.rag.reranker import rerank
@@ -54,18 +56,29 @@ class PPTRequest(BaseModel):
     num_slides: int = Field(default=10, ge=3, le=25)
     doc_ids: List[str] = Field(default_factory=list)
     style_notes: Optional[str] = None
+    # Revision / versioning fields
+    revision_prompt: Optional[str] = Field(None, description="Instructions for revising an existing PPT")
+    previous_slides_json: Optional[str] = Field(None, description="JSON of previous slides to revise")
+    version: int = Field(default=1, ge=1, description="Version number (v1, v2, v3...)")
 
 
 @router.post("/generate/ppt")
 async def generate_ppt(
     body: PPTRequest,
     user: dict = Depends(get_current_user),
+    request: Request = None,
 ):
     """
     Generate a PowerPoint presentation from RAG context.
     Returns the .pptx file as a download.
     """
+    # Extract raw token for usage logging
+    auth_header_token = ""
+    if request:
+        auth_h = request.headers.get("authorization", "")
+        auth_header_token = auth_h.replace("Bearer ", "") if auth_h else ""
     store = get_store()
+    start_time = time.time()
 
     # Gather context from specified documents (or all)
     context_chunks = []
@@ -79,8 +92,24 @@ async def generate_ppt(
 
     context_text = "\n\n".join(c["text"][:500] for c in context_chunks[:15])
 
-    # Build prompt for slide structure
-    prompt = f"""Create a structured PowerPoint presentation with exactly {body.num_slides} slides about: {body.topic}
+    # Build prompt — revision mode vs new generation
+    if body.revision_prompt and body.previous_slides_json:
+        prompt = f"""You previously generated a PowerPoint presentation about: {body.topic}
+
+Here are the current slides (JSON):
+{body.previous_slides_json}
+
+The user wants the following changes (this will be version v{body.version}):
+{body.revision_prompt}
+
+Additional context from documents:
+{context_text}
+
+Return ONLY an updated JSON array of slide objects with the requested changes applied.
+Each slide must have: "title", "bullets" (list of 3-5 strings), "notes" (string).
+Return valid JSON only, no markdown formatting:"""
+    else:
+        prompt = f"""Create a structured PowerPoint presentation with exactly {body.num_slides} slides about: {body.topic}
 
 Based on this context:
 {context_text}
@@ -128,15 +157,27 @@ Return valid JSON only, no markdown formatting:"""
 
     # Build PPTX
     job_id = str(uuid.uuid4())
-    output_path = _OUTPUTS_DIR / f"{job_id}.pptx"
+    version_label = f"_v{body.version}" if body.version > 1 else ""
+    safe_topic = body.topic[:30].replace(' ', '_')
+    output_filename = f"{job_id}.pptx"
+    output_path = _OUTPUTS_DIR / output_filename
     build_pptx(slides_data, str(output_path), title=body.topic)
 
-    logger.info("Generated PPT: %s (%d slides)", output_path.name, len(slides_data))
+    logger.info("Generated PPT v%d: %s (%d slides)", body.version, output_path.name, len(slides_data))
+
+    elapsed_ms = (time.time() - start_time) * 1000
+    log_usage(
+        action_type="ppt",
+        module="generate",
+        token=auth_header_token,
+        response_time_ms=elapsed_ms,
+    )
 
     return FileResponse(
         path=str(output_path),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        filename=f"AGRA_{body.topic[:30].replace(' ', '_')}.pptx",
+        filename=f"AGRA_{safe_topic}{version_label}.pptx",
+        headers={"X-PPT-Version": str(body.version), "X-Slides-JSON": json.dumps(slides_data)},
     )
 
 
@@ -153,11 +194,17 @@ class SummaryRequest(BaseModel):
 async def generate_summary(
     body: SummaryRequest,
     user: dict = Depends(get_current_user),
+    request: Request = None,
 ):
     """
     Generate an executive or technical summary of a document.
     Returns SSE stream of the summary + a .docx download link.
     """
+    summary_start = time.time()
+    auth_tok = ""
+    if request:
+        ah = request.headers.get("authorization", "")
+        auth_tok = ah.replace("Bearer ", "") if ah else ""
     store = get_store()
     chunks = store.get_chunks_by_doc(body.doc_id)
 
@@ -210,6 +257,10 @@ Cite specific sections where relevant using [Page X] notation."""
 
         yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_summary.docx'})}\n\n"
 
+        # Log usage
+        elapsed_ms = (time.time() - summary_start) * 1000
+        log_usage(action_type="summary", module="generate", token=auth_tok, response_time_ms=elapsed_ms)
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -231,11 +282,17 @@ class QuizRequest(BaseModel):
 async def generate_quiz(
     body: QuizRequest,
     user: dict = Depends(get_current_user),
+    request: Request = None,
 ):
     """
     Generate a knowledge quiz from a document.
     Returns JSON quiz data + a .docx download link.
     """
+    quiz_start = time.time()
+    auth_tok = ""
+    if request:
+        ah = request.headers.get("authorization", "")
+        auth_tok = ah.replace("Bearer ", "") if ah else ""
     store = get_store()
     chunks = store.get_chunks_by_doc(body.doc_id)
 
@@ -322,6 +379,9 @@ Return ONLY valid JSON in this exact format:
         doc.add_paragraph("")
 
     doc.save(str(docx_path))
+
+    elapsed_ms = (time.time() - quiz_start) * 1000
+    log_usage(action_type="quiz", module="generate", token=auth_tok, response_time_ms=elapsed_ms)
 
     return {
         "quiz": quiz_data,
