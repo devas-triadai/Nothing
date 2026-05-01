@@ -22,10 +22,22 @@ function ProtectedRoute({ children }) {
       if (storedToken && storedToken !== 'null' && storedToken !== '') {
         setIsAuthenticated(true);
       } else {
-        window.location.href = getDashboardUrl('/login');
+        // Instead of redirecting immediately, set an error state so we can see what's going wrong
+        setIsAuthenticated('error');
       }
     }
   }, []);
+
+  if (isAuthenticated === 'error') {
+    return (
+      <div style={{ padding: 40, color: 'white' }}>
+        <h1>Authentication Error</h1>
+        <p>No valid token found. Cannot load Agent UI.</p>
+        <p>Current URL: {window.location.href}</p>
+        <button onClick={() => window.location.href = getDashboardUrl('/login')}>Go to Login</button>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return null;
