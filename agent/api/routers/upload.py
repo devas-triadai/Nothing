@@ -50,6 +50,14 @@ async def upload_document(
             detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(_ALLOWED_EXTENSIONS)}",
         )
 
+    # Check for duplicates by filename
+    existing_files = list(_UPLOADS_DIR.glob(f"*_{filename}"))
+    if existing_files:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Document '{filename}' has already been uploaded.",
+        )
+
     # Read and validate size
     content = await file.read()
     if len(content) > _MAX_FILE_SIZE:

@@ -27,14 +27,17 @@ def _get_paddle_ocr():
     """
     global _paddle_ocr
     if _paddle_ocr is None:
+        import os
+        # Disable oneDNN to prevent PIR runtime crash (ERR_HTTP2_PROTOCOL_ERROR)
+        os.environ["FLAGS_use_mkldnn"] = "0"
         from paddleocr import PaddleOCR
         try:
-            # PaddleOCR v3+ minimal API — GPU is auto-detected, show_log removed
-            _paddle_ocr = PaddleOCR(use_angle_cls=True, lang="en")
+            # PaddleOCR v3+ minimal API
+            _paddle_ocr = PaddleOCR(use_angle_cls=True, use_gpu=False, enable_mkldnn=False, lang="en")
         except TypeError as e:
             logger.warning("PaddleOCR init with use_angle_cls failed (%s), retrying bare init.", e)
             try:
-                _paddle_ocr = PaddleOCR(lang="en")
+                _paddle_ocr = PaddleOCR(use_gpu=False, enable_mkldnn=False, lang="en")
             except Exception as e2:
                 logger.error("PaddleOCR could not be initialised: %s", e2)
                 raise
