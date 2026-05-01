@@ -18,6 +18,7 @@ frontend/.vite/
 frontend/coverage/
 node_modules/
 dist/
+!agent/ui/dist/
 
 # Misc
 .DS_Store
