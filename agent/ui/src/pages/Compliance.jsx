@@ -17,6 +17,8 @@ const VERDICT_CONFIG = {
   Compliant:     { color: '#00c853', bg: 'rgba(0,200,83,0.10)',  icon: CheckCircle2,   label: 'Compliant' },
   'Non-Compliant': { color: '#ff4757', bg: 'rgba(255,71,87,0.10)', icon: XCircle,        label: 'Non-Compliant' },
   Partial:       { color: '#f0b429', bg: 'rgba(240,180,41,0.10)', icon: AlertTriangle,  label: 'Partial' },
+  Missing:       { color: '#9333ea', bg: 'rgba(147,51,234,0.10)', icon: HelpCircle,     label: 'Missing Requirement' },
+  Contradiction: { color: '#ef4444', bg: 'rgba(239,68,68,0.10)',  icon: AlertTriangle,  label: 'Contradiction' },
   Unverifiable:  { color: '#8899bb', bg: 'rgba(136,153,187,0.10)',icon: HelpCircle,     label: 'Unverifiable' },
 };
 
@@ -265,6 +267,14 @@ export default function CompliancePage() {
                 <div style={styles.summaryItem}>
                   <span style={{ color: '#f0b429', fontWeight: 700, fontSize: '20px' }}>{summary.partial}</span>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Partial</span>
+                </div>
+                <div style={styles.summaryItem}>
+                  <span style={{ color: '#9333ea', fontWeight: 700, fontSize: '20px' }}>{summary.missing || 0}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Missing</span>
+                </div>
+                <div style={styles.summaryItem}>
+                  <span style={{ color: '#ef4444', fontWeight: 700, fontSize: '20px' }}>{summary.contradiction || 0}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Contradiction</span>
                 </div>
                 <div style={styles.summaryItem}>
                   <span style={{ color: '#8899bb', fontWeight: 700, fontSize: '20px' }}>{summary.unverifiable}</span>

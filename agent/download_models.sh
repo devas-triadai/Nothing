@@ -73,7 +73,13 @@ $HF_CMD download \
     --include "google_gemma-4-31B-it-Q4_K_L.gguf" \
     --local-dir "${MODELS_DIR}/gemma4-31b-it"
 
-echo "✅ Gemma 4 31B-IT downloaded successfully."
+echo "  Downloading Multimodal Projector (mmproj) for VLM..."
+$HF_CMD download \
+    bartowski/google_gemma-4-31B-it-GGUF \
+    --include "mmproj-gemma-4-31b-f16.gguf" \
+    --local-dir "${MODELS_DIR}/gemma4-31b-it"
+
+echo "✅ Gemma 4 31B-IT and projector downloaded successfully."
 
 # ─────────────────────────────────────────────────────────────────
 # 2. BAAI/bge-m3 — Embedding Model
@@ -119,7 +125,8 @@ echo "║                   All models downloaded!                    ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  models/                                                    ║"
 echo "║  ├── gemma4-31b-it/                                         ║"
-echo "║  │   └── google_gemma-4-31B-it-Q4_K_L.gguf    (~20 GB)     ║"
+echo "║  │   ├── google_gemma-4-31B-it-Q4_K_L.gguf    (~20 GB)     ║"
+echo "║  │   └── mmproj-gemma-4-31b-f16.gguf           (~1 GB)      ║"
 echo "║  ├── bge-m3/                                                ║"
 echo "║  │   └── (sentence-transformers model files)   (~2.2 GB)    ║"
 echo "║  └── bge-reranker-v2-m3/                                    ║"

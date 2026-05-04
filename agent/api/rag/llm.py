@@ -44,6 +44,19 @@ def _find_gguf_path() -> str:
     )
 
 
+def _find_mmproj_path() -> Optional[str]:
+    """Locate the multimodal projector GGUF file if available."""
+    direct = _GEMMA_DIR / "mmproj-gemma-4-31b-f16.gguf"
+    if direct.exists():
+        return str(direct)
+        
+    matches = list(_GEMMA_DIR.rglob("mmproj*.gguf"))
+    if matches:
+        return str(matches[0])
+        
+    return None
+
+
 class _LLMSingleton:
     """Thread-safe singleton wrapping the llama-cpp-python Llama instance."""
 
@@ -62,6 +75,16 @@ class _LLMSingleton:
         if self._llm is not None:
             return
         from llama_cpp import Llama
+        
+        chat_handler = None
+        mmproj_path = _find_mmproj_path()
+        if mmproj_path:
+            logger.info("Found mmproj file at %s. Enabling VLM mode.", mmproj_path)
+            try:
+                from llama_cpp.llama_chat_format import Llava15ChatHandler
+                chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
+            except ImportError:
+                logger.warning("Could not import Llava15ChatHandler. VLM disabled.")
 
         gguf_path = _find_gguf_path()
         logger.info("Loading Gemma 4 31B-IT from %s …", gguf_path)
@@ -72,10 +95,12 @@ class _LLMSingleton:
             n_gpu_layers=_N_GPU_LAYERS,
             n_ctx=_N_CTX,
             verbose=False,
-            # Let llama.cpp use the Jinja2 chat template from GGUF metadata
-            chat_format=None,
+            # If chat_handler is provided, it intercepts and handles image inputs
+            chat_handler=chat_handler,
+            # Let llama.cpp use the Jinja2 chat template from GGUF metadata for standard text
+            chat_format="llava-1-5" if chat_handler else None,
         )
-        logger.info("Gemma 4 31B-IT loaded successfully.")
+        logger.info("Gemma 4 31B-IT loaded successfully (VLM Ready: %s).", bool(chat_handler))
 
     @property
     def llm(self):

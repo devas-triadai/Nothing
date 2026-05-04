@@ -10,36 +10,37 @@
 :root {
   color-scheme: light;
 
-  /* ── Core Palette ── */
-  --bg-page:       #f5f7fb;
+  /* ── Core Palette (ICG Military Grade) ── */
+  --bg-page:       #f4f6f8;
   --bg-card:       #ffffff;
-  --bg-card-hover: #f0f3f9;
-  --bg-surface:    #f8f9fc;
-  --bg-input:      #f0f2f7;
+  --bg-card-hover: #eef2f6;
+  --bg-surface:    #f8fafc;
+  --bg-input:      #ffffff;
 
-  --border:        #e2e6ef;
-  --border-light:  #d0d6e3;
-  --border-focus:  #4a8bff;
+  --border:        #cbd5e1;
+  --border-light:  #e2e8f0;
+  --border-focus:  #002244; /* Navy Blue focus */
 
-  --primary:       #4a8bff;
-  --primary-hover: #3a7af0;
-  --primary-glow:  rgba(74, 139, 255, 0.15);
-  --primary-dim:   rgba(74, 139, 255, 0.06);
+  --primary:       #002244; /* ICG Navy Blue */
+  --primary-hover: #003366;
+  --primary-glow:  rgba(0, 34, 68, 0.15);
+  --primary-dim:   rgba(0, 34, 68, 0.06);
 
   --accent-green:  #16a34a;
-  --accent-red:    #dc2626;
+  --accent-red:    #ff4500; /* Coast Guard Orange */
   --accent-amber:  #d97706;
-  --accent-grey:   #6b7a94;
+  --accent-grey:   #64748b;
+  --accent-gold:   #ffd700;
 
   /* ── Text ── */
-  --text-primary:   #1a1f2e;
-  --text-secondary: #4b5563;
-  --text-muted:     #9ca3af;
+  --text-primary:   #0f172a;
+  --text-secondary: #334155;
+  --text-muted:     #64748b;
   --text-inverse:   #ffffff;
-  --text-heading:   #0f172a;
+  --text-heading:   #002244;
 
   /* ── Typography ── */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-sans: 'Roboto', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* ── Spacing ── */
@@ -59,19 +60,20 @@
   --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
 
   /* ── Sidebar ── */
-  --sidebar-bg:    #ffffff;
-  --sidebar-border: #e5e7eb;
+  --sidebar-bg:    #002244;
+  --sidebar-border: #001f3f;
+  --sidebar-text:  #ffffff;
 
   /* ── Chat Bubbles ── */
-  --user-bubble-bg:    #4a8bff;
+  --user-bubble-bg:    #002244;
   --user-bubble-color: #ffffff;
-  --ai-bubble-bg:      #f8f9fc;
-  --ai-bubble-border:  #e2e6ef;
+  --ai-bubble-bg:      #f8fafc;
+  --ai-bubble-border:  #cbd5e1;
 
   /* ── Code ── */
-  --code-bg:       rgba(74, 139, 255, 0.08);
-  --code-color:    #3b6ce7;
-  --pre-bg:        #f1f3f8;
+  --code-bg:       rgba(0, 34, 68, 0.08);
+  --code-color:    #003366;
+  --pre-bg:        #f1f5f9;
 
   /* ── Scrollbar ── */
   --scrollbar-thumb: #d0d6e3;
@@ -82,47 +84,49 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg-page:       #0b1020;
-  --bg-card:       #111a2e;
-  --bg-card-hover: #162038;
-  --bg-surface:    #0e1528;
-  --bg-input:      #0d1225;
+  --bg-page:       #060c17;
+  --bg-card:       #0a1324;
+  --bg-card-hover: #0d1930;
+  --bg-surface:    #080f1d;
+  --bg-input:      #0a1324;
 
-  --border:        #1e2d4d;
-  --border-light:  #253559;
-  --border-focus:  #4a8bff;
+  --border:        #1e293b;
+  --border-light:  #334155;
+  --border-focus:  #ff4500;
 
-  --primary:       #4a8bff;
-  --primary-hover: #5e9aff;
-  --primary-glow:  rgba(74, 139, 255, 0.15);
-  --primary-dim:   rgba(74, 139, 255, 0.08);
+  --primary:       #002244; /* Maintain ICG Navy identity in dark mode */
+  --primary-hover: #003366;
+  --primary-glow:  rgba(255, 69, 0, 0.15); /* Orange glow */
+  --primary-dim:   rgba(0, 34, 68, 0.3);
 
-  --accent-green:  #00c853;
-  --accent-red:    #ff4757;
-  --accent-amber:  #f0b429;
-  --accent-grey:   #8899bb;
+  --accent-green:  #22c55e;
+  --accent-red:    #ff4500;
+  --accent-amber:  #f59e0b;
+  --accent-grey:   #94a3b8;
+  --accent-gold:   #ffd700;
 
-  --text-primary:   #e0e6f0;
-  --text-secondary: #8899bb;
-  --text-muted:     #556688;
-  --text-inverse:   #0b1020;
+  --text-primary:   #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted:     #64748b;
+  --text-inverse:   #ffffff;
   --text-heading:   #ffffff;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45);
-  --shadow-glow: 0 0 24px rgba(74, 139, 255, 0.12);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 24px rgba(255, 69, 0, 0.12);
 
-  --sidebar-bg:    #0a0e1a;
-  --sidebar-border: #1e2d4d;
+  --sidebar-bg:    #040a12;
+  --sidebar-border: #1e293b;
+  --sidebar-text:  #ffffff;
 
-  --user-bubble-bg:    #1a3a7a;
-  --user-bubble-color: #e4ecff;
-  --ai-bubble-bg:      #111a2e;
-  --ai-bubble-border:  #1e2d4d;
+  --user-bubble-bg:    #002244;
+  --user-bubble-color: #f8fafc;
+  --ai-bubble-bg:      #0a1324;
+  --ai-bubble-border:  #1e293b;
 
-  --code-bg:       rgba(74, 139, 255, 0.1);
-  --code-color:    #7eb8ff;
+  --code-bg:       rgba(0, 34, 68, 0.3);
+  --code-color:    #94a3b8;
   --pre-bg:        #0a0e1a;
 
   --scrollbar-thumb: #1e2d4d;

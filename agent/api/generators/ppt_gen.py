@@ -106,7 +106,7 @@ def _add_title_bar(slide, title: str, include_logo: bool = True):
         _add_logo(slide)
 
 
-def _add_footer(slide, text: str = "Indian Coast Guard | AGRA System | Confidential"):
+def _add_footer(slide, text: str = "AI-Generated Draft | Indian Coast Guard | AGRA System | Confidential"):
     """Add footer bar at the bottom."""
     txBox = slide.shapes.add_textbox(
         Inches(0.5), Inches(7.0), Inches(9.0), Inches(0.4),

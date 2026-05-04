@@ -100,15 +100,18 @@ APPLICABLE STANDARDS:
 {scope_note}
 
 For each relevant clause/requirement in the standard, evaluate the subject document's compliance.
+Critically:
+- If a requirement in the standard is completely absent in the subject document, mark the verdict as "Missing" (Missing Requirements Report).
+- If the subject document contains conflicting specifications between different sections (e.g. Doc A says 20 knots, Doc B says 18 knots), mark the verdict as "Contradiction" (Contradiction Detection).
 
 Return ONLY a valid JSON array of findings. Each finding must be:
 {{
   "clause": "Clause/section reference from the standard",
   "requirement": "What the standard requires",
-  "verdict": "Compliant" | "Non-Compliant" | "Partial" | "Unverifiable",
-  "finding": "Detailed explanation of the compliance status",
+  "verdict": "Compliant" | "Non-Compliant" | "Partial" | "Missing" | "Contradiction" | "Unverifiable",
+  "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing or contradictory.",
   "recommendation": "Specific action needed (if not fully compliant)",
-  "citation": "Relevant excerpt from the subject document"
+  "citation": "Relevant excerpt from the subject document, if any"
 }}
 
 Analyse at least 5-10 key clauses. Return valid JSON array only:"""
@@ -152,10 +155,12 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
         compliant = sum(1 for f in findings if f.get("verdict") == "Compliant")
         non_compliant = sum(1 for f in findings if f.get("verdict") == "Non-Compliant")
         partial = sum(1 for f in findings if f.get("verdict") == "Partial")
+        missing = sum(1 for f in findings if f.get("verdict") == "Missing")
+        contradiction = sum(1 for f in findings if f.get("verdict") == "Contradiction")
         unverifiable = sum(1 for f in findings if f.get("verdict") == "Unverifiable")
 
         doc.add_heading("Summary", level=2)
-        summary_table = doc.add_table(rows=5, cols=2)
+        summary_table = doc.add_table(rows=7, cols=2)
         summary_table.style = "Table Grid"
         cells = summary_table.rows[0].cells
         cells[0].text = "Total Clauses Checked"
@@ -170,6 +175,12 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
         cells[0].text = "Partial"
         cells[1].text = str(partial)
         cells = summary_table.rows[4].cells
+        cells[0].text = "Missing"
+        cells[1].text = str(missing)
+        cells = summary_table.rows[5].cells
+        cells[0].text = "Contradiction"
+        cells[1].text = str(contradiction)
+        cells = summary_table.rows[6].cells
         cells[0].text = "Unverifiable"
         cells[1].text = str(unverifiable)
 
@@ -187,7 +198,7 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
 
         doc.save(str(docx_path))
 
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'unverifiable': unverifiable}})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'missing': missing, 'contradiction': contradiction, 'unverifiable': unverifiable}})}\n\n"
 
         # Log usage
         elapsed_ms = (time.time() - compliance_start) * 1000

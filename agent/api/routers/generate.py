@@ -326,6 +326,16 @@ Cite specific sections where relevant using [Page X] notation."""
         doc = DocxDocument()
         doc.add_heading(f"{type_label}: {filename}", level=1)
         doc.add_paragraph("".join(collected_text))
+        
+        # Add Watermark (FR-GEN-006)
+        try:
+            section = doc.sections[0]
+            footer = section.footer
+            footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+            footer_para.text = "AI-Generated Draft - ICG AGRA"
+        except Exception as e:
+            logger.warning(f"Could not add watermark: {e}")
+
         doc.save(str(docx_path))
 
         yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_summary.docx'})}\n\n"
@@ -451,6 +461,15 @@ Return ONLY valid JSON in this exact format:
         doc.add_paragraph(f"   Model Answer: {q.get('model_answer', '')}")
         doc.add_paragraph("")
 
+    # Add Watermark (FR-GEN-006)
+    try:
+        section = doc.sections[0]
+        footer = section.footer
+        footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        footer_para.text = "AI-Generated Draft - ICG AGRA"
+    except Exception as e:
+        logger.warning(f"Could not add watermark: {e}")
+
     doc.save(str(docx_path))
 
     elapsed_ms = (time.time() - quiz_start) * 1000
@@ -460,3 +479,173 @@ Return ONLY valid JSON in this exact format:
         "quiz": quiz_data,
         "download_url": f"/api/agent/download/{job_id}_quiz.docx",
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  DRAFT SOTR GENERATOR (FR-GEN-003)
+# ═══════════════════════════════════════════════════════════════
+
+class DraftSOTRRequest(BaseModel):
+    doc_id: str
+    focus_area: Optional[str] = Field(None, description="Specific area to focus the SOTR on")
+
+
+@router.post("/generate/sotr")
+async def generate_draft_sotr(
+    body: DraftSOTRRequest,
+    user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """
+    Generate a Draft SOTR (Statement of Technical Requirements).
+    Returns SSE stream of the SOTR + a .docx download link.
+    """
+    sotr_start = time.time()
+    auth_tok = ""
+    if request:
+        ah = request.headers.get("authorization", "")
+        auth_tok = ah.replace("Bearer ", "") if ah else ""
+    
+    store = get_store()
+    chunks = store.get_chunks_by_doc(body.doc_id)
+
+    if not chunks:
+        raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
+
+    full_text = "\n\n".join(c["text"] for c in chunks)
+    if len(full_text) > 25000:
+        full_text = full_text[:25000] + "\n[Document truncated]"
+
+    filename = chunks[0]["metadata"].get("filename", "document")
+    focus_note = f"\\nFocus specifically on: {body.focus_area}" if body.focus_area else ""
+
+    prompt = f\"\"\"Generate a Draft Statement of Technical Requirements (SOTR) based on the following document.
+
+DOCUMENT: {filename}
+{focus_note}
+
+CONTENT:
+{full_text}
+
+FORMAT the SOTR strictly with the following sections:
+1. **Introduction** — Purpose and scope
+2. **Applicable Documents** — References and standards
+3. **General Requirements** — High-level technical needs
+4. **Specific Requirements** — Detailed specifications and performance criteria
+5. **Quality Assurance & Testing** — Acceptance criteria
+
+Use formal, objective military specification language (e.g., 'The system shall...', 'The contractor must...').\"\"\"
+
+    messages = [
+        {"role": "system", "content": "You are a technical specifications writer for the Indian Coast Guard."},
+        {"role": "user", "content": prompt},
+    ]
+
+    job_id = str(uuid.uuid4())
+    collected_text = []
+
+    def event_stream():
+        for tok in llm_engine.stream_generate(messages, max_tokens=3500):
+            collected_text.append(tok)
+            yield f"data: {json.dumps({'token': tok})}\n\n"
+
+        docx_path = _OUTPUTS_DIR / f"{job_id}_sotr.docx"
+        doc = DocxDocument()
+        doc.add_heading(f"Draft SOTR: {filename}", level=1)
+        doc.add_paragraph("".join(collected_text))
+
+        try:
+            section = doc.sections[0]
+            footer = section.footer
+            footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+            footer_para.text = "AI-Generated Draft - ICG AGRA"
+        except Exception as e:
+            logger.warning(f"Could not add watermark: {e}")
+
+        doc.save(str(docx_path))
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_sotr.docx'})}\n\n"
+
+        log_usage(action_type="draft_sotr", module="generate", token=auth_tok, response_time_ms=(time.time() - sotr_start) * 1000)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  TECHNICAL REVIEW COMMENT GENERATOR (FR-GEN-004)
+# ═══════════════════════════════════════════════════════════════
+
+class TechReviewRequest(BaseModel):
+    doc_id: str
+    target_audience: str = Field(default="shipyard", pattern="^(shipyard|internal|management)$")
+
+
+@router.post("/generate/tech-review")
+async def generate_tech_review(
+    body: TechReviewRequest,
+    user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """
+    Generate Technical Review Comments for a document.
+    """
+    review_start = time.time()
+    auth_tok = ""
+    if request:
+        ah = request.headers.get("authorization", "")
+        auth_tok = ah.replace("Bearer ", "") if ah else ""
+        
+    store = get_store()
+    chunks = store.get_chunks_by_doc(body.doc_id)
+
+    if not chunks:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    full_text = "\n\n".join(c["text"] for c in chunks[:30]) # Use first 30 chunks
+    filename = chunks[0]["metadata"].get("filename", "document")
+
+    prompt = f\"\"\"Generate Technical Review Comments for the following submission document.
+Target Audience: {body.target_audience}
+
+DOCUMENT: {filename}
+CONTENT:
+{full_text}
+
+FORMAT the review strictly as:
+1. **General Observations** — Overall assessment of the submission
+2. **Major Deviations / Concerns** — Critical issues identified
+3. **Clarifications Required** — Specific points needing more details
+4. **Recommendations** — Proposed actions or accept/reject advice
+
+Keep the tone professional, objective, and analytical.\"\"\"
+
+    messages = [
+        {"role": "system", "content": "You are a lead technical reviewer for the Indian Coast Guard."},
+        {"role": "user", "content": prompt},
+    ]
+
+    job_id = str(uuid.uuid4())
+    collected_text = []
+
+    def event_stream():
+        for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+            collected_text.append(tok)
+            yield f"data: {json.dumps({'token': tok})}\n\n"
+
+        docx_path = _OUTPUTS_DIR / f"{job_id}_tech_review.docx"
+        doc = DocxDocument()
+        doc.add_heading(f"Technical Review: {filename}", level=1)
+        doc.add_paragraph("".join(collected_text))
+
+        try:
+            section = doc.sections[0]
+            footer = section.footer
+            footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+            footer_para.text = "AI-Generated Draft - ICG AGRA"
+        except Exception as e:
+            logger.warning(f"Could not add watermark: {e}")
+
+        doc.save(str(docx_path))
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_tech_review.docx'})}\n\n"
+        log_usage(action_type="tech_review", module="generate", token=auth_tok, response_time_ms=(time.time() - review_start) * 1000)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

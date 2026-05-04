@@ -234,8 +234,17 @@ function SourcePanel({ source, onClose, apiUrl }) {
         <div style={panelStyles.header}>
           <div style={panelStyles.headerLeft}>
             <FileText size={16} color="var(--primary)" />
-            <span style={panelStyles.filename}>{source.document}</span>
-            {source.page && <span style={panelStyles.page}>Page {source.page}</span>}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={panelStyles.filename}>{source.document}</span>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {source.page && <span style={panelStyles.page}>Page {source.page}</span>}
+                {source.clause && source.clause !== "Unknown" && (
+                  <span style={{ ...panelStyles.page, background: 'rgba(255,69,0,0.1)', color: 'var(--accent-red)' }}>
+                    {source.clause}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
           <button onClick={onClose} style={panelStyles.closeBtn}><X size={16} /></button>
         </div>
@@ -298,6 +307,8 @@ export default function Chat() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
   const [bgTasks, setBgTasks] = useState([]); // background generation tasks
+  const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
+  const [selectedImage, setSelectedImage] = useState(null); // VLM image attachment
 
   // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
   const [pptHistory, setPptHistory] = useState({});
@@ -442,8 +453,8 @@ export default function Chat() {
         };
       }
 
-      if (type === 'summary') {
-        // Stream the summary
+      if (type === 'summary' || type === 'draft_sotr' || type === 'tech_review') {
+        // Stream the document
         return null; // handled via stream separately
       }
     } catch (err) {
@@ -457,15 +468,26 @@ export default function Chat() {
     }
   };
 
-  // ── Stream summary via SSE ──
-  const streamSummary = (intentParams, sessId, updateMsgs) => {
-    const { doc_id, summary_type } = intentParams;
+  // ── Stream Document via SSE ──
+  const streamDocument = (intentType, intentParams, sessId, updateMsgs) => {
+    const { doc_id, summary_type, target_audience } = intentParams;
     let accumulated = '';
-    let summaryDownloadUrl = null;
+    let docDownloadUrl = null;
+
+    let endpoint = '/api/agent/generate/summary';
+    let payload = { doc_id, summary_type: summary_type || 'executive' };
+
+    if (intentType === 'draft_sotr') {
+      endpoint = '/api/agent/generate/sotr';
+      payload = { doc_id };
+    } else if (intentType === 'tech_review') {
+      endpoint = '/api/agent/generate/tech-review';
+      payload = { doc_id, target_audience: target_audience || 'shipyard' };
+    }
 
     return connectStream(
-      getApiUrl('/api/agent/generate/summary'),
-      { doc_id, summary_type: summary_type || 'executive' },
+      getApiUrl(endpoint),
+      payload,
       (data) => {
         if (data.token) {
           accumulated += data.token;
@@ -473,10 +495,10 @@ export default function Chat() {
         }
       },
       (data) => {
-        summaryDownloadUrl = data.download_url
+        docDownloadUrl = data.download_url
           ? getApiUrl(data.download_url)
           : null;
-        updateMsgs(accumulated, summaryDownloadUrl);
+        updateMsgs(accumulated, docDownloadUrl);
         setIsStreaming(false);
       },
       (err) => {
@@ -491,9 +513,9 @@ export default function Chat() {
 
   const handleSend = async () => {
     const question = input.trim();
-    if (!question || isSessionStreaming) return;
+    if ((!question && !selectedImage) || isSessionStreaming) return;
 
-    const userMsg = { role: 'user', content: question, timestamp: Date.now() };
+    const userMsg = { role: 'user', content: question, timestamp: Date.now(), image: selectedImage ? URL.createObjectURL(selectedImage) : null };
     const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
     const updatedMsgs = [...messages, userMsg, aiMsg];
 
@@ -505,19 +527,137 @@ export default function Chat() {
     let sessId = activeSessionId;
     if (!sessId) {
       const id = newSessionId();
-      const sess = { id, title: question.slice(0, 50), messages: updatedMsgs, createdAt: Date.now(), updatedAt: Date.now() };
+      const sess = { id, title: question.slice(0, 50) || 'Image Analysis', messages: updatedMsgs, createdAt: Date.now(), updatedAt: Date.now() };
       setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
       setActiveSessionId(id);
       sessId = id;
     } else {
       setSessions(prev => {
         const u = prev.map(s => s.id === sessId
-          ? { ...s, title: s.title === 'New Chat' ? question.slice(0, 50) : s.title, messages: updatedMsgs, updatedAt: Date.now() }
+          ? { ...s, title: s.title === 'New Chat' ? (question.slice(0, 50) || 'Image Analysis') : s.title, messages: updatedMsgs, updatedAt: Date.now() }
           : s
         );
         saveSessions(u);
         return u;
       });
+    }
+
+    if (selectedImage) {
+      // VLM Flow
+      const imgToUpload = selectedImage;
+      setSelectedImage(null); // Clear after grabbing
+
+      const formData = new FormData();
+      formData.append('image', imgToUpload);
+      formData.append('prompt', question);
+
+      let accumulatedText = '';
+      streamRef.current = connectStream(
+        getApiUrl('/api/agent/vlm/analyze'),
+        formData, // Note: connectStream needs to handle FormData if it uses fetch, wait... connectStream might JSON stringify if not handled.
+        (data) => {
+          if (activeSessionIdRef.current !== sessId) return;
+          if (data.token) {
+            accumulatedText += data.token;
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText };
+              return copy;
+            });
+          }
+        },
+        async (data) => {
+          if (activeSessionIdRef.current !== sessId) return;
+          setIsStreaming(false);
+          setMessages(prev => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false };
+            persistMessages(copy, sessId);
+            return copy;
+          });
+        },
+        (err) => {
+          if (activeSessionIdRef.current !== sessId) return;
+          setIsStreaming(false);
+          setMessages(prev => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText || `Error: ${err.message}`, streaming: false, isError: true };
+            return copy;
+          });
+        },
+        true // pass a flag indicating it's FormData? Wait, connectStream is defined where? I need to check it first.
+      );
+      // Wait, let's look at connectStream definition first! I can't just pass FormData if it doesn't support it.
+      // I'll implement fetch stream directly here for VLM to be safe.
+      
+      try {
+        const res = await fetch(getApiUrl('/api/agent/vlm/analyze'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        
+        if (!res.ok) throw new Error(`VLM request failed: ${res.status}`);
+        
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        
+        while (true) {
+          const { value, done } = await reader.read();
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6).trim();
+                if (!dataStr) continue;
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.token) {
+                    accumulatedText += data.token;
+                    setMessages(prev => {
+                      if (activeSessionIdRef.current !== sessId) return prev;
+                      const copy = [...prev];
+                      copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText };
+                      return copy;
+                    });
+                  }
+                  if (data.done) {
+                    if (activeSessionIdRef.current === sessId) {
+                      setIsStreaming(false);
+                      setMessages(prev => {
+                        const copy = [...prev];
+                        copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false };
+                        persistMessages(copy, sessId);
+                        return copy;
+                      });
+                    }
+                    return;
+                  }
+                  if (data.error) {
+                    throw new Error(data.error);
+                  }
+                } catch (e) {
+                  console.error("VLM Stream Parse Error:", e, dataStr);
+                }
+              }
+            }
+          }
+          if (done) break;
+        }
+      } catch (err) {
+         if (activeSessionIdRef.current === sessId) {
+           setIsStreaming(false);
+           setMessages(prev => {
+             const copy = [...prev];
+             copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText || `Error: ${err.message}`, streaming: false, isError: true };
+             return copy;
+           });
+         }
+      }
+      return;
     }
 
     const history = messages
@@ -551,20 +691,21 @@ export default function Chat() {
           const intentType = data.intent;
           const intentParams = data.intent_params || {};
 
-          if (intentType === 'summary') {
-            // Replace placeholder with summary header, then stream
+          if (intentType === 'summary' || intentType === 'draft_sotr' || intentType === 'tech_review') {
+            // Replace placeholder with header, then stream
             setMessages(prev => {
               const copy = [...prev];
               copy[copy.length - 1] = {
                 ...copy[copy.length - 1],
                 content: '',
                 streaming: true,
-                summaryHeader: true,
+                summaryHeader: true, // We reuse this flag for UI layout
               };
               return copy;
             });
 
-            streamRef.current = streamSummary(
+            streamRef.current = streamDocument(
+              intentType,
               intentParams,
               sessId,
               (text, downloadUrl) => {
@@ -575,7 +716,7 @@ export default function Chat() {
                     ...last,
                     content: text,
                     streaming: !downloadUrl,
-                    summary: downloadUrl ? { downloadUrl } : last.summary,
+                    summary: downloadUrl ? { downloadUrl } : last.summary, // reuse summary obj for download card
                   };
                   if (!downloadUrl) return copy;
                   // persist final
@@ -618,6 +759,7 @@ export default function Chat() {
             ...last,
             content: accumulatedText || last?.content || '',
             sources: data?.sources || [],
+            confidence_score: data?.confidence_score, // Save confidence score
             streaming: false,
           };
           persistMessages(copy, sessId);
@@ -650,6 +792,14 @@ export default function Chat() {
   const handleFileAttach = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // If it's an image, attach it to the message for VLM
+    if (file.type.startsWith('image/')) {
+      setSelectedImage(file);
+      e.target.value = '';
+      return;
+    }
+
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -701,6 +851,9 @@ export default function Chat() {
             <button onClick={toggleTheme} style={styles.collapseBtn} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
             </button>
+            <button onClick={() => setIsHindi(!isHindi)} style={{...styles.collapseBtn, fontSize: '11px', fontWeight: 'bold'}} title="Toggle Hindi">
+              {isHindi ? 'EN' : 'HI'}
+            </button>
             <button onClick={() => setSidebarCollapsed(p => !p)} style={styles.collapseBtn} title="Toggle sidebar">
               {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             </button>
@@ -709,7 +862,7 @@ export default function Chat() {
 
         <button onClick={createNewChat} style={styles.newChatBtn} id="new-chat-btn">
           <Plus size={16} />
-          {!sidebarCollapsed && <span>New Chat</span>}
+          {!sidebarCollapsed && <span>{isHindi ? 'नई चैट' : 'New Chat'}</span>}
         </button>
 
         {!sidebarCollapsed && (
@@ -717,7 +870,7 @@ export default function Chat() {
             {sessions.length === 0 && (
               <div style={styles.emptyState}>
                 <MessageSquare size={18} style={{ opacity: 0.3 }} />
-                <span>No conversations yet</span>
+                <span>{isHindi ? 'अभी तक कोई बातचीत नहीं' : 'No conversations yet'}</span>
               </div>
             )}
             {sessions.map(sess => (
@@ -743,9 +896,9 @@ export default function Chat() {
         )}
 
         <div style={styles.navSection}>
-          <Link to="/upload" style={styles.navLink}><Upload size={15} />{!sidebarCollapsed && <span>Documents</span>}</Link>
-          <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>Compliance</span>}</Link>
-          <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>Dashboard</span>}</a>
+          <Link to="/upload" style={styles.navLink}><Upload size={15} />{!sidebarCollapsed && <span>{isHindi ? 'दस्तावेज़' : 'Documents'}</span>}</Link>
+          <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>{isHindi ? 'अनुपालन' : 'Compliance'}</span>}</Link>
+          <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
         </div>
 
         <div style={styles.sidebarFooter}>
@@ -767,16 +920,20 @@ export default function Chat() {
         {messages.length === 0 ? (
           <div style={styles.welcome}>
             <div style={styles.welcomeIcon}><Sparkles size={36} color="var(--primary)" /></div>
-            <h1 style={styles.welcomeTitle}>AGRA Intelligence Agent</h1>
+            <h1 style={styles.welcomeTitle}>{isHindi ? 'एग्रा इंटेलिजेंस एजेंट' : 'AGRA Intelligence Agent'}</h1>
             <p style={styles.welcomeDesc}>
-              Ask questions, generate presentations, create quizzes, or get summaries — all from your uploaded documents.
+              {isHindi 
+                ? 'प्रश्न पूछें, प्रेजेंटेशन बनाएं, क्विज़ जनरेट करें, या सारांश प्राप्त करें — सब आपके अपलोड किए गए दस्तावेज़ों से।'
+                : 'Ask questions, generate presentations, create quizzes, or get summaries — all from your uploaded documents.'}
             </p>
             <div style={styles.suggestionsGrid}>
               {[
-                { icon: <MessageSquare size={14} />, text: 'What are the key requirements in the SOTR?' },
-                { icon: <Presentation size={14} />, text: 'Create a PPT about ICG AGRA' },
-                { icon: <ClipboardList size={14} />, text: 'Generate a quiz from the uploaded document' },
-                { icon: <BookOpen size={14} />, text: 'Summarize the technical proposal' },
+                { icon: <MessageSquare size={14} />, text: isHindi ? 'SOTR में मुख्य आवश्यकताएं क्या हैं?' : 'What are the key requirements in the SOTR?' },
+                { icon: <Presentation size={14} />, text: isHindi ? 'ICG AGRA के बारे में एक PPT बनाएं' : 'Create a PPT about ICG AGRA' },
+                { icon: <ClipboardList size={14} />, text: isHindi ? 'अपलोड किए गए दस्तावेज़ से एक क्विज़ जनरेट करें' : 'Generate a quiz from the uploaded document' },
+                { icon: <BookOpen size={14} />, text: isHindi ? 'तकनीकी प्रस्ताव का सारांश दें' : 'Summarize the technical proposal' },
+                { icon: <FileText size={14} />, text: isHindi ? 'इस दस्तावेज़ से एक SOTR ड्राफ्ट करें' : 'Draft an SOTR from this document' },
+                { icon: <AlertTriangle size={14} />, text: isHindi ? 'शिपयार्ड के लिए तकनीकी समीक्षा टिप्पणियां बनाएं' : 'Generate technical review comments for the shipyard' },
               ].map((q, i) => (
                 <button
                   key={i}
@@ -854,11 +1011,14 @@ export default function Chat() {
                               key={si}
                               onClick={() => setSelectedSource(src)}
                               style={styles.sourcePill}
-                              title={src.excerpt}
+                              title={`${src.excerpt}\n\nClause: ${src.clause || 'N/A'}`}
                             >
                               <span style={styles.pillNum}>{src.index || si + 1}</span>
                               <FileText size={10} />
                               <span style={styles.pillName}>{src.document}</span>
+                              {src.clause && src.clause !== 'Unknown' && (
+                                <span style={{...styles.pillPage, color: 'var(--accent-red)'}}>§ {src.clause.split(' ')[1] || 'Sec'}</span>
+                              )}
                               {src.page && <span style={styles.pillPage}>p.{src.page}</span>}
                             </button>
                           ))}
@@ -866,12 +1026,24 @@ export default function Chat() {
                       )}
                     </>
                   ) : (
-                    <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {msg.image && (
+                        <img src={msg.image} alt="Uploaded attachment" style={{ maxWidth: '200px', borderRadius: '8px', border: '1px solid var(--border)' }} />
+                      )}
+                      <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                    </div>
                   )}
-                  {/* Timestamp */}
-                  {msg.timestamp && (
-                    <div style={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
-                  )}
+                  {/* Timestamp & Confidence */}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                    {msg.timestamp && (
+                      <div style={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
+                    )}
+                    {msg.confidence_score !== undefined && (
+                      <div style={{...styles.timestamp, color: msg.confidence_score > 0.5 ? 'var(--accent-green)' : 'var(--accent-amber)'}} title="Retrieval Confidence Score">
+                        {Math.round(msg.confidence_score * 100)}% Confidence
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -881,6 +1053,13 @@ export default function Chat() {
 
         {/* ── Input Bar ── */}
         <div style={styles.inputBarWrap}>
+          {selectedImage && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <img src={URL.createObjectURL(selectedImage)} alt="Preview" style={{ height: '30px', borderRadius: '4px' }} />
+              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{selectedImage.name}</span>
+              <button onClick={() => setSelectedImage(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
+            </div>
+          )}
           <div style={styles.inputBar}>
             <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
               <Paperclip size={17} />
@@ -891,7 +1070,7 @@ export default function Chat() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a question, or type 'create a PPT about…', 'generate a quiz', 'summarize'…"
+              placeholder={isHindi ? "कोई प्रश्न पूछें, या टाइप करें 'एक पीपीटी बनाएं...'..." : "Ask a question, or type 'create a PPT about…', 'generate a quiz', 'summarize'…"}
               rows={1}
               style={styles.textarea}
               id="chat-input"

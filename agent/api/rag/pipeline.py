@@ -43,6 +43,14 @@ _INTENT_SUMMARY = re.compile(
     r'\b(summar|summarise|summarize|give me a summary|executive summary|brief|overview)\b',
     re.IGNORECASE,
 )
+_INTENT_SOTR = re.compile(
+    r'\b(draft|generat|creat|build|make|prepar)e?.{0,40}(sotr|statement of technical requirements|technical requirements)\b',
+    re.IGNORECASE,
+)
+_INTENT_TECH_REVIEW = re.compile(
+    r'\b(draft|generat|creat|build|make|prepar)e?.{0,40}(tech review|technical review|review comments?)\b',
+    re.IGNORECASE,
+)
 
 
 def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
@@ -83,6 +91,10 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
         return {"type": "quiz", "num_mcq": 5, "num_short_answer": 3}
     if _INTENT_SUMMARY.search(q):
         return {"type": "summary", "summary_type": "executive"}
+    if _INTENT_SOTR.search(q):
+        return {"type": "draft_sotr"}
+    if _INTENT_TECH_REVIEW.search(q):
+        return {"type": "tech_review", "target_audience": "shipyard"}
     return None
 
 
@@ -115,7 +127,7 @@ RULES:
 1. Answer using ONLY the information in the provided context chunks below.
 2. Cite sources inline using numbered superscript notation, e.g. [1], [2], immediately after the relevant sentence.
 3. Each context chunk below is numbered — use that number as the citation reference.
-4. If the context does not contain enough information, say so clearly — NEVER fabricate or hallucinate information.
+4. If the context does not contain enough information, state exactly 'Not found in standard'. NEVER fabricate or hallucinate information.
 5. Be concise, professional, and precise.
 6. Use structured formatting (headings, bullet points) when appropriate.
 {house_rules}
@@ -134,7 +146,8 @@ def _format_context(chunks: List[Dict[str, Any]]) -> str:
         meta = c.get("metadata", {})
         fname = meta.get("filename", "Unknown")
         page = meta.get("page", "?")
-        lines.append(f"[{i}] {fname} — Page {page}")
+        clause = meta.get("section_title", "Unknown Clause")
+        lines.append(f"[{i}] {fname} — Page {page} (Clause: {clause})")
         lines.append(c["text"])
         lines.append("")
     return "\n".join(lines)
@@ -149,6 +162,7 @@ def _format_sources(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "index": i,                                      # Matches [N] in text
             "document": meta.get("filename", "Unknown"),
             "page": meta.get("page", "?"),
+            "clause": meta.get("section_title", "Unknown"), # Added for FR-QRY-002
             "doc_id": meta.get("doc_id", ""),               # For download link
             "excerpt": c["text"][:250] + ("…" if len(c["text"]) > 250 else ""),
         })
@@ -417,4 +431,5 @@ async def query_pipeline(
         "sources": sources,
         "response_time_ms": elapsed_ms,
         "chunks_used": len(top_chunks),
+        "confidence_score": max_score,
     }
