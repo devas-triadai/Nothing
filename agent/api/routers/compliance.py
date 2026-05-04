@@ -42,7 +42,7 @@ def _clean_json(raw: str) -> str:
 
 
 class ComplianceRequest(BaseModel):
-    subject_doc_id: str = Field(..., description="Document being checked")
+    subject_doc_ids: List[str] = Field(..., min_length=1, description="Documents being checked")
     standard_doc_ids: List[str] = Field(..., min_length=1, description="Standards to check against")
     check_scope: Optional[str] = Field(None, description="Specific area to focus on")
 
@@ -65,9 +65,14 @@ async def compliance_check(
     store = get_store()
 
     # Load subject document chunks
-    subject_chunks = store.get_chunks_by_doc(body.subject_doc_id)
+    subject_chunks = []
+    for s_id in body.subject_doc_ids:
+        chunks = store.get_chunks_by_doc(s_id)
+        if chunks:
+            subject_chunks.extend(chunks)
+
     if not subject_chunks:
-        raise HTTPException(status_code=404, detail="Subject document not found in knowledge base.")
+        raise HTTPException(status_code=404, detail="Subject documents not found in knowledge base.")
 
     # Load standard document chunks
     standard_chunks = []
@@ -80,8 +85,9 @@ async def compliance_check(
     if not standard_chunks:
         raise HTTPException(status_code=400, detail="No standard document content found.")
 
-    subject_filename = subject_chunks[0]["metadata"].get("filename", "Subject Document")
-    subject_text = "\n\n".join(c["text"] for c in subject_chunks[:20])
+    subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
+    subject_filenames_str = ", ".join(subject_filenames)
+    subject_text = "\n\n".join(f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}" for c in subject_chunks[:30])
 
     # Extract key clauses from standards
     standards_text = "\n\n".join(c["text"] for c in standard_chunks[:20])
@@ -90,26 +96,28 @@ async def compliance_check(
 
     prompt = f"""You are a compliance analyst for the Indian Coast Guard.
 
-TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT against the STANDARD(S).
+TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT(S) against the STANDARD(S).
 
-SUBJECT DOCUMENT ({subject_filename}):
-{subject_text[:12000]}
+SUBJECT DOCUMENTS ({subject_filenames_str}):
+{subject_text[:15000]}
 
 APPLICABLE STANDARDS:
 {standards_text[:12000]}
 {scope_note}
 
-For each relevant clause/requirement in the standard, evaluate the subject document's compliance.
+For each relevant clause/requirement in the standard, evaluate the subject documents' compliance.
 Critically:
-- If a requirement in the standard is completely absent in the subject document, mark the verdict as "Missing" (Missing Requirements Report).
-- If the subject document contains conflicting specifications between different sections (e.g. Doc A says 20 knots, Doc B says 18 knots), mark the verdict as "Contradiction" (Contradiction Detection).
+- "Missing": If a requirement in the standard is completely absent in the subject document.
+- "Contradiction": If the subject documents contain conflicting specifications between themselves (Inter-Document Inconsistency) or with the standard.
+- "Selective Compliance": If the subject documents cite a standard but specifically omit or ignore a restrictive sub-clause.
 
 Return ONLY a valid JSON array of findings. Each finding must be:
 {{
+  "topic": "Broad category (e.g. Fire Safety, Propulsion, Hull Structure)",
   "clause": "Clause/section reference from the standard",
   "requirement": "What the standard requires",
   "verdict": "Compliant" | "Non-Compliant" | "Partial" | "Missing" | "Contradiction" | "Unverifiable",
-  "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing or contradictory.",
+  "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing, contradictory, or selectively compliant.",
   "recommendation": "Specific action needed (if not fully compliant)",
   "citation": "Relevant excerpt from the subject document, if any"
 }}
@@ -147,7 +155,7 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
         docx_path = _OUTPUTS_DIR / f"{job_id}_compliance.docx"
         doc = DocxDocument()
         doc.add_heading("Compliance Analysis Report", level=1)
-        doc.add_heading(f"Subject: {subject_filename}", level=2)
+        doc.add_heading(f"Subjects: {subject_filenames_str}", level=2)
         doc.add_paragraph(f"Scope: {body.check_scope or 'Full Document'}")
         doc.add_paragraph("")
 

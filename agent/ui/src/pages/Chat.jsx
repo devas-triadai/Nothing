@@ -309,6 +309,11 @@ export default function Chat() {
   const [bgTasks, setBgTasks] = useState([]); // background generation tasks
   const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
   const [selectedImage, setSelectedImage] = useState(null); // VLM image attachment
+  
+  // Phase 5: Multi-document context selection
+  const [documents, setDocuments] = useState([]);
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [showDocSelector, setShowDocSelector] = useState(false);
 
   // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
   const [pptHistory, setPptHistory] = useState({});
@@ -324,6 +329,13 @@ export default function Chat() {
   const isSuperAdmin = user?.role === 'super_admin';
   const apiUrl = getApiUrl('');
   const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    // Fetch available documents for the context selector
+    api.get('/documents')
+      .then(({ data }) => setDocuments(data.documents || []))
+      .catch(err => console.error("Failed to load documents", err));
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -667,9 +679,14 @@ export default function Chat() {
 
     let accumulatedText = '';
 
+    const chatPayload = { question, history, session_id: sessId };
+    if (selectedDocIds.length > 0) {
+      chatPayload.doc_ids = selectedDocIds;
+    }
+
     streamRef.current = connectStream(
       getApiUrl('/api/agent/chat'),
-      { question, history, session_id: sessId },
+      chatPayload,
       // onToken — guarded with session ID
       (data) => {
         if (activeSessionIdRef.current !== sessId) return; // session isolation guard
@@ -1053,6 +1070,50 @@ export default function Chat() {
 
         {/* ── Input Bar ── */}
         <div style={styles.inputBarWrap}>
+          {/* Phase 5: Context Selector */}
+          <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <button 
+              onClick={() => setShowDocSelector(!showDocSelector)}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}
+            >
+              <FileText size={14} />
+              {selectedDocIds.length > 0 ? `Context: ${selectedDocIds.length} docs selected` : 'Context: All Documents'}
+              {showDocSelector ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+            
+            {showDocSelector && (
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '8px', maxHeight: '150px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {documents.length === 0 ? (
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No documents available. Upload some first.</span>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setSelectedDocIds([])}
+                      style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid', fontSize: '11px', cursor: 'pointer', background: selectedDocIds.length === 0 ? 'var(--primary)' : 'transparent', borderColor: selectedDocIds.length === 0 ? 'var(--primary)' : 'var(--border)', color: selectedDocIds.length === 0 ? '#fff' : 'var(--text-secondary)' }}
+                    >
+                      All Documents
+                    </button>
+                    {documents.map(doc => {
+                      const isSelected = selectedDocIds.includes(doc.doc_id);
+                      return (
+                        <button
+                          key={doc.doc_id}
+                          onClick={() => {
+                            setSelectedDocIds(prev => isSelected ? prev.filter(id => id !== doc.doc_id) : [...prev, doc.doc_id]);
+                          }}
+                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid', fontSize: '11px', cursor: 'pointer', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: isSelected ? 'rgba(74,139,255,0.1)' : 'transparent', borderColor: isSelected ? 'var(--primary)' : 'var(--border)', color: isSelected ? 'var(--primary)' : 'var(--text-secondary)' }}
+                          title={doc.filename}
+                        >
+                          {doc.filename}
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           {selectedImage && (
             <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
               <img src={URL.createObjectURL(selectedImage)} alt="Preview" style={{ height: '30px', borderRadius: '4px' }} />

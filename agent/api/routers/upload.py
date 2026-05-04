@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query, Form
 from fastapi.responses import StreamingResponse
 
 from api.utils.auth_check import get_current_user
@@ -35,6 +35,8 @@ _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    category: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -81,6 +83,8 @@ async def upload_document(
             doc_id=doc_id,
             uploaded_by_user_id=0,  # Extracted from JWT if needed
             token=user.get("_raw_token", ""),
+            category=category,
+            description=description,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
@@ -122,6 +126,7 @@ async def list_documents(
                 seen_docs[did] = {
                     "doc_id": did,
                     "filename": meta.get("filename", "Unknown"),
+                    "category": meta.get("category", "Uncategorised"),
                     "chunks": 0,
                     "pages": set(),
                 }

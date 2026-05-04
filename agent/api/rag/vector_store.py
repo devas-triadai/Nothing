@@ -185,7 +185,7 @@ class VectorStore:
         query_text: str,
         query_embedding: List[float],
         top_k: int = 10,
-        doc_id_filter: Optional[str] = None,
+        doc_ids_filter: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: dense cosine (weight 0.6) + BM25 keyword (weight 0.4).
@@ -193,9 +193,10 @@ class VectorStore:
         """
         # ── Dense Search ──
         qdrant_filter = None
-        if doc_id_filter:
+        if doc_ids_filter:
+            from qdrant_client.models import MatchAny
             qdrant_filter = Filter(
-                must=[FieldCondition(key="metadata.doc_id", match=MatchValue(value=doc_id_filter))]
+                must=[FieldCondition(key="metadata.doc_id", match=MatchAny(any=doc_ids_filter))]
             )
 
         response = self.client.query_points(
@@ -238,8 +239,8 @@ class VectorStore:
         # ── Combine scores ──
         combined: List[Dict[str, Any]] = []
         for pid, data in result_map.items():
-            # Apply doc_id filter to BM25 results too
-            if doc_id_filter and data["metadata"].get("doc_id") != doc_id_filter:
+            # Apply doc_ids filter to BM25 results too
+            if doc_ids_filter and data["metadata"].get("doc_id") not in doc_ids_filter:
                 continue
             d_score = dense_scores.get(pid, 0.0)
             b_score = bm25_scores.get(pid, 0.0)

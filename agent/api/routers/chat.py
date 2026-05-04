@@ -31,7 +31,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=5000)
     session_id: Optional[str] = None
     history: List[ChatMessage] = Field(default_factory=list)
-    doc_id: Optional[str] = Field(None, description="Filter to a specific document")
+    doc_ids: Optional[List[str]] = Field(None, description="Filter to specific documents")
 
 
 @router.post("/chat")
@@ -64,7 +64,7 @@ async def chat(
                 session_history=history,
                 user_id=0,
                 token=raw_token,
-                doc_id_filter=body.doc_id,
+                doc_ids_filter=body.doc_ids,
             ):
                 if 'token' in event:
                     token_count += 1
@@ -97,7 +97,7 @@ async def _async_query_wrapper(
     session_history: list,
     user_id: int,
     token: str,
-    doc_id_filter: Optional[str],
+    doc_ids_filter: Optional[List[str]],
 ):
     """
     Wraps and iterates over the async generator returned by query_pipeline.
@@ -107,7 +107,7 @@ async def _async_query_wrapper(
         session_history=session_history,
         user_id=user_id,
         token=token,
-        doc_id_filter=doc_id_filter,
+        doc_ids_filter=doc_ids_filter,
     ):
         yield event
         # Yield control to event loop between tokens

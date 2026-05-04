@@ -120,7 +120,7 @@ def _get_all_doc_ids() -> List[str]:
     return list(seen)
 
 # ── System prompt template ──
-_SYSTEM_PROMPT = """You are AGRA, the AI assistant for Indian Coast Guard Headquarters, New Delhi.
+_SYSTEM_PROMPT_FALLBACK = """You are AGRA, the AI assistant for Indian Coast Guard Headquarters, New Delhi.
 You answer questions ONLY based on the provided context documents.
 
 RULES:
@@ -130,11 +130,7 @@ RULES:
 4. If the context does not contain enough information, state exactly 'Not found in standard'. NEVER fabricate or hallucinate information.
 5. Be concise, professional, and precise.
 6. Use structured formatting (headings, bullet points) when appropriate.
-{house_rules}
----
-CONTEXT DOCUMENTS:
-{context}
----"""
+"""
 
 
 def _format_context(chunks: List[Dict[str, Any]]) -> str:
@@ -181,7 +177,7 @@ async def _fetch_house_rules(token: str) -> str:
                 data = resp.json()
                 rules = data.get("house_rules", "")
                 if rules:
-                    return f"\nADDITIONAL GOVERNANCE RULES:\n{rules}\n"
+                    return rules
     except Exception as e:
         logger.warning("Could not fetch house rules: %s", e)
     return ""
@@ -197,6 +193,8 @@ def ingest_document(
     doc_id: str,
     uploaded_by_user_id: int,
     token: str = "",
+    category: Optional[str] = None,
+    description: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
@@ -214,7 +212,7 @@ def ingest_document(
 
     # ── Stage 2: Chunking ──
     yield {"stage": "chunking", "progress": 0, "message": "Chunking text…"}
-    chunks = chunker.chunk_pages(pages, doc_id, filename)
+    chunks = chunker.chunk_pages(pages, doc_id, filename, category=category, description=description)
     if not chunks:
         yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}
         return
@@ -254,9 +252,10 @@ def ingest_document(
                     "filename": filename,
                     "original_filename": filename,
                     "file_type": filename.rsplit(".", 1)[-1] if "." in filename else "unknown",
+                    "category": category or "Uncategorised",
+                    "description": description or f"Ingested by AGRA Agent (doc_id: {doc_id})",
                     "page_count": len(pages),
                     "status": "indexed",
-                    "description": f"Ingested by AGRA Agent (doc_id: {doc_id})",
                 },
                 timeout=5.0,
             )
@@ -282,7 +281,7 @@ async def query_pipeline(
     session_history: List[Dict[str, str]],
     user_id: int,
     token: str = "",
-    doc_id_filter: Optional[str] = None,
+    doc_ids_filter: Optional[List[str]] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Full RAG query: embed → hybrid search → rerank → build prompt → stream LLM.
@@ -299,8 +298,8 @@ async def query_pipeline(
     intent = _detect_intent(question)
     if intent:
         # Get available doc_ids (use filter if set, else all)
-        if doc_id_filter:
-            doc_ids = [doc_id_filter]
+        if doc_ids_filter:
+            doc_ids = doc_ids_filter
         else:
             doc_ids = _get_all_doc_ids()
 
@@ -334,7 +333,7 @@ async def query_pipeline(
         query_text=rewritten,
         query_embedding=query_emb,
         top_k=10,
-        doc_id_filter=doc_id_filter,
+        doc_ids_filter=doc_ids_filter,
     )
 
     # ── 4. CRAG-Style Retry Loop (Priority 3) ──
@@ -383,8 +382,10 @@ async def query_pipeline(
 
     # 6. Build prompt
     house_rules = await _fetch_house_rules(token)
+    base_prompt = house_rules if house_rules.strip() else _SYSTEM_PROMPT_FALLBACK
     context_str = _format_context(top_chunks)
-    system_msg = _SYSTEM_PROMPT.format(house_rules=house_rules, context=context_str)
+    
+    system_msg = f"{base_prompt.strip()}\n\n---\nCONTEXT DOCUMENTS:\n{context_str}\n---"
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
 

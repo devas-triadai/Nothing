@@ -15,9 +15,8 @@ export default function Agents() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
-
-  useEffect(() => { fetchAgents() }, [])
-
+  const [houseRules, setHouseRules] = useState('')
+  const [savingRules, setSavingRules] = useState(false)
   async function fetchAgents() {
     setLoading(true)
     try {
@@ -27,6 +26,36 @@ export default function Agents() {
       console.error('Fetch agents error:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function fetchHouseRules() {
+    try {
+      const data = await apiFetch('/agents/house-rules')
+      setHouseRules(data.house_rules || '')
+    } catch (e) {
+      console.error('Fetch house rules error:', e)
+    }
+  }
+
+  useEffect(() => { 
+    fetchAgents()
+    fetchHouseRules()
+  }, [])
+
+  async function saveHouseRules() {
+    setSavingRules(true)
+    try {
+      await apiFetch('/agents/house-rules', {
+        method: 'PUT',
+        body: JSON.stringify({ house_rules: houseRules })
+      })
+      alert('System prompt updated successfully.')
+    } catch (e) {
+      console.error('Save rules error:', e)
+      alert('Failed to save system prompt.')
+    } finally {
+      setSavingRules(false)
     }
   }
 
@@ -103,6 +132,41 @@ export default function Agents() {
           <Plus size={18} />
           New Agent
         </button>
+      </div>
+
+      {/* Global System Prompt */}
+      <div style={{ ...s.tableWrap, padding: '20px', marginBottom: '32px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-heading)', margin: 0 }}>Global System Prompt (House Rules)</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '4px 0 0' }}>These instructions will be prepended to every RAG query across all agents.</p>
+          </div>
+          <button 
+            onClick={saveHouseRules} 
+            disabled={savingRules}
+            style={{ ...s.primaryBtn, background: 'var(--accent-green)', padding: '8px 16px', fontSize: '13px' }}
+          >
+            {savingRules ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+        <textarea
+          value={houseRules}
+          onChange={(e) => setHouseRules(e.target.value)}
+          placeholder="Enter global constraints or instructions... e.g. 'Always answer like a pirate'"
+          style={{
+            width: '100%',
+            height: '120px',
+            padding: '12px',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            color: 'var(--text-primary)',
+            fontSize: '14px',
+            fontFamily: 'monospace',
+            outline: 'none',
+            resize: 'vertical'
+          }}
+        />
       </div>
 
       {/* Toolbar: Search + Filter */}

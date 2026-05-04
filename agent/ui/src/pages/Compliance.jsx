@@ -27,8 +27,8 @@ export default function CompliancePage() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Step 1 — subject document
-  const [subjectDocId, setSubjectDocId] = useState('');
+  // Step 1 — subject documents
+  const [subjectDocIds, setSubjectDocIds] = useState([]);
   // Step 2 — standard documents
   const [standardDocIds, setStandardDocIds] = useState([]);
   // Step 3 — results
@@ -51,6 +51,12 @@ export default function CompliancePage() {
     findingsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [findings]);
 
+  const toggleSubject = (docId) => {
+    setSubjectDocIds(prev =>
+      prev.includes(docId) ? prev.filter(d => d !== docId) : [...prev, docId]
+    );
+  };
+
   const toggleStandard = (docId) => {
     setStandardDocIds(prev =>
       prev.includes(docId) ? prev.filter(d => d !== docId) : [...prev, docId]
@@ -58,7 +64,7 @@ export default function CompliancePage() {
   };
 
   const canProceed = () => {
-    if (step === 1) return !!subjectDocId;
+    if (step === 1) return subjectDocIds.length > 0;
     if (step === 2) return standardDocIds.length > 0;
     return false;
   };
@@ -77,7 +83,7 @@ export default function CompliancePage() {
     connectStream(
       getApiUrl('/api/agent/compliance/check'),
       {
-        subject_doc_id: subjectDocId,
+        subject_doc_ids: subjectDocIds,
         standard_doc_ids: standardDocIds,
       },
       // onToken — each finding
@@ -100,7 +106,12 @@ export default function CompliancePage() {
     );
   };
 
-  const getSubjectName = () => documents.find(d => d.doc_id === subjectDocId)?.filename || 'Document';
+  const getSubjectNames = () => {
+    const names = documents.filter(d => subjectDocIds.includes(d.doc_id)).map(d => d.filename);
+    if (names.length === 0) return 'Documents';
+    if (names.length === 1) return names[0];
+    return `${names[0]} and ${names.length - 1} more`;
+  };
 
   return (
     <div style={styles.page}>
@@ -147,11 +158,9 @@ export default function CompliancePage() {
           <div className="animate-fade-in">
             <h2 style={styles.stepTitle}>
               <FileCheck size={20} />
-              Select Subject Document
+              Select Subject Document(s)
             </h2>
-            <p style={styles.stepDesc}>
-              Choose the document to check for compliance (e.g., bid proposal, inspection report).
-            </p>
+            <p style={styles.stepDesc}>Choose the documents (e.g. shipbuilder bid, drawings) you want to evaluate.</p>
             <div style={styles.docGrid}>
               {loading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>
@@ -160,15 +169,23 @@ export default function CompliancePage() {
               ) : documents.map(doc => (
                 <div
                   key={doc.doc_id}
-                  onClick={() => setSubjectDocId(doc.doc_id)}
                   style={{
                     ...styles.docCard,
-                    borderColor: subjectDocId === doc.doc_id ? 'var(--primary)' : 'var(--border)',
-                    background: subjectDocId === doc.doc_id ? 'var(--primary-dim)' : 'var(--bg-input)',
+                    borderColor: subjectDocIds.includes(doc.doc_id) ? 'var(--primary)' : 'var(--border)',
+                    background: subjectDocIds.includes(doc.doc_id) ? 'rgba(74,139,255,0.05)' : 'var(--bg-card)',
                   }}
+                  onClick={() => toggleSubject(doc.doc_id)}
                 >
-                  <FileText size={18} color={subjectDocId === doc.doc_id ? '#4a8bff' : '#556688'} />
+                  <input
+                    type="checkbox"
+                    checked={subjectDocIds.includes(doc.doc_id)}
+                    readOnly
+                    style={{ accentColor: 'var(--primary)', width: 16, height: 16, cursor: 'pointer' }}
+                  />
                   <div style={styles.docCardName}>{doc.filename}</div>
+                  <div style={{ fontSize: '11px', color: doc.category === 'Global Standard' ? '#22c55e' : 'var(--accent-blue-light)', marginBottom: '4px', fontWeight: 600 }}>
+                    {doc.category || 'Uncategorised'}
+                  </div>
                   <div style={styles.docCardMeta}>{doc.chunks} chunks • {doc.page_count} pages</div>
                 </div>
               ))}
@@ -190,11 +207,11 @@ export default function CompliancePage() {
               Select Standard Documents
             </h2>
             <p style={styles.stepDesc}>
-              Choose one or more standard/regulatory documents to check against. Selected subject: <strong style={{ color: 'var(--primary)' }}>{getSubjectName()}</strong>
+              Choose one or more standard/regulatory documents to check against. Selected subjects: <strong style={{ color: 'var(--primary)' }}>{getSubjectNames()}</strong>
             </p>
             <div style={styles.docGrid}>
               {documents
-                .filter(d => d.doc_id !== subjectDocId)
+                .filter(d => !subjectDocIds.includes(d.doc_id))
                 .map(doc => (
                   <div
                     key={doc.doc_id}
@@ -218,6 +235,9 @@ export default function CompliancePage() {
                       {standardDocIds.includes(doc.doc_id) && <CheckCircle2 size={12} color="#fff" />}
                     </div>
                     <div style={styles.docCardName}>{doc.filename}</div>
+                    <div style={{ fontSize: '11px', color: doc.category === 'Global Standard' ? '#22c55e' : 'var(--accent-blue-light)', marginBottom: '4px', fontWeight: 600 }}>
+                      {doc.category || 'Uncategorised'}
+                    </div>
                     <div style={styles.docCardMeta}>{doc.chunks} chunks</div>
                   </div>
                 ))}
@@ -239,7 +259,7 @@ export default function CompliancePage() {
               Compliance Analysis
             </h2>
             <p style={styles.stepDesc}>
-              Checking <strong style={{ color: 'var(--primary)' }}>{getSubjectName()}</strong> against {standardDocIds.length} standard document{standardDocIds.length !== 1 ? 's' : ''}.
+              Checking <strong style={{ color: 'var(--primary)' }}>{getSubjectNames()}</strong> against {standardDocIds.length} standard document{standardDocIds.length !== 1 ? 's' : ''}.
             </p>
 
             {!running && findings.length === 0 && (
@@ -283,52 +303,68 @@ export default function CompliancePage() {
               </div>
             )}
 
-            {/* Findings */}
+            {/* Findings Grouped by Topic */}
             <div style={styles.findingsList}>
-              {findings.map((f, i) => {
-                const v = VERDICT_CONFIG[f.verdict] || VERDICT_CONFIG.Unverifiable;
-                const VIcon = v.icon;
-                return (
-                  <div key={i} style={{ ...styles.findingCard, borderLeftColor: v.color }} className="animate-slide-up">
-                    <div style={styles.findingHeader}>
-                      <div style={{ ...styles.verdictBadge, background: v.bg, color: v.color }}>
-                        <VIcon size={14} />
-                        {v.label}
-                      </div>
-                      <span style={styles.findingClause}>{f.clause}</span>
-                    </div>
-                    <div style={styles.findingBody}>
-                      <div style={styles.fieldGroup}>
-                        <div style={styles.fieldLabel}>Requirement</div>
-                        <div style={styles.fieldValue}>{f.requirement}</div>
-                      </div>
-                      <div style={styles.fieldGroup}>
-                        <div style={styles.fieldLabel}>Finding</div>
-                        <div style={styles.fieldValue}>{f.finding}</div>
-                      </div>
-                      {f.recommendation && (
-                        <div style={styles.fieldGroup}>
-                          <div style={styles.fieldLabel}>Recommendation</div>
-                          <div style={{ ...styles.fieldValue, color: 'var(--accent-amber)' }}>{f.recommendation}</div>
+              {Object.entries(
+                findings.reduce((acc, f) => {
+                  const t = f.topic || 'General Requirements';
+                  if (!acc[t]) acc[t] = [];
+                  acc[t].push(f);
+                  return acc;
+                }, {})
+              ).map(([topic, tFindings]) => (
+                <div key={topic} style={{ marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>
+                    {topic}
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {tFindings.map((f, i) => {
+                      const v = VERDICT_CONFIG[f.verdict] || VERDICT_CONFIG.Unverifiable;
+                      const VIcon = v.icon;
+                      return (
+                        <div key={i} style={{ ...styles.findingCard, borderLeftColor: v.color }} className="animate-slide-up">
+                          <div style={styles.findingHeader}>
+                            <div style={{ ...styles.verdictBadge, background: v.bg, color: v.color }}>
+                              <VIcon size={14} />
+                              {v.label}
+                            </div>
+                            <span style={styles.findingClause}>{f.clause}</span>
+                          </div>
+                          <div style={styles.findingBody}>
+                            <div style={styles.fieldGroup}>
+                              <div style={styles.fieldLabel}>Requirement</div>
+                              <div style={styles.fieldValue}>{f.requirement}</div>
+                            </div>
+                            <div style={styles.fieldGroup}>
+                              <div style={styles.fieldLabel}>Finding</div>
+                              <div style={styles.fieldValue}>{f.finding}</div>
+                            </div>
+                            {f.recommendation && (
+                              <div style={styles.fieldGroup}>
+                                <div style={styles.fieldLabel}>Recommendation</div>
+                                <div style={{ ...styles.fieldValue, color: 'var(--accent-amber)' }}>{f.recommendation}</div>
+                              </div>
+                            )}
+                            {f.citation && (
+                              <div style={styles.fieldGroup}>
+                                <div style={styles.fieldLabel}>Citation</div>
+                                <div style={{
+                                  ...styles.fieldValue,
+                                  fontStyle: 'italic',
+                                  background: 'rgba(74,139,255,0.05)',
+                                  padding: '8px 10px',
+                                  borderRadius: '6px',
+                                  borderLeft: '2px solid var(--primary)',
+                                }}>{f.citation}</div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      {f.citation && (
-                        <div style={styles.fieldGroup}>
-                          <div style={styles.fieldLabel}>Citation</div>
-                          <div style={{
-                            ...styles.fieldValue,
-                            fontStyle: 'italic',
-                            background: 'rgba(74,139,255,0.05)',
-                            padding: '8px 10px',
-                            borderRadius: '6px',
-                            borderLeft: '2px solid var(--primary)',
-                          }}>{f.citation}</div>
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              ))}
               {running && (
                 <div style={{ textAlign: 'center', padding: '24px' }}>
                   <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} color="var(--primary)" />

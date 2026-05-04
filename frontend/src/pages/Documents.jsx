@@ -160,7 +160,7 @@ export default function Documents() {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>FILENAME</th>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>SIZE</th>
+                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>CATEGORY</th>
                 <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>VERSION</th>
                 <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>UPLOADED BY</th>
                 <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}></th>
@@ -199,7 +199,16 @@ export default function Documents() {
                       </div>
                     </td>
                     <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                      {doc.size ? (doc.size / 1024 / 1024).toFixed(2) + ' MB' : '0.5 MB'}
+                      <span style={{
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        background: doc.category === 'Global Standard' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(74, 139, 255, 0.1)',
+                        color: doc.category === 'Global Standard' ? '#22c55e' : '#7ab4ff',
+                        fontSize: '11px',
+                        fontWeight: 600
+                      }}>
+                        {doc.category || 'Uncategorised'}
+                      </span>
                     </td>
                     <td style={{ padding: '16px 20px' }}>
                       <span style={{ 
@@ -273,8 +282,7 @@ export default function Documents() {
                   onChange={(e) => setSelectedFile(e.target.files[0])}
                 />
               </div>
-              <input
-                placeholder="Category (optional)"
+              <select
                 value={uploadData.category}
                 onChange={(e) => setUploadData({...uploadData, category: e.target.value})}
                 style={{
@@ -284,9 +292,15 @@ export default function Documents() {
                   borderRadius: '8px',
                   color: 'var(--text-heading)',
                   fontSize: '14px',
-                  outline: 'none'
+                  outline: 'none',
+                  appearance: 'none'
                 }}
-              />
+              >
+                <option value="" disabled>Select Category</option>
+                <option value="Global Standard">Global Standard</option>
+                <option value="Project Document">Project Document</option>
+                <option value="Reference Material">Reference Material</option>
+              </select>
               <textarea
                 placeholder="Description (optional)"
                 value={uploadData.description}
