@@ -10,7 +10,7 @@ import {
   MessageSquare, Plus, Send, Paperclip, ChevronDown, ChevronRight,
   Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
-  ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard,
+  ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
 import { getApiUrl } from '../utils/api';
