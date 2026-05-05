@@ -28,8 +28,9 @@ def _get_paddle_ocr():
     global _paddle_ocr
     if _paddle_ocr is None:
         import os
-        # Disable oneDNN to prevent PIR runtime crash (ERR_HTTP2_PROTOCOL_ERROR)
+        # Disable oneDNN and PIR to prevent runtime crash (ERR_HTTP2_PROTOCOL_ERROR / PIR attribute error)
         os.environ["FLAGS_use_mkldnn"] = "0"
+        os.environ["FLAGS_enable_pir_api"] = "0"
         from paddleocr import PaddleOCR
         try:
             # Try passing legacy kwargs for older versions

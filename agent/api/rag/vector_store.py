@@ -42,6 +42,7 @@ class VectorStore:
 
     _instance = None
     _lock = threading.Lock()
+    _upsert_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -162,23 +163,24 @@ class VectorStore:
         if not chunks or not embeddings:
             return 0
 
-        points: List[PointStruct] = []
-        for chunk, emb in zip(chunks, embeddings):
-            point_id = str(uuid.uuid4())
-            payload = {
-                "text": chunk["text"],
-                "metadata": chunk["metadata"],
-            }
-            points.append(PointStruct(id=point_id, vector=emb, payload=payload))
-            self._add_to_bm25(point_id, chunk["text"], chunk["metadata"])
+        with self._upsert_lock:
+            points: List[PointStruct] = []
+            for chunk, emb in zip(chunks, embeddings):
+                point_id = str(uuid.uuid4())
+                payload = {
+                    "text": chunk["text"],
+                    "metadata": chunk["metadata"],
+                }
+                points.append(PointStruct(id=point_id, vector=emb, payload=payload))
+                self._add_to_bm25(point_id, chunk["text"], chunk["metadata"])
 
-        # Upsert in batches of 100
-        for i in range(0, len(points), 100):
-            batch = points[i:i + 100]
-            self.client.upsert(collection_name=_COLLECTION, points=batch)
+            # Upsert in batches of 100
+            for i in range(0, len(points), 100):
+                batch = points[i:i + 100]
+                self.client.upsert(collection_name=_COLLECTION, points=batch)
 
-        logger.info("Upserted %d chunks into '%s'.", len(points), _COLLECTION)
-        return len(points)
+            logger.info("Upserted %d chunks into '%s'.", len(points), _COLLECTION)
+            return len(points)
 
     def hybrid_search(
         self,
