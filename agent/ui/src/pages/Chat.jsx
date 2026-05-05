@@ -13,7 +13,7 @@ import {
   ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
-import { getApiUrl } from '../utils/api';
+import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
