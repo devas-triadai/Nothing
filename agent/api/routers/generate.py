@@ -519,7 +519,7 @@ async def generate_draft_sotr(
     filename = chunks[0]["metadata"].get("filename", "document")
     focus_note = f"\\nFocus specifically on: {body.focus_area}" if body.focus_area else ""
 
-    prompt = f\"\"\"Generate a Draft Statement of Technical Requirements (SOTR) based on the following document.
+    prompt = f"""Generate a Draft Statement of Technical Requirements (SOTR) based on the following document.
 
 DOCUMENT: {filename}
 {focus_note}
@@ -534,7 +534,7 @@ FORMAT the SOTR strictly with the following sections:
 4. **Specific Requirements** — Detailed specifications and performance criteria
 5. **Quality Assurance & Testing** — Acceptance criteria
 
-Use formal, objective military specification language (e.g., 'The system shall...', 'The contractor must...').\"\"\"
+Use formal, objective military specification language (e.g., 'The system shall...', 'The contractor must...')."""
 
     messages = [
         {"role": "system", "content": "You are a technical specifications writer for the Indian Coast Guard."},
@@ -603,7 +603,7 @@ async def generate_tech_review(
     full_text = "\n\n".join(c["text"] for c in chunks[:30]) # Use first 30 chunks
     filename = chunks[0]["metadata"].get("filename", "document")
 
-    prompt = f\"\"\"Generate Technical Review Comments for the following submission document.
+    prompt = f"""Generate Technical Review Comments for the following submission document.
 Target Audience: {body.target_audience}
 
 DOCUMENT: {filename}
@@ -616,7 +616,7 @@ FORMAT the review strictly as:
 3. **Clarifications Required** — Specific points needing more details
 4. **Recommendations** — Proposed actions or accept/reject advice
 
-Keep the tone professional, objective, and analytical.\"\"\"
+Keep the tone professional, objective, and analytical."""
 
     messages = [
         {"role": "system", "content": "You are a lead technical reviewer for the Indian Coast Guard."},
