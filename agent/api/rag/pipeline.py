@@ -195,6 +195,8 @@ def ingest_document(
     token: str = "",
     category: Optional[str] = None,
     description: Optional[str] = None,
+    parent_doc_id: Optional[str] = None,
+    version_notes: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
@@ -242,21 +244,22 @@ def ingest_document(
     # ── Notify admin backend (best effort) ──
     if token:
         try:
+            # We must use a multipart form since the backend expects Form(...) data for /upload
+            files = {'file': (filename, b'dummy content for metadata registration', 'text/plain')}
+            data = {
+                "category": category or "Uncategorised",
+                "description": description or f"Ingested by AGRA Agent (doc_id: {doc_id})",
+            }
+            if parent_doc_id:
+                data["parent_doc_id"] = parent_doc_id
+            if version_notes:
+                data["version_notes"] = version_notes
+                
             httpx.post(
-                f"{_ADMIN_BASE}/api/documents/",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "filename": filename,
-                    "original_filename": filename,
-                    "file_type": filename.rsplit(".", 1)[-1] if "." in filename else "unknown",
-                    "category": category or "Uncategorised",
-                    "description": description or f"Ingested by AGRA Agent (doc_id: {doc_id})",
-                    "page_count": len(pages),
-                    "status": "indexed",
-                },
+                f"{_ADMIN_BASE}/api/documents/upload",
+                headers={"Authorization": f"Bearer {token}"},
+                data=data,
+                files=files,
                 timeout=5.0,
             )
         except Exception as e:

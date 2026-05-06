@@ -89,6 +89,10 @@ async def compliance_check(
     subject_filenames_str = ", ".join(subject_filenames)
     subject_text = "\n\n".join(f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}" for c in subject_chunks[:30])
 
+    # Calculate average OCR confidence
+    conf_scores = [c["metadata"].get("ocr_confidence", 1.0) for c in subject_chunks if "metadata" in c]
+    avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 1.0
+
     # Extract key clauses from standards
     standards_text = "\n\n".join(c["text"] for c in standard_chunks[:20])
 
@@ -143,6 +147,55 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("Failed to parse compliance JSON: %s\nRaw (first 800): %s", e, findings_raw[:800])
         raise HTTPException(status_code=500, detail="Failed to parse compliance analysis. Please try again.")
+
+    # Second pass: Missing Requirements
+    covered_clauses = [f.get("clause", "") for f in findings]
+    covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
+    
+    missing_prompt = f"""You are a compliance analyst.
+    
+STANDARD:
+{standards_text[:12000]}
+
+The following clauses were already checked:
+{covered_str}
+
+Identify any CRITICAL requirements or clauses in the STANDARD that were NOT checked above, and which are completely MISSING from the subject documents.
+Return ONLY a valid JSON array of these missing findings, using the exact same format:
+{{
+  "topic": "Broad category",
+  "clause": "Clause reference",
+  "requirement": "What the standard requires",
+  "verdict": "Missing",
+  "finding": "This requirement was completely omitted from the subject document.",
+  "recommendation": "Shipbuilder must provide details on this requirement.",
+  "citation": "N/A"
+}}
+If there are no major missing requirements, return an empty array []."""
+
+    messages_missing = [
+        {"role": "system", "content": "You are an expert compliance auditor. Return only valid JSON arrays."},
+        {"role": "user", "content": missing_prompt},
+    ]
+    try:
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=2048, temperature=0.3)
+        cleaned = _clean_json(missing_raw)
+        start = cleaned.find("[")
+        end = cleaned.rfind("]") + 1
+        if start != -1 and end != 0:
+            missing_findings = json.loads(cleaned[start:end])
+            if isinstance(missing_findings, list):
+                findings.extend(missing_findings)
+    except Exception as e:
+        logger.warning("Second pass (Missing Requirements) failed or returned empty: %s", e)
+
+    # Post-process for low OCR confidence
+    if avg_conf < 0.65:
+        logger.warning(f"Low OCR confidence detected: {avg_conf:.2f}")
+        for finding in findings:
+            if finding.get("verdict") != "Missing":
+                finding["verdict"] = "Unverifiable"
+                finding["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + finding.get("finding", "")
 
     # Stream findings as SSE
     job_id = str(uuid.uuid4())

@@ -37,6 +37,8 @@ async def upload_document(
     file: UploadFile = File(...),
     category: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    parent_doc_id: Optional[str] = Form(None),
+    version_notes: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -85,6 +87,8 @@ async def upload_document(
             token=user.get("_raw_token", ""),
             category=category,
             description=description,
+            parent_doc_id=parent_doc_id,
+            version_notes=version_notes,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 

@@ -104,6 +104,27 @@ class IngestionJob(Base):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Background Jobs (VLM / Drawing Analysis)
+# ═══════════════════════════════════════════════════════════════
+
+class AsyncJob(Base):
+    __tablename__ = "async_jobs"
+
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
+    job_type = Column(String(50), nullable=False)  # e.g., "drawing_extraction", "drawing_compare"
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    progress = Column(Integer, default=0)
+    
+    input_data = Column(JSON, nullable=True)
+    result_data = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Create all tables
 # ═══════════════════════════════════════════════════════════════
 

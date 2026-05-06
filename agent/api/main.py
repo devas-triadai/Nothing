@@ -130,13 +130,15 @@ app.add_middleware(
 
 
 # ── Register Routers ──
-from api.routers import upload, chat, generate, compliance, vlm
+from api.routers import upload, chat, generate, compliance, vlm, drawing, compare
 
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
 app.include_router(generate.router,   prefix="/api/agent", tags=["Generation"])
 app.include_router(compliance.router, prefix="/api/agent", tags=["Compliance"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
+app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
+app.include_router(compare.router,    prefix="/api/agent", tags=["Compare"])
 
 
 # ── Health & Root ──

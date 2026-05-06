@@ -31,6 +31,8 @@ export default function UploadPage() {
   const [sortKey, setSortKey] = useState('filename');
   const [sortDir, setSortDir] = useState('asc');
   const fileInputRef = useRef(null);
+  const versionInputRef = useRef(null);
+  const [versionTarget, setVersionTarget] = useState(null);
   const token = getToken();
 
   // Sort handler
@@ -79,7 +81,7 @@ export default function UploadPage() {
   }, [fetchDocuments]);
 
   // ── Upload handler ──
-  const uploadFile = async (file) => {
+  const uploadFile = async (file, parentDocId = null, versionNotes = null) => {
     const id = Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     const queueItem = {
       id,
@@ -95,6 +97,12 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      if (parentDocId) {
+        formData.append('parent_doc_id', parentDocId);
+      }
+      if (versionNotes) {
+        formData.append('version_notes', versionNotes);
+      }
 
       const response = await fetch(getApiUrl('/api/agent/upload'), {
         method: 'POST',
@@ -178,6 +186,23 @@ export default function UploadPage() {
     handleFiles(e.dataTransfer.files);
   };
 
+  const handleVersionClick = (docId) => {
+    setVersionTarget(docId);
+    versionInputRef.current?.click();
+  };
+
+  const handleVersionFiles = (files) => {
+    if (!versionTarget) return;
+    const versionNotes = window.prompt("Enter version notes (optional):", "Minor revision");
+    Array.from(files).forEach(file => {
+      const ext = '.' + file.name.split('.').pop().toLowerCase();
+      if (ACCEPTED_TYPES.includes(ext)) {
+        uploadFile(file, versionTarget, versionNotes);
+      }
+    });
+    setVersionTarget(null);
+  };
+
   const handleDragOver = (e) => {
     e.preventDefault();
     setIsDragging(true);
@@ -247,6 +272,13 @@ export default function UploadPage() {
           multiple
           accept={ACCEPTED_TYPES.join(',')}
           onChange={(e) => handleFiles(e.target.files)}
+          style={{ display: 'none' }}
+        />
+        <input
+          ref={versionInputRef}
+          type="file"
+          accept={ACCEPTED_TYPES.join(',')}
+          onChange={(e) => handleVersionFiles(e.target.files)}
           style={{ display: 'none' }}
         />
         <div style={styles.dropIcon}>
@@ -407,13 +439,22 @@ export default function UploadPage() {
                         </span>
                       </td>
                       <td style={styles.td}>
-                        <button
-                          onClick={() => handleDelete(doc.doc_id)}
-                          style={styles.deleteBtn}
-                          title="Delete document"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={() => handleVersionClick(doc.doc_id)}
+                            style={styles.actionBtn}
+                            title="Upload new version"
+                          >
+                            <UploadIcon size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(doc.doc_id)}
+                            style={styles.actionBtn}
+                            title="Delete document"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -650,16 +691,17 @@ const styles = {
     color: 'var(--primary)',
     letterSpacing: '0.5px',
   },
-  deleteBtn: {
+  actionBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     width: 30,
     height: 30,
     borderRadius: 'var(--radius-sm)',
-    background: 'transparent',
+    background: 'var(--bg-input)',
     color: 'var(--text-muted)',
-    border: 'none',
+    border: '1px solid var(--border)',
     transition: 'color 0.15s, background 0.15s',
+    cursor: 'pointer',
   },
 };

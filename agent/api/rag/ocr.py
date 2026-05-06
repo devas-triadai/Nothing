@@ -10,7 +10,7 @@ import io
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger("agra.ocr")
 
@@ -47,8 +47,8 @@ def _get_paddle_ocr():
     return _paddle_ocr
 
 
-def _ocr_image_bytes(image_bytes: bytes) -> str:
-    """Run PaddleOCR on raw image bytes, return extracted text."""
+def _ocr_image_bytes(image_bytes: bytes) -> Tuple[str, float]:
+    """Run PaddleOCR on raw image bytes, return (extracted text, avg_confidence)."""
     import numpy as np
     from PIL import Image
 
@@ -59,16 +59,26 @@ def _ocr_image_bytes(image_bytes: bytes) -> str:
         results = ocr.ocr(img_array)
     except Exception as e:
         logger.error("PaddleOCR failed to process image (likely PIR attribute error): %s", e)
-        return ""
+        return "", 0.0
         
     if not results or not results[0]:
-        return ""
+        return "", 0.0
     lines = []
+    confidences = []
     for line in results[0]:
         if line and len(line) >= 2:
-            text = line[1][0] if isinstance(line[1], (list, tuple)) else str(line[1])
-            lines.append(text)
-    return "\n".join(lines)
+            val = line[1]
+            if isinstance(val, (list, tuple)) and len(val) >= 2:
+                lines.append(str(val[0]))
+                try:
+                    confidences.append(float(val[1]))
+                except ValueError:
+                    pass
+            else:
+                lines.append(str(val))
+                
+    avg_conf = sum(confidences) / len(confidences) if confidences else 1.0
+    return "\n".join(lines), avg_conf
 
 
 def _is_scanned_page(page) -> bool:
@@ -102,13 +112,14 @@ def extract_pdf(file_path: str) -> List[Dict[str, Any]]:
             logger.debug("Page %d is scanned — using OCR.", page_num + 1)
             pix = page.get_pixmap(dpi=300)
             img_bytes = pix.tobytes("png")
-            text = _ocr_image_bytes(img_bytes)
+            text, conf = _ocr_image_bytes(img_bytes)
         else:
             text = page.get_text("text")
+            conf = 1.0
 
         text = text.strip()
         if text:
-            pages.append({"page": page_num + 1, "text": text})
+            pages.append({"page": page_num + 1, "text": text, "ocr_confidence": conf})
 
     doc.close()
     logger.info("PDF %s: extracted %d pages.", Path(file_path).name, len(pages))
@@ -133,13 +144,13 @@ def extract_docx(file_path: str) -> List[Dict[str, Any]]:
         current_page.append(line)
         current_len += len(line)
         if current_len >= 3000:
-            chunks.append({"page": page_num, "text": "\n".join(current_page)})
+            chunks.append({"page": page_num, "text": "\n".join(current_page), "ocr_confidence": 1.0})
             current_page = []
             current_len = 0
             page_num += 1
 
     if current_page:
-        chunks.append({"page": page_num, "text": "\n".join(current_page)})
+        chunks.append({"page": page_num, "text": "\n".join(current_page), "ocr_confidence": 1.0})
 
     logger.info("DOCX %s: extracted %d pages.", Path(file_path).name, len(chunks))
     return chunks
@@ -158,18 +169,18 @@ def extract_txt(file_path: str) -> List[Dict[str, Any]]:
         return []
 
     logger.info("TXT %s: %d characters.", Path(file_path).name, len(text))
-    return [{"page": 1, "text": text}]
+    return [{"page": 1, "text": text, "ocr_confidence": 1.0}]
 
 
 def extract_image(file_path: str) -> List[Dict[str, Any]]:
     """OCR a standalone image file (JPEG, PNG)."""
     with open(file_path, "rb") as f:
         img_bytes = f.read()
-    text = _ocr_image_bytes(img_bytes)
+    text, conf = _ocr_image_bytes(img_bytes)
     if not text.strip():
         return []
     logger.info("Image %s: OCR extracted %d characters.", Path(file_path).name, len(text))
-    return [{"page": 1, "text": text}]
+    return [{"page": 1, "text": text, "ocr_confidence": conf}]
 
 
 def extract_document(file_path: str) -> List[Dict[str, Any]]:

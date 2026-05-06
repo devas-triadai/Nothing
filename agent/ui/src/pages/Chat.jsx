@@ -297,18 +297,19 @@ function SourcePanel({ source, onClose, apiUrl }) {
 
 
 export default function Chat() {
-  const [sessions, setSessions] = useState(loadSessions);
+  const [sessions, setSessions] = useState(loadSessions());
   const [activeSessionId, setActiveSessionId] = useState(
     () => localStorage.getItem(ACTIVE_KEY) || null
   );
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isProcessingBg, setIsProcessingBg] = useState(false); // Separate flag for custom bg actions
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
-  const [bgTasks, setBgTasks] = useState([]); // background generation tasks
   const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
   const [selectedImage, setSelectedImage] = useState(null); // VLM image attachment
+  const [isPollingDrawing, setIsPollingDrawing] = useState(false);
   
   // Phase 5: Multi-document context selection
   const [documents, setDocuments] = useState([]);
@@ -830,6 +831,173 @@ export default function Chat() {
     e.target.value = '';
   };
 
+  const handleCompare = async () => {
+    if (selectedDocIds.length < 2) return;
+    setIsProcessingBg(true);
+    
+    const sessId = activeSessionIdRef.current || newSessionId();
+    if (!activeSessionId) {
+      setActiveSessionId(sessId);
+      setSessions(prev => [{ id: sessId, title: "Bid Comparison" }, ...prev]);
+    }
+
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: 'Please compare the selected bid documents. ' + input,
+      timestamp: new Date().toISOString()
+    }, {
+      role: 'assistant',
+      content: 'Starting comparative analysis...',
+      streaming: true,
+      timestamp: new Date().toISOString()
+    }]);
+
+    try {
+      const resp = await fetch(getApiUrl('/api/agent/compare/bids'), {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          bid_doc_ids: selectedDocIds,
+          standard_doc_id: null,
+          check_scope: input
+        })
+      });
+
+      if (!resp.ok) throw new Error("Failed to start comparison");
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '### Cross-Document Comparative Analysis\n\n';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.replace('data: ', '').trim();
+            if (!dataStr) continue;
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.comparison) {
+                const comp = data.comparison;
+                accumulatedContent += `#### ${comp.parameter}\n`;
+                accumulatedContent += `- **Standard**: ${comp.standard_requirement}\n`;
+                for (const bid of comp.bids || []) {
+                  accumulatedContent += `- **${bid.bidder}**: ${bid.value} *(Compliant: ${bid.compliant})*\n`;
+                }
+                accumulatedContent += `\n**Analysis**: ${comp.analysis}\n`;
+                accumulatedContent += `**Winner**: ${comp.winner}\n\n`;
+                
+                setMessages(prev => {
+                  const copy = [...prev];
+                  copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedContent };
+                  return copy;
+                });
+              }
+              if (data.done) {
+                setMessages(prev => {
+                  const copy = [...prev];
+                  copy[copy.length - 1] = { 
+                    ...copy[copy.length - 1], 
+                    streaming: false,
+                    summary: data.download_url ? { downloadUrl: data.download_url } : null
+                  };
+                  return copy;
+                });
+                break;
+              }
+            } catch (e) {
+              console.error("Parse error", e);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setMessages(prev => {
+        const copy = [...prev];
+        copy[copy.length - 1] = { ...copy[copy.length - 1], content: 'Error: ' + err.message, streaming: false, isError: true };
+        return copy;
+      });
+    } finally {
+      setIsProcessingBg(false);
+      setInput('');
+    }
+  };
+
+  const handleDrawingExtract = async () => {
+    if (!selectedImage) return;
+    setIsPollingDrawing(true);
+    
+    // Add temporary message
+    const tempUrl = URL.createObjectURL(selectedImage);
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: 'Please extract parameters from this drawing.',
+      image: tempUrl,
+      timestamp: new Date().toISOString()
+    }]);
+
+    try {
+      const formData = new FormData();
+      formData.append('image', selectedImage);
+      
+      const resp = await fetch(getApiUrl('/api/agent/drawing/extract_parameters'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!resp.ok) throw new Error('Failed to start extraction');
+      const { job_id } = await resp.json();
+      
+      // Poll for completion
+      const interval = setInterval(async () => {
+        const statusResp = await fetch(getApiUrl(`/api/agent/drawing/jobs/${job_id}`), {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const statusData = await statusResp.json();
+        if (statusData.status === 'completed') {
+          clearInterval(interval);
+          setIsPollingDrawing(false);
+          setSelectedImage(null);
+          
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'Here are the extracted parameters from the drawing:\n```json\n' + JSON.stringify(statusData.result_data, null, 2) + '\n```\n\n*To compare against a standard, please use the compliance endpoints or ask me to compare them.*',
+            timestamp: new Date().toISOString()
+          }]);
+        } else if (statusData.status === 'failed') {
+          clearInterval(interval);
+          setIsPollingDrawing(false);
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'Failed to extract parameters: ' + statusData.error_message,
+            isError: true,
+            timestamp: new Date().toISOString()
+          }]);
+        }
+      }, 3000);
+      
+    } catch (err) {
+      setIsPollingDrawing(false);
+      console.error(err);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Failed to start drawing extraction.',
+        isError: true,
+        timestamp: new Date().toISOString()
+      }]);
+    }
+  };
+
   // Citation click handler — attach to document, read data-cite attr
   useEffect(() => {
     const handler = (e) => {
@@ -1072,14 +1240,26 @@ export default function Chat() {
         <div style={styles.inputBarWrap}>
           {/* Phase 5: Context Selector */}
           <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <button 
-              onClick={() => setShowDocSelector(!showDocSelector)}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}
-            >
-              <FileText size={14} />
-              {selectedDocIds.length > 0 ? `Context: ${selectedDocIds.length} docs selected` : 'Context: All Documents'}
-              {showDocSelector ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button 
+                onClick={() => setShowDocSelector(!showDocSelector)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0 }}
+              >
+                <FileText size={14} />
+                {selectedDocIds.length > 0 ? `Context: ${selectedDocIds.length} docs selected` : 'Context: All Documents'}
+                {showDocSelector ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
+              
+              {selectedDocIds.length >= 2 && (
+                <button
+                  onClick={handleCompare}
+                  disabled={isSessionStreaming || isProcessingBg}
+                  style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '10px', padding: '2px 8px', cursor: 'pointer', opacity: (isSessionStreaming || isProcessingBg) ? 0.5 : 1 }}
+                >
+                  Compare Bids
+                </button>
+              )}
+            </div>
             
             {showDocSelector && (
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '8px', maxHeight: '150px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -1119,6 +1299,13 @@ export default function Chat() {
               <img src={URL.createObjectURL(selectedImage)} alt="Preview" style={{ height: '30px', borderRadius: '4px' }} />
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{selectedImage.name}</span>
               <button onClick={() => setSelectedImage(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
+              <button 
+                onClick={handleDrawingExtract} 
+                style={{ padding: '4px 8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', marginLeft: '8px', opacity: isPollingDrawing ? 0.6 : 1 }}
+                disabled={isPollingDrawing}
+              >
+                {isPollingDrawing ? "Extracting Parameters (VLM)..." : "Extract Parameters"}
+              </button>
             </div>
           )}
           <div style={styles.inputBar}>

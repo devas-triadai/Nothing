@@ -254,6 +254,7 @@ def chunk_pages(
     for page_data in pages:
         page_num = page_data.get("page", 1)
         page_text = page_data.get("text", "")
+        ocr_confidence = page_data.get("ocr_confidence", 1.0)
 
         # Detect section heading from this page's text
         detected = _detect_section_heading(page_text)
@@ -278,6 +279,7 @@ def chunk_pages(
             chunk["metadata"]["chunk_index"] = global_index
             chunk["metadata"]["section_title"] = current_section or ""
             chunk["metadata"]["doc_title"] = doc_title
+            chunk["metadata"]["ocr_confidence"] = ocr_confidence
             global_index += 1
             all_chunks.append(chunk)
 
