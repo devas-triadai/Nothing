@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { apiFetch } from '../utils/api'
 import Spinner from '../components/Spinner'
 import { getToken } from '../utils/auth'
-import { FileText, Upload, Download, Trash2, Eye, History, Search, Filter, MoreVertical } from 'lucide-react'
+import { FileText, Upload, Download, Trash2, Eye, History, Search, Filter, MoreVertical, X, GitBranch } from 'lucide-react'
 
 export default function Documents() {
   const [docs, setDocs] = useState([])
@@ -15,6 +15,8 @@ export default function Documents() {
     description: '',
     version_notes: ''
   })
+  const [versionHistory, setVersionHistory] = useState(null)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
 
   useEffect(() => {
     fetchDocs()
@@ -24,7 +26,7 @@ export default function Documents() {
     setLoading(true)
     try {
       const data = await apiFetch('/documents/')
-      setDocs(Array.isArray(data) ? data : (data?.items || []))
+      setDocs(Array.isArray(data) ? data : (data?.documents || data?.items || []))
     } catch (e) {
       console.error('Fetch docs error:', e)
     } finally {
@@ -67,10 +69,64 @@ export default function Documents() {
     }
   }
 
-  const filteredDocs = docs.filter(d => 
-    d.filename?.toLowerCase().includes(search.toLowerCase()) || 
-    d.type?.toLowerCase().includes(search.toLowerCase())
-  )
+  async function handleView(doc) {
+    const token = getToken()
+    window.open(`/api/documents/${doc.id}/download?token=${token}`, '_blank')
+  }
+
+  async function handleDownload(doc) {
+    try {
+      const token = getToken()
+      const res = await fetch(`/api/documents/${doc.id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      if (!res.ok) throw new Error('Download failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = doc.original_filename || doc.filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Download error:', e)
+      alert('Failed to download file')
+    }
+  }
+
+  async function handleHistory(doc) {
+    try {
+      const data = await apiFetch(`/documents/${doc.id}/versions`)
+      setVersionHistory({ doc, versions: data?.versions || [] })
+      setShowHistoryModal(true)
+    } catch (e) {
+      console.error('History error:', e)
+      alert('Failed to fetch version history')
+    }
+  }
+
+  async function handleDelete(doc) {
+    if (!window.confirm(`Are you sure you want to delete "${doc.original_filename || doc.filename}"? This cannot be undone.`)) return
+    try {
+      await apiFetch(`/documents/${doc.id}`, { method: 'DELETE' })
+      setDocs(prev => prev.filter(d => d.id !== doc.id))
+    } catch (e) {
+      console.error('Delete error:', e)
+      alert('Failed to delete document')
+    }
+  }
+
+  const filteredDocs = docs.filter(d => {
+    const q = search.toLowerCase()
+    if (!q) return true
+    return d.filename?.toLowerCase().includes(q) || 
+      d.original_filename?.toLowerCase().includes(q) ||
+      d.category?.toLowerCase().includes(q) ||
+      d.tags?.toLowerCase().includes(q) ||
+      d.file_type?.toLowerCase().includes(q)
+  })
 
   return (
     <div style={{ padding: '24px' }}>
@@ -177,7 +233,7 @@ export default function Documents() {
                 </tr>
               ) : (
                 filteredDocs.map((doc, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}>
+                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '16px 20px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{
@@ -214,7 +270,7 @@ export default function Documents() {
                       <span style={{ 
                         padding: '4px 8px', 
                         borderRadius: '4px', 
-                        background: 'rgba(255, 255, 255, 0.05)', 
+                        background: 'var(--bg-secondary)', 
                         color: 'var(--text-primary)',
                         fontSize: '11px',
                         fontWeight: 600
@@ -227,10 +283,10 @@ export default function Documents() {
                     </td>
                     <td style={{ padding: '16px 20px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                        <button title="View" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Eye size={18} /></button>
-                        <button title="Download" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Download size={18} /></button>
-                        <button title="History" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><History size={18} /></button>
-                        <button title="Delete" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
+                        <button onClick={() => handleView(doc)} title="View" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Eye size={18} /></button>
+                        <button onClick={() => handleDownload(doc)} title="Download" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Download size={18} /></button>
+                        <button onClick={() => handleHistory(doc)} title="History" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><History size={18} /></button>
+                        <button onClick={() => handleDelete(doc)} title="Delete" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
                       </div>
                     </td>
                   </tr>
@@ -255,8 +311,8 @@ export default function Documents() {
           zIndex: 1000
         }}>
           <div style={{
-            background: '#1a1f2e',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--border)',
             borderRadius: '16px',
             padding: '32px',
             width: '90%',
@@ -266,7 +322,7 @@ export default function Documents() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{
                 padding: '24px',
-                border: '2px dashed rgba(255, 255, 255, 0.2)',
+                border: '2px dashed var(--border)',
                 borderRadius: '12px',
                 textAlign: 'center',
                 cursor: 'pointer'
@@ -287,8 +343,8 @@ export default function Documents() {
                 onChange={(e) => setUploadData({...uploadData, category: e.target.value})}
                 style={{
                   padding: '12px 16px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'var(--bg-input, var(--surface))',
+                  border: '1px solid var(--border)',
                   borderRadius: '8px',
                   color: 'var(--text-heading)',
                   fontSize: '14px',
@@ -297,9 +353,15 @@ export default function Documents() {
                 }}
               >
                 <option value="" disabled>Select Category</option>
-                <option value="Global Standard">Global Standard</option>
-                <option value="Project Document">Project Document</option>
-                <option value="Reference Material">Reference Material</option>
+                <option value="Standard">Standard / Specification</option>
+                <option value="Blueprint">Blueprint / Drawing</option>
+                <option value="SOP">SOP / Procedure</option>
+                <option value="Report">Report / Assessment</option>
+                <option value="Bid Document">Bid / Tender Document</option>
+                <option value="Vessel Document">Vessel / Ship Document</option>
+                <option value="Compliance">Compliance / Regulatory</option>
+                <option value="Imagery">Imagery / Scan</option>
+                <option value="General">General</option>
               </select>
               <textarea
                 placeholder="Description (optional)"
@@ -308,8 +370,8 @@ export default function Documents() {
                 rows={3}
                 style={{
                   padding: '12px 16px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'var(--bg-input, var(--surface))',
+                  border: '1px solid var(--border)',
                   borderRadius: '8px',
                   color: 'var(--text-heading)',
                   fontSize: '14px',
@@ -323,8 +385,8 @@ export default function Documents() {
                 onChange={(e) => setUploadData({...uploadData, version_notes: e.target.value})}
                 style={{
                   padding: '12px 16px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'var(--bg-input, var(--surface))',
+                  border: '1px solid var(--border)',
                   borderRadius: '8px',
                   color: 'var(--text-heading)',
                   fontSize: '14px',
@@ -338,7 +400,7 @@ export default function Documents() {
                     flex: 1,
                     padding: '12px',
                     background: 'var(--accent-blue)',
-                    color: 'var(--text-heading)',
+                    color: '#fff',
                     border: 'none',
                     borderRadius: '8px',
                     fontWeight: 600,
@@ -357,9 +419,9 @@ export default function Documents() {
                   style={{
                     flex: 1,
                     padding: '12px',
-                    background: 'rgba(255, 255, 255, 0.1)',
+                    background: 'var(--bg-secondary, var(--surface))',
                     color: 'var(--text-heading)',
-                    border: 'none',
+                    border: '1px solid var(--border)',
                     borderRadius: '8px',
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -369,6 +431,92 @@ export default function Documents() {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Version History Modal */}
+      {showHistoryModal && versionHistory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'var(--card-bg, var(--surface))',
+            border: '1px solid var(--border)',
+            borderRadius: '16px',
+            padding: '32px',
+            width: '90%',
+            maxWidth: '600px',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <GitBranch size={20} color="var(--accent-blue, #1e6bff)" />
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
+                  Version History
+                </h2>
+              </div>
+              <button
+                onClick={() => { setShowHistoryModal(false); setVersionHistory(null); }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              Lineage for: <strong style={{ color: 'var(--text-heading)' }}>{versionHistory.doc.original_filename || versionHistory.doc.filename}</strong>
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+              {versionHistory.versions.map((v, i) => (
+                <div key={v.id} style={{ display: 'flex', gap: '16px', position: 'relative' }}>
+                  {/* Timeline line */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '24px', flexShrink: 0 }}>
+                    <div style={{
+                      width: '12px', height: '12px', borderRadius: '50%',
+                      background: v.id === versionHistory.doc.id ? 'var(--accent-blue, #1e6bff)' : 'var(--border)',
+                      border: v.id === versionHistory.doc.id ? '2px solid var(--accent-blue, #1e6bff)' : '2px solid var(--text-muted)',
+                      zIndex: 1
+                    }} />
+                    {i < versionHistory.versions.length - 1 && (
+                      <div style={{ width: '2px', flex: 1, background: 'var(--border)', minHeight: '40px' }} />
+                    )}
+                  </div>
+                  {/* Version details */}
+                  <div style={{
+                    flex: 1, padding: '10px 14px', marginBottom: '8px', borderRadius: '10px',
+                    background: v.id === versionHistory.doc.id ? 'rgba(30, 107, 255, 0.08)' : 'transparent',
+                    border: v.id === versionHistory.doc.id ? '1px solid rgba(30, 107, 255, 0.2)' : '1px solid var(--border)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-heading)' }}>
+                        v{v.version} {v.id === versionHistory.doc.id ? '(current)' : ''}
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {v.created_at ? new Date(v.created_at).toLocaleDateString() : ''}
+                      </span>
+                    </div>
+                    {v.version_notes && (
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                        {v.version_notes}
+                      </p>
+                    )}
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                      Uploaded by: {v.uploaded_by || 'System'} • {v.file_type?.toUpperCase()} • {((v.file_size || 0) / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

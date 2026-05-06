@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
 import uuid
 import os
+import re
 
 from app.database import get_db
 from app.models.models import User, Document, AuditLog
@@ -41,6 +43,7 @@ def _doc_to_dict(doc: Document, db: Session) -> dict:
         "page_count": doc.page_count,
         "status": doc.status,
         "category": doc.category,
+        "tags": doc.tags,
         "description": doc.description,
         "version": doc.version,
         "version_notes": doc.version_notes,
@@ -279,3 +282,169 @@ def delete_document(
     db.add(audit)
     db.commit()
     return {"message": "Document deleted"}
+
+
+# ─── Download document file ───────────────────────────────────────────────────
+@router.get("/{doc_id}/download")
+def download_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_path = os.path.join(UPLOAD_DIR, doc.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        path=file_path,
+        filename=doc.original_filename,
+        media_type="application/octet-stream"
+    )
+
+
+# ─── Bulk upload multiple documents ──────────────────────────────────────────
+@router.post("/upload/bulk")
+async def bulk_upload_documents(
+    files: List[UploadFile] = File(...),
+    category: Optional[str] = Form(None),
+    auto_categorize: bool = Form(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    allowed = {"pdf", "docx", "doc", "txt", "xlsx", "pptx", "png", "jpg", "jpeg"}
+    results = []
+    for file in files:
+        ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
+        if ext not in allowed:
+            results.append({"filename": file.filename, "status": "skipped", "reason": f"Type '.{ext}' not allowed"})
+            continue
+        content = await file.read()
+        file_size = len(content)
+        doc_group_id = str(uuid.uuid4())
+        safe_name = f"{doc_group_id}_v1_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, safe_name)
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        # Auto-categorize based on filename + extension patterns
+        detected_category = category
+        detected_tags = ""
+        if auto_categorize and not category:
+            detected_category, detected_tags = _auto_detect_category(file.filename, ext)
+
+        doc = Document(
+            uploaded_by=current_user.id,
+            filename=safe_name,
+            original_filename=file.filename,
+            file_type=ext,
+            file_size=file_size,
+            status="indexed",
+            category=detected_category,
+            tags=detected_tags,
+            version=1,
+            doc_group_id=doc_group_id,
+        )
+        db.add(doc)
+        results.append({"filename": file.filename, "status": "uploaded", "category": detected_category, "tags": detected_tags})
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="BULK_UPLOAD",
+        resource_type="document",
+        new_value=f"{len(results)} files",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+    return {"message": f"{len(results)} files processed", "results": results}
+
+
+# ─── Auto-categorize a single existing document ─────────────────────────────
+@router.post("/{doc_id}/auto-categorize")
+def auto_categorize_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    detected_category, detected_tags = _auto_detect_category(doc.original_filename, doc.file_type)
+    doc.category = detected_category
+    doc.tags = detected_tags
+    doc.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Auto-categorized", "category": detected_category, "tags": detected_tags, "document": _doc_to_dict(doc, db)}
+
+
+# ─── Auto-categorize ALL uncategorized documents ────────────────────────────
+@router.post("/auto-categorize/all")
+def auto_categorize_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    uncategorized = db.query(Document).filter(
+        (Document.category == None) | (Document.category == "") | (Document.category == "Uncategorised")
+    ).all()
+    count = 0
+    for doc in uncategorized:
+        cat, tags = _auto_detect_category(doc.original_filename, doc.file_type)
+        doc.category = cat
+        doc.tags = tags
+        doc.updated_at = datetime.utcnow()
+        count += 1
+    db.commit()
+    return {"message": f"Auto-categorized {count} documents", "processed": count}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUTO-CATEGORIZATION ENGINE (Pattern-based, offline, no LLM required)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_CATEGORY_PATTERNS = [
+    # Standards & Specifications
+    (r"(?i)(SOTR|SOR|specification|standard|requirement|norm|ISO|BIS|MIL-STD|ABS|LR|DNV|IRS|IACS)", "Standard", "specification,requirements"),
+    # Blueprints & Engineering Drawings
+    (r"(?i)(blueprint|drawing|GA|general.arrangement|piping|schematic|diagram|layout|assembly|cross.section|structural)", "Blueprint", "engineering,drawing"),
+    # Operational Documents
+    (r"(?i)(SOP|operational|procedure|manual|guideline|protocol|instruction|checklist)", "SOP", "operational,procedure"),
+    # Reports
+    (r"(?i)(report|analysis|assessment|survey|inspection|audit|finding|observation|review)", "Report", "report,assessment"),
+    # Compliance & Regulatory
+    (r"(?i)(compliance|regulation|rule|act|policy|circular|notification|amendment|addendum)", "Compliance", "regulatory,compliance"),
+    # Technical Proposals & Bids
+    (r"(?i)(proposal|bid|tender|quotation|RFP|RFQ|techno.commercial|price.bid|commercial)", "Bid Document", "procurement,tender"),
+    # Imagery & Visual
+    (r"(?i)(image|photo|picture|screenshot|scan)", "Imagery", "visual,scan"),
+    # Missile / Weapon Systems (defense-specific)
+    (r"(?i)(missile|weapon|torpedo|gun|armament|munition|ordnance|warhead)", "Weapon System", "defense,armament"),
+    # Ship / Vessel
+    (r"(?i)(ship|vessel|OPV|patrol|frigate|corvette|hull|propulsion|engine|machinery)", "Vessel Document", "naval,ship"),
+    # Training & HR
+    (r"(?i)(training|course|syllabus|HR|human.resource|personnel|roster|leave)", "Training", "training,personnel"),
+]
+
+
+def _auto_detect_category(filename: str, file_type: str) -> tuple:
+    """Detect category and tags from filename patterns. Returns (category, tags_csv)."""
+    # Image files → Imagery
+    if file_type in ("png", "jpg", "jpeg"):
+        return "Imagery", "visual,scan,image"
+
+    # Spreadsheet → likely data/report
+    if file_type in ("xlsx", "xls", "csv"):
+        return "Report", "data,spreadsheet"
+
+    # Presentation
+    if file_type in ("pptx", "ppt"):
+        return "Presentation", "slides,briefing"
+
+    # Check filename against pattern library
+    for pattern, category, tags in _CATEGORY_PATTERNS:
+        if re.search(pattern, filename):
+            return category, tags
+
+    # Fallback
+    return "General", "uncategorized"

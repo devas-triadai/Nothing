@@ -10,7 +10,7 @@ import {
   MessageSquare, Plus, Send, Paperclip, ChevronDown, ChevronRight,
   Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
-  ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle,
+  ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle, Edit2,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
 import api, { getApiUrl } from '../utils/api';
@@ -147,7 +147,7 @@ function InlineQuiz({ quiz }) {
 }
 
 // ── PPT Card Component ──
-function PPTCard({ filename, slides, downloadUrl, topic, version }) {
+function PPTCard({ filename, slides, downloadUrl, topic, version, onRefine }) {
   return (
     <div style={pptStyles.card}>
       <div style={pptStyles.icon}><Presentation size={28} color="var(--primary)" /></div>
@@ -164,16 +164,34 @@ function PPTCard({ filename, slides, downloadUrl, topic, version }) {
         </div>
         <div style={pptStyles.meta}>{slides} slides · PowerPoint Presentation{version && version > 1 ? ` · Revision ${version}` : ''}</div>
       </div>
-      <a
-        href={downloadUrl}
-        download={filename || "Presentation.pptx"}
-        style={pptStyles.dlBtn}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <Download size={14} />
-        Download
-      </a>
+      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+        {onRefine && (
+          <button
+            onClick={onRefine}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '7px 12px', background: 'transparent', color: 'var(--primary)',
+              borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600,
+              border: '1px solid var(--primary)', cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+            title="Revise this presentation with a follow-up prompt"
+          >
+            <Edit2 size={12} />
+            Refine
+          </button>
+        )}
+        <a
+          href={downloadUrl}
+          download={filename || "Presentation.pptx"}
+          style={pptStyles.dlBtn}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Download size={14} />
+          Download
+        </a>
+      </div>
     </div>
   );
 }
@@ -206,8 +224,10 @@ function SourcePanel({ source, onClose, apiUrl }) {
     ? `${apiUrl}/api/agent/download/${source.doc_id}`
     : null;
   const isPDF = source.document?.toLowerCase().endsWith('.pdf');
+  // Use #search= for native browser PDF text highlighting
+  const searchPhrase = source.excerpt?.split(/[.!?]+/).filter(s => s.trim().length > 10)?.[0]?.trim().slice(0, 80) || '';
   const pdfViewUrl = downloadHref && isPDF
-    ? `${downloadHref}#page=${source.page || 1}`
+    ? `${downloadHref}#page=${source.page || 1}${searchPhrase ? '&search=' + encodeURIComponent(searchPhrase) : ''}`
     : null;
 
   // Highlight matching keywords from excerpt in the displayed text
@@ -325,6 +345,11 @@ export default function Chat() {
   const fileInputRef = useRef(null);
   const activeSessionIdRef = useRef(activeSessionId);
 
+  const switchSession = (id) => {
+    setActiveSessionId(id);
+    activeSessionIdRef.current = id;
+  };
+
   const token = getToken();
   const user = token ? (getUser() || decodeToken(token)) : null;
   const isSuperAdmin = user?.role === 'super_admin';
@@ -383,7 +408,7 @@ export default function Chat() {
     const id = newSessionId();
     const sess = { id, title: 'New Chat', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
     setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
-    setActiveSessionId(id);
+    switchSession(id);
     setMessages([]);
     setInput('');
     inputRef.current?.focus();
@@ -393,7 +418,7 @@ export default function Chat() {
     e.stopPropagation();
     if (!isSuperAdmin) return;
     setSessions(prev => { const u = prev.filter(s => s.id !== id); saveSessions(u); return u; });
-    if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
+    if (activeSessionId === id) { switchSession(null); setMessages([]); }
   };
 
   // ── Handle generation intents from chat ──
@@ -403,12 +428,14 @@ export default function Chat() {
 
     try {
       if (type === 'ppt') {
-        // Determine version from PPT history
+        // ── BACKGROUND PPT GENERATION ──
+        // Immediately return a placeholder so the user can keep chatting
         const sessHistory = pptHistory[activeSessionIdRef.current];
         const isRevision = sessHistory && sessHistory.topic?.toLowerCase() === topic?.toLowerCase();
         const version = isRevision ? (sessHistory.version || 1) + 1 : 1;
         const prevSlides = isRevision ? sessHistory.slidesJson : null;
         const revisionPrompt = isRevision ? originalQuestion : null;
+        const capturedSessId = activeSessionIdRef.current;
 
         const requestBody = {
           topic,
@@ -419,33 +446,121 @@ export default function Chat() {
           ...(prevSlides && { previous_slides_json: prevSlides }),
         };
 
-        const res = await fetch(getApiUrl('/api/agent/generate/ppt'), {
-          method: 'POST',
-          headers: { ...authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        });
-        if (!res.ok) throw new Error(`PPT generation failed: ${res.status}`);
+        // Fire PPT generation in background (non-blocking)
+        setIsProcessingBg(true);
+        (async () => {
+          try {
+            const res = await fetch(getApiUrl('/api/agent/generate/ppt'), {
+              method: 'POST',
+              headers: { ...authHeader, 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody),
+            });
+            if (!res.ok) throw new Error(`PPT generation failed: ${res.status}`);
 
-        // Extract slides JSON from response header for version tracking
-        const slidesJson = res.headers.get('X-Slides-JSON') || null;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const versionLabel = version > 1 ? ` v${version}` : '';
-        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
-          || `AGRA_${topic.slice(0, 30)}${version > 1 ? '_v' + version : ''}.pptx`;
+            const slidesJson = res.headers.get('X-Slides-JSON') || null;
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const versionLabel = version > 1 ? ` v${version}` : '';
+            const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+              || `AGRA_${topic.slice(0, 30)}${version > 1 ? '_v' + version : ''}.pptx`;
 
-        // Update PPT history for this session
-        setPptHistory(prev => ({
-          ...prev,
-          [activeSessionIdRef.current]: { topic, version, slidesJson },
-        }));
+            setPptHistory(prev => ({
+              ...prev,
+              [capturedSessId]: { topic, version, slidesJson },
+            }));
 
+            const updateMsgsForSess = (updater) => {
+              if (activeSessionIdRef.current === capturedSessId) {
+                setMessages(prev => {
+                  const copy = updater([...prev]);
+                  persistMessages(copy, capturedSessId);
+                  return copy;
+                });
+              } else {
+                setSessions(prevSessions => {
+                  const updatedSessions = prevSessions.map(sess => {
+                    if (sess.id === capturedSessId) {
+                      const copy = updater([...(sess.messages || [])]);
+                      return { ...sess, messages: copy, updatedAt: Date.now() };
+                    }
+                    return sess;
+                  });
+                  saveSessions(updatedSessions);
+                  return updatedSessions;
+                });
+              }
+            };
+
+            // Append finished PPT as a new message (even if user switched sessions)
+            updateMsgsForSess(copy => {
+              const placeholderIdx = copy.findIndex(m => m._pptJobId === capturedSessId + topic);
+              if (placeholderIdx >= 0) {
+                copy[placeholderIdx] = {
+                  role: 'assistant',
+                  content: `✅ Your PowerPoint presentation${versionLabel} on **${topic}** is ready!${version > 1 ? '\n\n_This is a revised version based on your feedback._' : ''}`,
+                  ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10, version },
+                  sources: [],
+                  timestamp: Date.now(),
+                  streaming: false,
+                };
+              } else {
+                copy.push({
+                  role: 'assistant',
+                  content: `✅ Your PowerPoint presentation${versionLabel} on **${topic}** is ready!`,
+                  ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10, version },
+                  sources: [],
+                  timestamp: Date.now(),
+                });
+              }
+              return copy;
+            });
+          } catch (err) {
+            const updateMsgsForSess = (updater) => {
+              if (activeSessionIdRef.current === capturedSessId) {
+                setMessages(prev => {
+                  const copy = updater([...prev]);
+                  persistMessages(copy, capturedSessId);
+                  return copy;
+                });
+              } else {
+                setSessions(prevSessions => {
+                  const updatedSessions = prevSessions.map(sess => {
+                    if (sess.id === capturedSessId) {
+                      const copy = updater([...(sess.messages || [])]);
+                      return { ...sess, messages: copy, updatedAt: Date.now() };
+                    }
+                    return sess;
+                  });
+                  saveSessions(updatedSessions);
+                  return updatedSessions;
+                });
+              }
+            };
+
+            updateMsgsForSess(copy => {
+              const placeholderIdx = copy.findIndex(m => m._pptJobId === capturedSessId + topic);
+              if (placeholderIdx >= 0) {
+                copy[placeholderIdx] = {
+                  ...copy[placeholderIdx],
+                  content: `❌ PPT generation failed: ${err.message}`,
+                  streaming: false, isError: true,
+                };
+              }
+              return copy;
+            });
+          } finally {
+            setIsProcessingBg(false);
+          }
+        })();
+
+        // Return a placeholder immediately so the user can keep chatting
         return {
           role: 'assistant',
-          content: `I've generated a PowerPoint presentation${versionLabel} on **${topic}**.${version > 1 ? '\n\n_This is a revised version based on your feedback._' : ''}`,
-          ppt: { filename, downloadUrl: url, topic, slides: num_slides || 10, version },
+          content: `⏳ Generating PowerPoint on **${topic}** in the background... You can continue chatting. I'll notify you when it's ready.`,
           sources: [],
           timestamp: Date.now(),
+          streaming: true,
+          _pptJobId: capturedSessId + topic,
         };
       }
 
@@ -542,7 +657,7 @@ export default function Chat() {
       const id = newSessionId();
       const sess = { id, title: question.slice(0, 50) || 'Image Analysis', messages: updatedMsgs, createdAt: Date.now(), updatedAt: Date.now() };
       setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
-      setActiveSessionId(id);
+      switchSession(id);
       sessId = id;
     } else {
       setSessions(prev => {
@@ -837,7 +952,7 @@ export default function Chat() {
     
     const sessId = activeSessionIdRef.current || newSessionId();
     if (!activeSessionId) {
-      setActiveSessionId(sessId);
+      switchSession(sessId);
       setSessions(prev => [{ id: sessId, title: "Bid Comparison" }, ...prev]);
     }
 
@@ -1061,7 +1176,7 @@ export default function Chat() {
             {sessions.map(sess => (
               <div
                 key={sess.id}
-                onClick={() => setActiveSessionId(sess.id)}
+                onClick={() => switchSession(sess.id)}
                 style={{
                   ...styles.sessionItem,
                   background: activeSessionId === sess.id ? 'rgba(74,139,255,0.08)' : 'transparent',
@@ -1174,6 +1289,10 @@ export default function Chat() {
                           downloadUrl={msg.ppt.downloadUrl}
                           topic={msg.ppt.topic}
                           version={msg.ppt.version}
+                          onRefine={() => {
+                            setInput(`Revise the PPT about "${msg.ppt.topic}": `);
+                            inputRef.current?.focus();
+                          }}
                         />
                       )}
 

@@ -15,7 +15,7 @@ const navItems = [
   { path: '/usage-analytics', icon: BarChart3, label: 'Usage Analytics' },
   { path: '/audit-logs', icon: ScrollText, label: 'Audit Logs' },
   { path: '/documents', icon: FileText, label: 'Documents' },
-  { path: '/agents', icon: Bot, label: 'Agent Config' },
+  { path: '/agents', icon: Bot, label: 'Agents' },
   { path: '/reports', icon: ClipboardList, label: 'Reports' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];

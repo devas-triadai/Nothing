@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../utils/api'
 import Spinner from '../components/Spinner'
-import { Users, CheckCircle, BarChart3, Clock } from 'lucide-react'
+import { Users, CheckCircle, BarChart3, FileText } from 'lucide-react'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
-    totalReports: 0,
-    pendingActions: 0
+    totalQueries: 0,
+    indexedDocs: 0
   })
   const [recentActivity, setRecentActivity] = useState([])
   const [loading, setLoading] = useState(true)
@@ -27,10 +27,10 @@ export default function Dashboard() {
 
       if (statsData) {
         setStats({
-          totalUsers: statsData.total_users ?? statsData.totalUsers ?? 0,
-          activeUsers: statsData.active_users ?? statsData.activeUsers ?? 0,
-          totalReports: statsData.total_reports ?? statsData.totalReports ?? 0,
-          pendingActions: statsData.pending_actions ?? statsData.pendingActions ?? 0
+          totalUsers: statsData.users?.total ?? 0,
+          activeUsers: statsData.users?.active ?? 0,
+          totalQueries: statsData.usage?.total_queries ?? 0,
+          indexedDocs: statsData.documents?.indexed ?? 0
         })
       }
 
@@ -48,8 +48,8 @@ export default function Dashboard() {
   const statCards = [
     { label: 'Total Users', value: stats.totalUsers, icon: Users, color: '#2463ff' },
     { label: 'Active Users', value: stats.activeUsers, icon: CheckCircle, color: '#22c55e' },
-    { label: 'Total Reports', value: stats.totalReports, icon: BarChart3, color: '#f59e0b' },
-    { label: 'Pending Actions', value: stats.pendingActions, icon: Clock, color: '#ef4444' }
+    { label: 'Total Queries', value: stats.totalQueries, icon: BarChart3, color: '#f59e0b' },
+    { label: 'Indexed Docs', value: stats.indexedDocs, icon: FileText, color: '#ef4444' }
   ]
 
   if (loading) {

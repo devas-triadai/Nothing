@@ -88,6 +88,7 @@ class Document(Base):
     page_count = Column(Integer, default=0)
     status = Column(String(20), default="processing")  # processing, indexed, failed
     category = Column(String(100), nullable=True)
+    tags = Column(Text, nullable=True)  # comma-separated auto-categorization tags
     description = Column(Text, nullable=True)
     # --- Lineage / Version fields ---
     version = Column(Integer, default=1)          # version number within its group

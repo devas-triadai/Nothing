@@ -129,3 +129,27 @@ def update_house_rules(
     db.add(audit)
     db.commit()
     return {"message": "House rules updated"}
+
+
+@router.delete("/{config_id}")
+def delete_agent_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    config = db.query(AgentConfig).filter(AgentConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Config not found")
+    name = config.name
+    db.delete(config)
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="DELETE_AGENT_CONFIG",
+        resource_type="agent_config",
+        resource_id=str(config_id),
+        old_value=name,
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+    return {"message": f"Agent config '{name}' deleted"}

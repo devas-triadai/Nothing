@@ -57,6 +57,61 @@ export default function Reports() {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      const data = await apiFetch(`/reports/export?report_type=usage&days=30`);
+      if (!data) return;
+      // Convert JSON to CSV
+      const rows = data.data || [];
+      if (rows.length === 0) { alert('No data to export.'); return; }
+      const headers = Object.keys(rows[0]);
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))
+      ].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `agra_${data.report_type}_report_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export error:', e);
+      alert('Failed to export report.');
+    }
+  };
+
+  const handleDownloadReport = async (report) => {
+    const typeMap = { usage: 'usage', users: 'users', documents: 'audit' };
+    const reportType = typeMap[report.type] || 'usage';
+    try {
+      const data = await apiFetch(`/reports/export?report_type=${reportType}&days=30`);
+      if (!data) return;
+      const rows = data.data || [];
+      if (rows.length === 0) { alert('No data available for this report.'); return; }
+      const headers = Object.keys(rows[0]);
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))
+      ].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `agra_${report.name?.replace(/\s+/g, '_') || 'report'}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Download report error:', e);
+      alert('Failed to download report.');
+    }
+  };
+
   const tabs = ['overview', 'usage', 'agents', 'users'];
 
   return (
@@ -79,6 +134,7 @@ export default function Reports() {
             <RefreshCw size={14} /> Refresh
           </button>
           <button
+            onClick={handleExport}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: 'none', background: '#1e6bff', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}
           >
             <Download size={14} /> Export
@@ -163,7 +219,7 @@ export default function Reports() {
                         }}>{report.status || 'pending'}</span>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <button style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>Download</button>
+                        <button onClick={() => handleDownloadReport(report)} style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>Download</button>
                       </td>
                     </tr>
                   ))}
