@@ -364,7 +364,7 @@ async def query_pipeline(
             query_text=retry_query,
             query_embedding=retry_emb,
             top_k=10,
-            doc_id_filter=doc_id_filter,
+            doc_ids_filter=doc_ids_filter,
         )
         retry_max = max((c.get("combined_score", 0) for c in retry_candidates), default=0)
         if retry_max > max_score:

@@ -171,7 +171,7 @@ export default function Users() {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '12px', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
@@ -187,7 +187,7 @@ export default function Users() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {['User', 'Role', 'Department', 'Status', 'Last Login', 'Actions'].map(h => (
                   <th key={h} style={{ padding: '12px 18px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{h}</th>
                 ))}
@@ -203,8 +203,8 @@ export default function Users() {
                   const rc = roleColors[user.role] || roleColors.viewer
                   const isActive = user.status === 'active'
                   return (
-                    <tr key={user.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', transition: 'background 0.15s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                    <tr key={user.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                       <td style={{ padding: '14px 18px' }}>
@@ -224,7 +224,7 @@ export default function Users() {
                         </span>
                       </td>
                       <td style={{ padding: '14px 18px', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                        {user.department || <span style={{ color: '#334155' }}>—</span>}
+                        {user.department || <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         {user.rank && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{user.rank}</div>}
                       </td>
                       <td style={{ padding: '14px 18px' }}>
@@ -327,41 +327,42 @@ export default function Users() {
 
 // ── Shared style objects ──
 const cardStyle = {
-  background: 'rgba(255,255,255,0.02)',
-  border: '1px solid rgba(255,255,255,0.05)',
+  background: 'var(--card-bg)',
+  border: '1px solid var(--card-border)',
   borderRadius: '14px',
   overflow: 'hidden',
 }
 const modalOverlay = {
   position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-  background: 'rgba(0,0,0,0.7)', display: 'flex',
+  background: 'rgba(0,0,0,0.6)', display: 'flex',
   alignItems: 'center', justifyContent: 'center', zIndex: 1000,
 }
 const modalBox = {
-  background: '#141927', border: '1px solid rgba(255,255,255,0.08)',
+  background: 'var(--surface)', border: '1px solid var(--border)',
   borderRadius: '16px', padding: '28px', width: '90%', maxWidth: '460px',
+  boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
 }
 const inputStyle = {
-  padding: '10px 14px', background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px',
+  padding: '10px 14px', background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)', borderRadius: '8px',
   color: 'var(--text-heading)', fontSize: '13px', outline: 'none', width: '100%',
 }
 const btnStyles = {
   primary: {
     display: 'flex', alignItems: 'center', gap: '7px',
-    padding: '9px 16px', background: 'var(--accent-blue)', color: 'var(--text-heading)',
+    padding: '9px 16px', background: 'var(--accent-blue)', color: '#fff',
     border: 'none', borderRadius: '9px', fontWeight: 600,
     cursor: 'pointer', fontSize: '13px',
   },
   secondary: {
     display: 'flex', alignItems: 'center', gap: '7px',
-    padding: '9px 14px', background: 'rgba(255,255,255,0.06)', color: '#94a3b8',
-    border: '1px solid rgba(255,255,255,0.08)', borderRadius: '9px', fontWeight: 500,
+    padding: '9px 14px', background: 'var(--surface)', color: 'var(--text-secondary)',
+    border: '1px solid var(--border)', borderRadius: '9px', fontWeight: 500,
     cursor: 'pointer', fontSize: '13px',
   },
   iconBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: '30px', height: '30px', background: 'rgba(255,255,255,0.04)',
+    width: '30px', height: '30px', background: 'var(--surface-hover)',
     border: '1px solid var(--card-border)', borderRadius: '7px',
     color: 'var(--text-secondary)', cursor: 'pointer', transition: 'all 0.15s',
   },

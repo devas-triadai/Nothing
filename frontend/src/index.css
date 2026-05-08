@@ -140,6 +140,16 @@ input, textarea, select {
   font-family: inherit;
 }
 
+select {
+  color: var(--text-heading);
+  background: var(--bg-secondary);
+}
+
+select option {
+  background: var(--surface);
+  color: var(--text-heading);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
