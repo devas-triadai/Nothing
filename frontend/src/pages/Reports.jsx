@@ -169,64 +169,78 @@ export default function Reports() {
         </div>
       ) : (
         <div>
-          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
-            <StatCard icon={Users} label="Total Users" value={stats?.total_users ?? stats?.users} change={stats?.user_change} color="#1e6bff" />
-            <StatCard icon={Activity} label="Active Sessions" value={stats?.active_sessions ?? stats?.sessions} change={stats?.session_change} color="#00c853" />
-            <StatCard icon={FileText} label="Documents" value={stats?.total_documents ?? stats?.documents} change={stats?.doc_change} color="#f0b429" />
-            <StatCard icon={TrendingUp} label="API Calls" value={stats?.api_calls ?? stats?.requests} change={stats?.api_change} color="#ff6d00" />
-          </div>
-
-          <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Recent Reports</h2>
-              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{reports.length} reports</span>
-            </div>
-            {reports.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-                No reports available
+          {/* ── Overview Tab ── */}
+          {activeTab === 'overview' && (
+            <>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
+                <StatCard icon={Users} label="Total Users" value={stats?.total_users ?? stats?.users} change={stats?.user_change} color="#1e6bff" />
+                <StatCard icon={Activity} label="Active Sessions" value={stats?.active_sessions ?? stats?.sessions} change={stats?.session_change} color="#00c853" />
+                <StatCard icon={FileText} label="Documents" value={stats?.total_documents ?? stats?.documents} change={stats?.doc_change} color="#f0b429" />
+                <StatCard icon={TrendingUp} label="API Calls" value={stats?.api_calls ?? stats?.requests} change={stats?.api_change} color="#ff6d00" />
               </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--surface-hover)' }}>
-                    {['Report Name', 'Type', 'Generated', 'Status', 'Actions'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((report, i) => (
-                    <tr
-                      key={report.id || i}
-                      style={{ borderBottom: '1px solid var(--border)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = ''}
-                    >
-                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
-                        {report.name || report.title || 'Untitled'}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        {report.type || '-'}
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {report.created_at ? new Date(report.created_at).toLocaleDateString() : '-'}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-                          background: report.status === 'completed' ? 'rgba(0,200,83,0.15)' : 'rgba(240,180,41,0.15)',
-                          color: report.status === 'completed' ? '#00c853' : '#f0b429',
-                        }}>{report.status || 'pending'}</span>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button onClick={() => handleDownloadReport(report)} style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>Download</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+
+              <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Recent Reports</h2>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{reports.length} reports</span>
+                </div>
+                {reports.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                    No reports available
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-hover)' }}>
+                        {['Report Name', 'Type', 'Generated', 'Status', 'Actions'].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reports.map((report, i) => (
+                        <tr
+                          key={report.id || i}
+                          style={{ borderBottom: '1px solid var(--border)' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                        >
+                          <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                            {report.name || report.title || 'Untitled'}
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            {report.type || '-'}
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {report.created_at ? new Date(report.created_at).toLocaleDateString() : '-'}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{
+                              display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                              background: report.status === 'completed' ? 'rgba(0,200,83,0.15)' : 'rgba(240,180,41,0.15)',
+                              color: report.status === 'completed' ? '#00c853' : '#f0b429',
+                            }}>{report.status || 'pending'}</span>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <button onClick={() => handleDownloadReport(report)} style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>Download</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Usage Tab ── */}
+          {activeTab === 'usage' && <UsageTab />}
+
+          {/* ── Agents Tab ── */}
+          {activeTab === 'agents' && <AgentsTab />}
+
+          {/* ── Users Tab ── */}
+          {activeTab === 'users' && <UsersTab />}
         </div>
       )}
     </div>

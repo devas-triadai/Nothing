@@ -62,6 +62,7 @@ class _LLMSingleton:
 
     _instance = None
     _lock = threading.Lock()
+    _inference_lock = threading.Lock()  # Serialize all LLM calls — llama.cpp is NOT thread-safe
 
     def __new__(cls):
         if cls._instance is None:
@@ -129,13 +130,14 @@ class _LLMSingleton:
         Returns:
             Generated text as a single string.
         """
-        response = self.llm.create_chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop or [],
-        )
+        with self._inference_lock:
+            response = self.llm.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop or [],
+            )
         choice = response["choices"][0]
         return choice["message"]["content"].strip()
 
@@ -157,19 +159,20 @@ class _LLMSingleton:
         Yields:
             Individual token strings as they are generated.
         """
-        stream = self.llm.create_chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop or [],
-            stream=True,
-        )
-        for chunk in stream:
-            delta = chunk["choices"][0].get("delta", {})
-            token = delta.get("content", "")
-            if token:
-                yield token
+        with self._inference_lock:
+            stream = self.llm.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop or [],
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk["choices"][0].get("delta", {})
+                token = delta.get("content", "")
+                if token:
+                    yield token
 
 
 # ── Module-level singleton ──
