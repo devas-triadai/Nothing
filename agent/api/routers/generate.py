@@ -2,6 +2,7 @@
 AGRA Phase 2 — Router: Content Generation (PPT, Summary, Quiz)
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -191,7 +192,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
         {"role": "user", "content": prompt},
     ]
 
-    raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.4)
+    raw = await asyncio.to_thread(llm_engine.generate, messages, 4096, 0.4)
 
     # ── 4. Parse and validate slide JSON ──
     try:
@@ -316,8 +317,24 @@ Cite specific sections where relevant using [Page X] notation."""
     job_id = str(uuid.uuid4())
     collected_text: list = []
 
-    def event_stream():
-        for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+    async def event_stream():
+        token_queue = asyncio.Queue()
+
+        def _run_llm():
+            try:
+                for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+                    token_queue.put_nowait(tok)
+                token_queue.put_nowait(None)
+            except Exception as e:
+                logger.error("Summary LLM error: %s", e)
+                token_queue.put_nowait(None)
+
+        llm_thread = asyncio.get_event_loop().run_in_executor(None, _run_llm)
+
+        while True:
+            tok = await token_queue.get()
+            if tok is None:
+                break
             collected_text.append(tok)
             yield f"data: {json.dumps({'token': tok})}\n\n"
 
@@ -420,7 +437,7 @@ Return ONLY valid JSON in this exact format:
         {"role": "user", "content": prompt},
     ]
 
-    raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.5)
+    raw = await asyncio.to_thread(llm_engine.generate, messages, 4096, 0.5)
 
     try:
         cleaned = _clean_json(raw)
@@ -544,8 +561,24 @@ Use formal, objective military specification language (e.g., 'The system shall..
     job_id = str(uuid.uuid4())
     collected_text = []
 
-    def event_stream():
-        for tok in llm_engine.stream_generate(messages, max_tokens=3500):
+    async def event_stream():
+        token_queue = asyncio.Queue()
+
+        def _run_llm():
+            try:
+                for tok in llm_engine.stream_generate(messages, max_tokens=3500):
+                    token_queue.put_nowait(tok)
+                token_queue.put_nowait(None)
+            except Exception as e:
+                logger.error("SOTR LLM error: %s", e)
+                token_queue.put_nowait(None)
+
+        llm_thread = asyncio.get_event_loop().run_in_executor(None, _run_llm)
+
+        while True:
+            tok = await token_queue.get()
+            if tok is None:
+                break
             collected_text.append(tok)
             yield f"data: {json.dumps({'token': tok})}\n\n"
 
@@ -626,8 +659,24 @@ Keep the tone professional, objective, and analytical."""
     job_id = str(uuid.uuid4())
     collected_text = []
 
-    def event_stream():
-        for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+    async def event_stream():
+        token_queue = asyncio.Queue()
+
+        def _run_llm():
+            try:
+                for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+                    token_queue.put_nowait(tok)
+                token_queue.put_nowait(None)
+            except Exception as e:
+                logger.error("Tech review LLM error: %s", e)
+                token_queue.put_nowait(None)
+
+        llm_thread = asyncio.get_event_loop().run_in_executor(None, _run_llm)
+
+        while True:
+            tok = await token_queue.get()
+            if tok is None:
+                break
             collected_text.append(tok)
             yield f"data: {json.dumps({'token': tok})}\n\n"
 

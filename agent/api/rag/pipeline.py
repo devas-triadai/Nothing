@@ -398,11 +398,29 @@ async def query_pipeline(
 
     messages.append({"role": "user", "content": question})
 
-    # 7. Stream LLM response
+    # 7. Stream LLM response (run in thread to avoid blocking async event loop)
     full_response = []
-    for tok in llm_engine.stream_generate(messages, max_tokens=2048):
+    token_queue = asyncio.Queue()
+
+    def _run_llm():
+        try:
+            for tok in llm_engine.stream_generate(messages, max_tokens=2048):
+                token_queue.put_nowait(tok)
+            token_queue.put_nowait(None)  # sentinel
+        except Exception as e:
+            logger.error("LLM generation error: %s", e, exc_info=True)
+            token_queue.put_nowait(None)
+
+    llm_thread = asyncio.get_event_loop().run_in_executor(None, _run_llm)
+
+    while True:
+        tok = await token_queue.get()
+        if tok is None:
+            break
         full_response.append(tok)
         yield {"token": tok}
+
+    await llm_thread  # ensure thread is done
 
     # 8. Build structured sources (no inline text footer — UI handles display)
     sources = _format_sources(top_chunks)
