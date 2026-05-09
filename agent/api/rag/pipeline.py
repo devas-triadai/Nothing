@@ -432,7 +432,7 @@ async def query_pipeline(
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 await client.post(
-                    f"{_ADMIN_BASE}/api/usage/log",
+                    f"{_ADMIN_BASE}/api/usage/",
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",

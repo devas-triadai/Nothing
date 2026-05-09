@@ -58,11 +58,16 @@ def _find_mmproj_path() -> Optional[str]:
 
 
 class _LLMSingleton:
-    """Thread-safe singleton wrapping the llama-cpp-python Llama instance."""
+    """Thread-safe singleton wrapping the llama-cpp-python Llama instance.
+
+    IMPORTANT: llama-cpp-python's Llama object is NOT thread-safe.
+    Concurrent calls to create_chat_completion corrupt the internal KV-cache
+    / _scores array, causing IndexError crashes.  We use _generate_lock to
+    serialise ALL inference calls so requests queue rather than crash.
+    """
 
     _instance = None
     _lock = threading.Lock()
-    _inference_lock = threading.Lock()  # Serialize all LLM calls — llama.cpp is NOT thread-safe
 
     def __new__(cls):
         if cls._instance is None:
@@ -70,6 +75,7 @@ class _LLMSingleton:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._llm = None
+                    cls._instance._generate_lock = threading.Lock()
         return cls._instance
 
     def load(self) -> None:
@@ -119,6 +125,7 @@ class _LLMSingleton:
     ) -> str:
         """
         Blocking generation — sends chat messages, returns full response string.
+        Serialised via _generate_lock to prevent concurrent llama-cpp access.
 
         Args:
             messages: List of {"role": "system"|"user"|"assistant", "content": str}
@@ -130,7 +137,8 @@ class _LLMSingleton:
         Returns:
             Generated text as a single string.
         """
-        with self._inference_lock:
+        with self._generate_lock:
+            logger.debug("generate() — lock acquired (max_tokens=%d)", max_tokens)
             response = self.llm.create_chat_completion(
                 messages=messages,
                 max_tokens=max_tokens,
@@ -151,6 +159,8 @@ class _LLMSingleton:
     ) -> Generator[str, None, None]:
         """
         Streaming generation — yields tokens one by one.
+        The lock is held for the ENTIRE streaming duration to prevent
+        another request from corrupting the KV-cache mid-generation.
 
         Args:
             messages: Chat messages list.
@@ -159,7 +169,9 @@ class _LLMSingleton:
         Yields:
             Individual token strings as they are generated.
         """
-        with self._inference_lock:
+        self._generate_lock.acquire()
+        logger.debug("stream_generate() — lock acquired (max_tokens=%d)", max_tokens)
+        try:
             stream = self.llm.create_chat_completion(
                 messages=messages,
                 max_tokens=max_tokens,
@@ -173,6 +185,9 @@ class _LLMSingleton:
                 token = delta.get("content", "")
                 if token:
                     yield token
+        finally:
+            self._generate_lock.release()
+            logger.debug("stream_generate() — lock released")
 
 
 # ── Module-level singleton ──

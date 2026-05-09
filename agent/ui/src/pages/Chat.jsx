@@ -639,6 +639,28 @@ export default function Chat() {
   // Derive streaming state from current session's last message to allow multi-tasking
   const isSessionStreaming = messages.length > 0 && messages[messages.length - 1].streaming === true;
 
+  // ── Timeout fallback: auto-recover sessions stuck in streaming state (90s) ──
+  useEffect(() => {
+    if (!isSessionStreaming) return;
+    const timeout = setTimeout(() => {
+      setMessages(prev => {
+        if (!prev.length || !prev[prev.length - 1].streaming) return prev;
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = {
+          ...last,
+          content: last.content || '⚠️ Response timed out. The server may be busy processing another request. Please try again.',
+          streaming: false,
+          isError: !last.content,
+        };
+        persistMessages(copy, activeSessionId);
+        return copy;
+      });
+      setIsStreaming(false);
+    }, 90000);
+    return () => clearTimeout(timeout);
+  }, [isSessionStreaming, activeSessionId]);
+
   const handleSend = async () => {
     const question = input.trim();
     if ((!question && !selectedImage) || isSessionStreaming) return;
@@ -899,9 +921,26 @@ export default function Chat() {
           return copy;
         });
       },
-      // onError — guarded
+      // onError — guarded (always persists to prevent frozen sessions)
       (err) => {
-        if (activeSessionIdRef.current !== sessId) return; // session isolation guard
+        if (activeSessionIdRef.current !== sessId) {
+          // Even if session switched, update the original session's data so it doesn't freeze
+          setSessions(prevSessions => {
+            const updatedSessions = prevSessions.map(sess => {
+              if (sess.id === sessId) {
+                const msgs = [...(sess.messages || [])];
+                if (msgs.length > 0 && msgs[msgs.length - 1].streaming) {
+                  msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: msgs[msgs.length - 1].content || `Error: ${err.message}`, streaming: false, isError: true };
+                }
+                return { ...sess, messages: msgs, updatedAt: Date.now() };
+              }
+              return sess;
+            });
+            saveSessions(updatedSessions);
+            return updatedSessions;
+          });
+          return;
+        }
         setIsStreaming(false);
         setMessages(prev => {
           const copy = [...prev];
@@ -912,6 +951,7 @@ export default function Chat() {
             streaming: false,
             isError: true,
           };
+          persistMessages(copy, sessId);
           return copy;
         });
       }
@@ -1485,21 +1525,21 @@ const styles = {
   logoGroup: { display: 'flex', alignItems: 'center', gap: '9px' },
   logoIcon: { width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: 'rgba(74,139,255,0.12)', flexShrink: 0 },
   logoText: { fontSize: '15px', fontWeight: 800, color: 'var(--sidebar-text)', letterSpacing: '1.5px' },
-  logoSub: { fontSize: '9px', color: 'rgba(255,255,255,0.6)', fontWeight: 500, letterSpacing: '0.3px' },
-  collapseBtn: { background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex' },
+  logoSub: { fontSize: '9px', color: 'rgba(255,255,255,0.55)', fontWeight: 500, letterSpacing: '0.3px' },
+  collapseBtn: { background: 'transparent', border: 'none', color: 'var(--sidebar-text)', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex', opacity: 0.7 },
   newChatBtn: { display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 10px 6px', padding: '9px 12px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, border: 'none', justifyContent: 'center', cursor: 'pointer' },
   sessionList: { flex: 1, overflowY: 'auto', padding: '4px 6px' },
-  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '28px 14px', color: 'rgba(255,255,255,0.5)', fontSize: '12px' },
-  sessionItem: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px', color: 'rgba(255,255,255,0.7)', transition: 'background 0.15s', marginBottom: '1px' },
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '28px 14px', color: 'var(--text-muted)', fontSize: '12px' },
+  sessionItem: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', transition: 'background 0.15s', marginBottom: '1px' },
   sessionTitle: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  sessionDeleteBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'transparent', color: 'rgba(255,255,255,0.5)', border: 'none', opacity: 0, transition: 'opacity 0.15s', cursor: 'pointer' },
-  navSection: { padding: '6px 6px', borderTop: '1px solid rgba(255,255,255,0.1)' },
-  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'rgba(255,255,255,0.7)', textDecoration: 'none', transition: 'background 0.15s' },
-  sidebarFooter: { padding: '10px', borderTop: '1px solid rgba(255,255,255,0.1)' },
+  sessionDeleteBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', opacity: 0, transition: 'opacity 0.15s', cursor: 'pointer' },
+  navSection: { padding: '6px 6px', borderTop: '1px solid var(--border)' },
+  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none', transition: 'background 0.15s' },
+  sidebarFooter: { padding: '10px', borderTop: '1px solid var(--border)' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '7px', padding: '5px 4px', marginBottom: '5px' },
   userAvatar: { width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.15)', color: 'var(--primary)', flexShrink: 0 },
-  userName: { fontSize: '11px', color: 'rgba(255,255,255,0.6)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  logoutBtn: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%', padding: '7px 10px', background: 'transparent', color: '#ff6b6b', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 500, border: 'none', cursor: 'pointer' },
+  userName: { fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logoutBtn: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%', padding: '7px 10px', background: 'transparent', color: 'var(--accent-red)', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 500, border: 'none', cursor: 'pointer' },
 
   /* Main */
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' },
@@ -1507,7 +1547,7 @@ const styles = {
   /* Welcome */
   welcome: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', textAlign: 'center' },
   welcomeIcon: { width: 72, height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.08)', border: '1px solid rgba(74,139,255,0.2)', marginBottom: '18px' },
-  welcomeTitle: { fontSize: '26px', fontWeight: 700, color: 'var(--text-heading)', marginBottom: '10px', background: 'linear-gradient(135deg, var(--text-heading), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  welcomeTitle: { fontSize: '26px', fontWeight: 700, color: 'var(--text-heading)', marginBottom: '10px', background: 'linear-gradient(135deg, var(--text-heading), #1e6bff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
   welcomeDesc: { fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '480px', lineHeight: '1.7', marginBottom: '32px' },
   suggestionsGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '10px', maxWidth: '560px', width: '100%' },
   suggestionCard: { padding: '13px 15px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'left', cursor: 'pointer', lineHeight: '1.5', transition: 'border-color 0.15s, background 0.15s', display: 'flex', alignItems: 'flex-start', gap: '8px' },
