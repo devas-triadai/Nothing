@@ -1,8 +1,13 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
+import asyncio
+import os
+import logging
+from datetime import datetime, timedelta
 
 from app.database import engine, Base, SessionLocal
 from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports, settings
@@ -15,6 +20,24 @@ from app.utils.security import decode_access_token
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     seed_superadmin()
+    
+    # ── Log Retention Enforcement (Background) ──
+    async def enforce_log_retention():
+        while True:
+            try:
+                db = SessionLocal()
+                from app.models.models import AuditLog, UsageLog
+                cutoff = datetime.utcnow() - timedelta(days=90)
+                deleted_audit = db.query(AuditLog).filter(AuditLog.created_at < cutoff).delete()
+                deleted_usage = db.query(UsageLog).filter(UsageLog.created_at < cutoff).delete()
+                db.commit()
+                db.close()
+                logging.getLogger("agra.backend").info(f"Log Retention Policy enforced: Deleted {deleted_audit} AuditLogs, {deleted_usage} UsageLogs older than 90 days.")
+            except Exception as e:
+                logging.getLogger("agra.backend").error(f"Failed to enforce log retention: {e}")
+            await asyncio.sleep(86400)  # run once a day
+
+    asyncio.create_task(enforce_log_retention())
     yield
 
 
@@ -24,6 +47,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# ── Security: TLS Enforcement (Phase 7) ──
+if os.getenv("ENFORCE_TLS", "false").lower() == "true":
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

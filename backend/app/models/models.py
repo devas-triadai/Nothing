@@ -27,6 +27,7 @@ class User(Base):
     department = Column(String(100), nullable=True)
     rank = Column(String(50), nullable=True)
     service_number = Column(String(50), nullable=True, unique=True)
+    clearance_level = Column(Integer, default=1)  # 1: Unclassified, 2: Confidential, 3: Secret, 4: Top Secret
     is_superadmin = Column(Boolean, default=False)
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -74,7 +75,24 @@ class AuditLog(Base):
     ip_address = Column(String(50), nullable=True)
     status = Column(String(20), default="success")
     created_at = Column(DateTime, default=datetime.utcnow)
+    prev_hash = Column(String(64), nullable=True)  # Hash of the previous log
+    curr_hash = Column(String(64), nullable=True)  # Hash of this log + prev_hash
     user = relationship("User", back_populates="audit_logs")
+
+import hashlib
+from sqlalchemy import event
+
+@event.listens_for(AuditLog, 'before_insert')
+def generate_audit_hash(mapper, connection, target):
+    # Fetch the previous log's hash
+    prev_log = connection.execute(
+        target.__table__.select().order_by(target.__table__.c.id.desc()).limit(1)
+    ).first()
+    target.prev_hash = prev_log.curr_hash if prev_log else "0" * 64
+    
+    # Calculate current hash
+    data_str = f"{target.user_id}{target.action}{target.resource_type}{target.resource_id}{target.new_value}{target.created_at}{target.prev_hash}"
+    target.curr_hash = hashlib.sha256(data_str.encode()).hexdigest()
 
 # Document model with lineage/versioning support
 class Document(Base):
@@ -94,6 +112,7 @@ class Document(Base):
     sha256_hash = Column(String(64), nullable=True, index=True)  # SHA-256 for tamper detection & dedup
     source = Column(String(30), default="admin_upload")  # admin_upload, agent_upload, knowledge_base
     classification_confidence = Column(Float, default=0.0)  # auto-classification confidence (0-1)
+    clearance_level = Column(Integer, default=1)  # Required clearance to read this document
     # --- Lineage / Version fields ---
     version = Column(Integer, default=1)          # version number within its group
     version_notes = Column(Text, nullable=True)   # what changed in this version

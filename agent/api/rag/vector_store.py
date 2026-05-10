@@ -24,6 +24,7 @@ from rank_bm25 import BM25Okapi
 
 import os
 import re
+from api.utils.crypto import encrypt_text, decrypt_text
 
 _STOP_WORDS = {
     "a", "an", "the", "and", "or", "but", "if", "then", "is", "are", "was", "were", 
@@ -178,7 +179,7 @@ class VectorStore:
             for chunk, emb in zip(chunks, embeddings):
                 point_id = str(uuid.uuid4())
                 payload = {
-                    "text": chunk["text"],
+                    "text": encrypt_text(chunk["text"]),
                     "metadata": chunk["metadata"],
                 }
                 points.append(PointStruct(id=point_id, vector=emb, payload=payload))
@@ -202,6 +203,7 @@ class VectorStore:
         doc_type: Optional[str] = None,
         version: Optional[int] = None,
         category: Optional[str] = None,
+        user_clearance: int = 4,  # Default to max clearance if not provided
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: dense cosine (weight 0.6) + BM25 keyword (weight 0.4).
@@ -222,6 +224,13 @@ class VectorStore:
             from qdrant_client.models import MatchValue
             must_conditions.append(FieldCondition(key="metadata.category", match=MatchValue(value=category)))
             
+        # ── Security Clearance Filter ──
+        from qdrant_client.models import Range
+        must_conditions.append(FieldCondition(
+            key="metadata.clearance_level",
+            range=Range(lte=user_clearance)
+        ))
+            
         qdrant_filter = Filter(must=must_conditions) if must_conditions else None
 
         response = self.client.query_points(
@@ -239,7 +248,7 @@ class VectorStore:
             pid = str(hit.id)
             dense_scores[pid] = float(hit.score)
             result_map[pid] = {
-                "text": hit.payload.get("text", ""),
+                "text": decrypt_text(hit.payload.get("text", "")),
                 "metadata": hit.payload.get("metadata", {}),
                 "dense_score": float(hit.score),
             }
@@ -260,6 +269,9 @@ class VectorStore:
                 if doc_type and meta.get("file_type") != doc_type: continue
                 if version is not None and meta.get("version") != version: continue
                 if category and meta.get("category") != category: continue
+                
+                # Security Clearance BM25 Filter
+                if meta.get("clearance_level", 1) > user_clearance: continue
                 
                 normalised = float(score) / max_bm25
                 bm25_scores[pid] = normalised
@@ -353,10 +365,10 @@ class VectorStore:
                 with_payload=True,
                 with_vectors=False,
             )
-            for pt in results:
+            for hit in results:
                 all_chunks.append({
-                    "text": pt.payload.get("text", ""),
-                    "metadata": pt.payload.get("metadata", {}),
+                    "text": decrypt_text(hit.payload.get("text", "")),
+                    "metadata": hit.payload.get("metadata", {}),
                 })
             if offset is None:
                 break

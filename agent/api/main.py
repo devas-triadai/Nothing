@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 
 from api.utils.auth_check import get_current_user
@@ -97,6 +98,11 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# ── Security: TLS Enforcement (Phase 7) ──
+if os.getenv("ENFORCE_TLS", "false").lower() == "true":
+    app.add_middleware(HTTPSRedirectMiddleware)
+    logger.info("🛡️ TLS Enforcement Enabled: All plaintext HTTP traffic will be rejected/redirected.")
 
 # ── CORS ── (ports from env vars)
 _UI_PORT = os.getenv("AGENT_UI_PORT", "7860")
