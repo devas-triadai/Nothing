@@ -16,7 +16,7 @@ if [ ! -d "llama.cpp" ]; then
     cd llama.cpp
     echo "Compiling with CUDA support via CMake (Ampere/Ada Architecture)..."
     cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="86;89"
-    cmake --build build --config Release -j 8
+    cmake --build build --config Release -j 16
 else
     echo "llama.cpp already exists."
     cd llama.cpp
@@ -24,7 +24,7 @@ else
     if [ ! -f "build/bin/llama-server" ]; then
         echo "Building missing binary (Ampere/Ada Architecture)..."
         cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="86;89"
-        cmake --build build --config Release -j 8
+        cmake --build build --config Release -j 16
     fi
 fi
 
