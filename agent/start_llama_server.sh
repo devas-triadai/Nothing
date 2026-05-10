@@ -14,16 +14,16 @@ if [ ! -d "llama.cpp" ]; then
     echo "Cloning llama.cpp repository..."
     git clone https://github.com/ggerganov/llama.cpp
     cd llama.cpp
-    echo "Compiling with CUDA support via CMake (Native Architecture for speed)..."
-    cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native
+    echo "Compiling with CUDA support via CMake (Ampere/Ada Architecture)..."
+    cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="86;89"
     cmake --build build --config Release -j
 else
     echo "llama.cpp already exists."
     cd llama.cpp
     # Just in case it wasn't built yet
     if [ ! -f "build/bin/llama-server" ]; then
-        echo "Building missing binary (Native Architecture for speed)..."
-        cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native
+        echo "Building missing binary (Ampere/Ada Architecture)..."
+        cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="86;89"
         cmake --build build --config Release -j
     fi
 fi
