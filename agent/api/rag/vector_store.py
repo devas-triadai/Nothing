@@ -23,6 +23,13 @@ from qdrant_client.models import (
 from rank_bm25 import BM25Okapi
 
 import os
+import re
+
+_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "then", "is", "are", "was", "were", 
+    "of", "to", "in", "for", "with", "on", "at", "by", "from", "as", "this", "that", 
+    "it", "be", "has", "have", "not", "which"
+}
 
 logger = logging.getLogger("agra.vector_store")
 
@@ -90,7 +97,10 @@ class VectorStore:
     # ── BM25 helpers ──
 
     def _tokenise(self, text: str) -> List[str]:
-        return text.lower().split()
+        # Lowercase, remove punctuation, split, remove stop words
+        clean_text = re.sub(r'[^\w\s]', ' ', text.lower())
+        tokens = clean_text.split()
+        return [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
 
     def _rebuild_bm25(self) -> None:
         """Scan all points in Qdrant and rebuild the in-memory BM25 index."""
@@ -235,22 +245,36 @@ class VectorStore:
                     result_map[pid] = {
                         "text": self._chunk_texts.get(pid, ""),
                         "metadata": self._chunk_meta.get(pid, {}),
-                        "dense_score": 0.0,
                     }
 
-        # ── Combine scores ──
+        # ── Reciprocal Rank Fusion (RRF) ──
+        # RRF formula: score = 1 / (k + rank_A) + 1 / (k + rank_B)
+        k_rrf = 60
+        
+        dense_ranked = sorted(dense_scores.items(), key=lambda x: x[1], reverse=True)
+        dense_ranks = {pid: rank for rank, (pid, _) in enumerate(dense_ranked, start=1)}
+        
+        bm25_ranked = sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)
+        bm25_ranks = {pid: rank for rank, (pid, _) in enumerate(bm25_ranked, start=1)}
+
         combined: List[Dict[str, Any]] = []
         for pid, data in result_map.items():
             # Apply doc_ids filter to BM25 results too
             if doc_ids_filter and data["metadata"].get("doc_id") not in doc_ids_filter:
                 continue
-            d_score = dense_scores.get(pid, 0.0)
-            b_score = bm25_scores.get(pid, 0.0)
-            final = _DENSE_WEIGHT * d_score + _BM25_WEIGHT * b_score
+                
+            d_rank = dense_ranks.get(pid, 1000)
+            b_rank = bm25_ranks.get(pid, 1000)
+            
+            rrf_score = (1.0 / (k_rrf + d_rank)) + (1.0 / (k_rrf + b_rank))
+            
             combined.append({
-                **data,
-                "bm25_score": b_score,
-                "combined_score": final,
+                "pid": pid,
+                "text": data["text"],
+                "metadata": data["metadata"],
+                "dense_score": dense_scores.get(pid, 0.0),
+                "bm25_score": bm25_scores.get(pid, 0.0),
+                "combined_score": rrf_score,
             })
 
         combined.sort(key=lambda x: x["combined_score"], reverse=True)

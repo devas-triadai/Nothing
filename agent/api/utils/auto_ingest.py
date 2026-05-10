@@ -1,20 +1,32 @@
 """
-AGRA — Auto-Ingest Built-in Knowledge Base
+AGRA — Auto-Ingest Built-in Knowledge Base (Phase 1 Unified)
 On agent startup, checks if synthetic ICG/IMO documents from
 agent/knowledge_base/ are already indexed. If not, ingests them
 in a background thread so the compliance checker works out-of-the-box.
+
+Phase 1 Enhancement:
+  - Auto-classifies each knowledge_base file using Tier 1 heuristics
+  - Stores category/tags/summary in Qdrant chunk metadata
+  - Registers each file with admin backend PostgreSQL for unified visibility
 """
 
+import hashlib
 import logging
 import threading
 import uuid
 from pathlib import Path
 from typing import List
 
+import httpx
+
 logger = logging.getLogger("agra.auto_ingest")
 
 _KB_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge_base"
 _MARKER_PREFIX = "builtin:"
+_ADMIN_BASE = "http://localhost:8000"
+
+import os
+_ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", _ADMIN_BASE)
 
 
 def _already_indexed(filename: str) -> bool:
@@ -22,13 +34,6 @@ def _already_indexed(filename: str) -> bool:
     from api.rag.vector_store import get_store
     store = get_store()
     try:
-        results, _ = store.client.scroll(
-            collection_name="agra_docs",
-            limit=1,
-            with_payload=True,
-            with_vectors=False,
-        )
-        # Scan for a chunk with this filename
         offset = None
         while True:
             results, offset = store.client.scroll(
@@ -49,6 +54,48 @@ def _already_indexed(filename: str) -> bool:
     return False
 
 
+def _classify_file(file_path: Path, text_preview: str) -> dict:
+    """Run Tier 1 heuristic classification on a knowledge_base file."""
+    from api.utils.classifier import classify_tier1
+    ext = file_path.suffix.lower().lstrip(".")
+    result = classify_tier1(file_path.name, ext, text_preview)
+    return result
+
+
+def _register_with_admin(file_path: Path, doc_id: str, classification: dict) -> None:
+    """Register an auto-ingested file with the admin backend PostgreSQL (best effort)."""
+    try:
+        # Read file content for SHA-256
+        with open(file_path, "rb") as f:
+            content = f.read()
+        sha256 = hashlib.sha256(content).hexdigest()
+
+        # Use internal API — we send a minimal registration
+        resp = httpx.post(
+            f"{_ADMIN_BASE}/api/documents/register-agent-doc",
+            json={
+                "filename": file_path.name,
+                "file_type": file_path.suffix.lower().lstrip("."),
+                "file_size": len(content),
+                "category": classification.get("category", "General"),
+                "sub_category": classification.get("sub_category", ""),
+                "tags": classification.get("tags", ""),
+                "description": classification.get("summary", ""),
+                "sha256_hash": sha256,
+                "source": "knowledge_base",
+                "classification_confidence": classification.get("confidence", 0.0),
+                "qdrant_doc_id": doc_id,
+            },
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            logger.info("✓ Registered %s with admin backend.", file_path.name)
+        else:
+            logger.warning("Admin registration for %s returned %d", file_path.name, resp.status_code)
+    except Exception as e:
+        logger.warning("Failed to register %s with admin backend: %s", file_path.name, e)
+
+
 def _ingest_file(file_path: Path) -> None:
     """Ingest a single knowledge-base file using the standard pipeline."""
     from api.rag import ocr, embedder
@@ -66,18 +113,36 @@ def _ingest_file(file_path: Path) -> None:
         logger.warning("No text extracted from %s — skipping.", filename)
         return
 
-    # 2. Chunk
-    chunks = chunk_pages(pages, doc_id, filename)
+    # 2. Classify using extracted text
+    text_preview = "\n".join(p.get("text", "") for p in pages[:2])[:3000]
+    classification = _classify_file(file_path, text_preview)
+    category = classification.get("category", "General")
+    tags = classification.get("tags", "")
+    summary = classification.get("summary", "")
+
+    logger.info(
+        "Classified %s → category=%s, sub=%s, confidence=%.2f",
+        filename, category,
+        classification.get("sub_category", ""),
+        classification.get("confidence", 0),
+    )
+
+    # 3. Chunk (with category metadata)
+    chunks = chunk_pages(pages, doc_id, filename, category=category, description=summary)
     if not chunks:
         logger.warning("No chunks from %s — skipping.", filename)
         return
 
-    # Mark chunks as built-in
+    # Mark chunks as built-in with classification metadata
     for c in chunks:
         c["metadata"]["source"] = "built-in"
         c["metadata"]["doc_id"] = doc_id
+        c["metadata"]["category"] = category
+        c["metadata"]["sub_category"] = classification.get("sub_category", "")
+        c["metadata"]["tags"] = tags
+        c["metadata"]["classification_confidence"] = classification.get("confidence", 0)
 
-    # 3. Embed
+    # 4. Embed
     texts = [c["text"] for c in chunks]
     all_embeddings = []
     batch_size = 32
@@ -86,10 +151,13 @@ def _ingest_file(file_path: Path) -> None:
         embs = embedder.embed_texts(batch)
         all_embeddings.extend(embs)
 
-    # 4. Store
+    # 5. Store
     store = get_store()
     count = store.upsert_chunks(chunks, all_embeddings)
-    logger.info("✓ Auto-ingested %s → %d chunks, %d pages.", filename, count, len(pages))
+    logger.info("✓ Auto-ingested %s → %d chunks, %d pages, category=%s.", filename, count, len(pages), category)
+
+    # 6. Register with admin backend (best effort)
+    _register_with_admin(file_path, doc_id, classification)
 
 
 def _run_auto_ingest() -> None:

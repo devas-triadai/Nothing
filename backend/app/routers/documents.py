@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
+import hashlib
 import uuid
 import os
 import re
@@ -43,12 +44,17 @@ def _doc_to_dict(doc: Document, db: Session) -> dict:
         "page_count": doc.page_count,
         "status": doc.status,
         "category": doc.category,
+        "sub_category": doc.sub_category,
         "tags": doc.tags,
         "description": doc.description,
+        "sha256_hash": doc.sha256_hash,
+        "source": doc.source,
+        "classification_confidence": doc.classification_confidence,
         "version": doc.version,
         "version_notes": doc.version_notes,
         "doc_group_id": doc.doc_group_id,
         "parent_doc_id": doc.parent_doc_id,
+        "qdrant_doc_id": doc.qdrant_doc_id,
         "uploaded_by": uploader.username if uploader else "unknown",
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
         "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
@@ -86,6 +92,8 @@ async def upload_document(
     description: Optional[str] = Form(None),
     version_notes: Optional[str] = Form(None),
     parent_doc_id: Optional[int] = Form(None),
+    source: Optional[str] = Form("admin_upload"),
+    qdrant_doc_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin)
 ):
@@ -99,13 +107,42 @@ async def upload_document(
     content = await file.read()
     file_size = len(content)
 
+    # SHA-256 hash for tamper detection and dedup
+    sha256 = hashlib.sha256(content).hexdigest()
+
+    # Dedup check — skip if identical hash already exists
+    existing = db.query(Document).filter(Document.sha256_hash == sha256).first()
+    if existing and not parent_doc_id:
+        return {"message": "Duplicate detected", "duplicate_of": _doc_to_dict(existing, db), "sha256": sha256}
+
+    # Auto-classification — no mandatory category dropdown
+    detected_category = category
+    detected_sub = ""
+    detected_tags = ""
+    detected_conf = 0.0
+    detected_summary = description or ""
+
+    if not category:
+        # Try to read text preview for content-based classification
+        content_preview = ""
+        try:
+            if ext == "txt":
+                content_preview = content.decode("utf-8", errors="replace")[:3000]
+            elif ext in ("pdf", "docx"):
+                # For binary files, use filename-only classification (Tier 1)
+                # Full content classification happens after ingestion
+                pass
+        except Exception:
+            pass
+        detected_category, detected_tags = _auto_detect_category(file.filename, ext)
+        detected_conf = 0.75 if detected_category != "General" else 0.30
+
     # Determine doc_group_id and version number
     if parent_doc_id:
         parent = db.query(Document).filter(Document.id == parent_doc_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent document not found")
         doc_group_id = parent.doc_group_id or str(parent.id)
-        # Find max version in this group
         latest = (
             db.query(Document)
             .filter(Document.doc_group_id == doc_group_id)
@@ -131,12 +168,18 @@ async def upload_document(
         file_type=ext,
         file_size=file_size,
         status="indexed",
-        category=category,
-        description=description,
+        category=detected_category or category,
+        sub_category=detected_sub,
+        tags=detected_tags,
+        description=detected_summary or description,
+        sha256_hash=sha256,
+        source=source or "admin_upload",
+        classification_confidence=detected_conf,
         version=version,
         version_notes=version_notes,
         doc_group_id=doc_group_id,
         parent_doc_id=parent_doc_id,
+        qdrant_doc_id=qdrant_doc_id,
     )
     db.add(doc)
 
@@ -322,6 +365,14 @@ async def bulk_upload_documents(
             continue
         content = await file.read()
         file_size = len(content)
+
+        # SHA-256 dedup
+        sha256 = hashlib.sha256(content).hexdigest()
+        existing = db.query(Document).filter(Document.sha256_hash == sha256).first()
+        if existing:
+            results.append({"filename": file.filename, "status": "duplicate", "duplicate_of": existing.id})
+            continue
+
         doc_group_id = str(uuid.uuid4())
         safe_name = f"{doc_group_id}_v1_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, safe_name)
@@ -331,8 +382,10 @@ async def bulk_upload_documents(
         # Auto-categorize based on filename + extension patterns
         detected_category = category
         detected_tags = ""
+        detected_conf = 0.0
         if auto_categorize and not category:
             detected_category, detected_tags = _auto_detect_category(file.filename, ext)
+            detected_conf = 0.75 if detected_category != "General" else 0.30
 
         doc = Document(
             uploaded_by=current_user.id,
@@ -343,11 +396,14 @@ async def bulk_upload_documents(
             status="indexed",
             category=detected_category,
             tags=detected_tags,
+            sha256_hash=sha256,
+            source="admin_upload",
+            classification_confidence=detected_conf,
             version=1,
             doc_group_id=doc_group_id,
         )
         db.add(doc)
-        results.append({"filename": file.filename, "status": "uploaded", "category": detected_category, "tags": detected_tags})
+        results.append({"filename": file.filename, "status": "uploaded", "category": detected_category, "tags": detected_tags, "confidence": detected_conf})
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -448,3 +504,75 @@ def _auto_detect_category(filename: str, file_type: str) -> tuple:
 
     # Fallback
     return "General", "uncategorized"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AGENT → ADMIN REGISTRATION (for unified doc visibility)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AgentDocRegistration(BaseModel):
+    filename: str
+    file_type: str
+    file_size: int = 0
+    category: Optional[str] = None
+    sub_category: Optional[str] = None
+    tags: Optional[str] = None
+    description: Optional[str] = None
+    sha256_hash: Optional[str] = None
+    source: str = "knowledge_base"
+    classification_confidence: float = 0.0
+    qdrant_doc_id: Optional[str] = None
+
+
+@router.post("/register-agent-doc")
+def register_agent_doc(
+    body: AgentDocRegistration,
+    db: Session = Depends(get_db),
+):
+    """
+    Register a document ingested by the agent service into admin PostgreSQL.
+    Used by auto_ingest and agent upload to maintain unified visibility.
+    No auth required — internal service-to-service call.
+    """
+    # Dedup by qdrant_doc_id or sha256
+    if body.qdrant_doc_id:
+        existing = db.query(Document).filter(Document.qdrant_doc_id == body.qdrant_doc_id).first()
+        if existing:
+            return {"message": "Already registered", "document_id": existing.id}
+
+    if body.sha256_hash:
+        existing = db.query(Document).filter(Document.sha256_hash == body.sha256_hash).first()
+        if existing:
+            # Update qdrant_doc_id if not set
+            if body.qdrant_doc_id and not existing.qdrant_doc_id:
+                existing.qdrant_doc_id = body.qdrant_doc_id
+                db.commit()
+            return {"message": "Already registered (hash match)", "document_id": existing.id}
+
+    # Get the first superadmin user as the uploader (system upload)
+    system_user = db.query(User).filter(User.is_superadmin == True).first()
+    uploader_id = system_user.id if system_user else 1
+
+    doc = Document(
+        uploaded_by=uploader_id,
+        filename=body.filename,
+        original_filename=body.filename,
+        file_type=body.file_type,
+        file_size=body.file_size,
+        status="indexed",
+        category=body.category or "General",
+        sub_category=body.sub_category or "",
+        tags=body.tags or "",
+        description=body.description or "",
+        sha256_hash=body.sha256_hash or "",
+        source=body.source,
+        classification_confidence=body.classification_confidence,
+        version=1,
+        doc_group_id=str(uuid.uuid4()),
+        qdrant_doc_id=body.qdrant_doc_id or "",
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    return {"message": "Registered", "document_id": doc.id}

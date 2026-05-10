@@ -120,3 +120,39 @@ def stream_generate(
                     yield token
             except json.JSONDecodeError:
                 logger.warning("Failed to parse SSE chunk: %s", data_str)
+
+async def generate_hyde_document(query: str) -> str:
+    """
+    Generate a hypothetical answer/document for the given query using the LLM.
+    This text will be embedded and used for vector search.
+    """
+    system_prompt = "You are an expert maritime and Coast Guard technical writer."
+    prompt = (
+        "Please write a short, precise paragraph that answers the following question or addresses the topic. "
+        "Write it as if it were an official technical document or regulation. Do not use conversational filler, "
+        "just output the raw factual or technical content that would perfectly answer the query.\n\n"
+        f"Topic/Question: {query}"
+    )
+
+    try:
+        # Non-streaming call for HyDE
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{_LLAMA_SERVER_URL}/v1/chat/completions",
+                json={
+                    "model": "local-model",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 150,
+                    "stream": False
+                }
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.warning("HyDE generation failed, falling back to raw query. Error: %s", e)
+        return query

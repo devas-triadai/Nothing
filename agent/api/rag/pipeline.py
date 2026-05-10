@@ -18,6 +18,7 @@ import httpx
 from api.rag import embedder, chunker, reranker, ocr
 from api.rag.vector_store import get_store
 from api.rag import llm as llm_engine
+from api.rag.cache import semantic_cache
 
 logger = logging.getLogger("agra.pipeline")
 
@@ -328,16 +329,41 @@ async def query_pipeline(
     from api.rag.query_rewriter import rewrite_query
     rewritten = rewrite_query(question, session_history)
 
-    # 2. Embed the REWRITTEN query (original kept for LLM prompt)
-    query_emb = embedder.embed_query(rewritten)
+    # ── 2. HyDE: Hypothetical Document Embeddings ──
+    # Generate a hypothetical answer to embed instead of the raw query
+    hyde_doc = await llm_engine.generate_hyde_document(rewritten)
+    logger.info("HyDE generated for query: %s", hyde_doc[:100].replace('\n', ' '))
 
-    # 3. Hybrid search (dense + BM25) → top 10
+    # 3. Embed the HyDE document (instead of the raw rewritten query)
+    query_emb = embedder.embed_query(hyde_doc)
+
+    # 3. Hybrid search (dense + BM25) → top 50 (Increased depth for RRF)
     candidates = store.hybrid_search(
         query_text=rewritten,
         query_embedding=query_emb,
-        top_k=10,
+        top_k=50,
         doc_ids_filter=doc_ids_filter,
     )
+
+    # ── Semantic Cache Check (Priority 2) ──
+    # Check if we have answered this exact/similar query recently
+    cache_hit = semantic_cache.check_cache(rewritten, query_emb)
+    if cache_hit and not intent:
+        logger.info("Serving response from semantic cache.")
+        # Stream the cached response token by token for UI consistency
+        words = cache_hit["response"].split(" ")
+        for i, word in enumerate(words):
+            yield {"token": word + (" " if i < len(words) - 1 else "")}
+            await asyncio.sleep(0.01)  # tiny delay to simulate stream
+        yield {
+            "done": True,
+            "sources": cache_hit["sources"],
+            "response_time_ms": round((time.time() - start_time) * 1000, 1),
+            "chunks_used": 0,
+            "confidence_score": 1.0,
+            "cached": True
+        }
+        return
 
     # ── 4. CRAG-Style Retry Loop (Priority 3) ──
     # Three-tier threshold: CONFIDENT → proceed; RETRY → rewrite & search again; REFUSE
@@ -363,7 +389,7 @@ async def query_pipeline(
         retry_candidates = store.hybrid_search(
             query_text=retry_query,
             query_embedding=retry_emb,
-            top_k=10,
+            top_k=50,
             doc_ids_filter=doc_ids_filter,
         )
         retry_max = max((c.get("combined_score", 0) for c in retry_candidates), default=0)
@@ -380,8 +406,8 @@ async def query_pipeline(
             yield {"done": True, "sources": []}
             return
 
-    # 5. Rerank → top 5
-    top_chunks = reranker.rerank(question, candidates, top_k=5)
+    # 5. Rerank → top 8
+    top_chunks = reranker.rerank(question, candidates, top_k=8)
 
     # 6. Build prompt
     house_rules = await _fetch_house_rules(token)
@@ -422,8 +448,25 @@ async def query_pipeline(
 
     await llm_thread  # ensure thread is done
 
-    # 8. Build structured sources (no inline text footer — UI handles display)
+    # 8. Build structured sources
     sources = _format_sources(top_chunks)
+    
+    # ── Citation Validation (Priority 2) ──
+    # Ensure all [N] citations in the text actually exist in our sources list.
+    full_text = "".join(full_response)
+    valid_source_indices = {str(s["index"]) for s in sources}
+    hallucinated_citations = set(re.findall(r'\[(\d+)\]', full_text)) - valid_source_indices
+    
+    if hallucinated_citations:
+        logger.warning("Stripping hallucinated citations: %s", hallucinated_citations)
+        for bad_id in hallucinated_citations:
+            full_text = full_text.replace(f"[{bad_id}]", "")
+            # Send a special clear token to the frontend to trigger a clean replacement
+            yield {"replace_all": full_text}
+
+    # Add to Semantic Cache
+    if len(full_text) > 10 and max_score >= _CONFIDENT_THRESHOLD:
+        semantic_cache.add_to_cache(rewritten, query_emb, full_text, sources)
 
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 

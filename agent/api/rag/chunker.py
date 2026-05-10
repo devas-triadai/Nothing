@@ -12,8 +12,11 @@ so the embedding model captures the chunk's place in the document.
 import logging
 import re
 from typing import Dict, List, Any, Optional
+import numpy as np
 
 import tiktoken
+
+from api.rag.embedder import embed_texts
 
 logger = logging.getLogger("agra.chunker")
 
@@ -171,11 +174,28 @@ def chunk_text(
     for para in paragraphs:
         segments.extend(_split_paragraph_if_needed(para))
 
-    # Merge small segments into chunks respecting _MAX_TOKENS
+    # Pre-compute embeddings for all segments to find semantic boundaries
+    seg_embs = []
+    if segments:
+        try:
+            seg_embs = embed_texts(segments)
+        except Exception as e:
+            logger.warning("Embedding failed during semantic chunking: %s. Falling back to basic chunking.", e)
+            seg_embs = []
+
+    def cosine_similarity(v1, v2):
+        if not v1 or not v2: return 0.0
+        v1_arr = np.array(v1)
+        v2_arr = np.array(v2)
+        norm = np.linalg.norm(v1_arr) * np.linalg.norm(v2_arr)
+        return np.dot(v1_arr, v2_arr) / norm if norm else 0.0
+
     chunks: List[Dict[str, Any]] = []
     current_parts: List[str] = []
     current_len = 0
     chunk_index = 0
+    
+    _SEMANTIC_THRESHOLD = 0.45  # A similarity drop below this suggests a topic shift
 
     def _flush():
         nonlocal chunk_index
@@ -196,9 +216,20 @@ def chunk_text(
             })
             chunk_index += 1
 
-    for seg in segments:
+    for i, seg in enumerate(segments):
         seg_len = _token_len(seg)
+        
+        # Determine if we should split due to token length or semantic shift
+        should_split = False
         if current_len + seg_len > _MAX_TOKENS and current_parts:
+            should_split = True
+        elif current_parts and seg_embs and i > 0:
+            # Check semantic similarity with the previous segment
+            sim = cosine_similarity(seg_embs[i], seg_embs[i-1])
+            if sim < _SEMANTIC_THRESHOLD:
+                should_split = True
+                
+        if should_split:
             _flush()
             # Overlap: keep tail tokens from previous chunk
             prev_text = "\n\n".join(current_parts)
@@ -210,6 +241,7 @@ def chunk_text(
             else:
                 current_parts = []
                 current_len = 0
+                
         current_parts.append(seg)
         current_len += seg_len
 

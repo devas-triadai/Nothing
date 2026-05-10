@@ -1,32 +1,93 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch } from '../utils/api'
-import Spinner from '../components/Spinner'
 import { getToken } from '../utils/auth'
-import { FileText, Upload, Download, Trash2, Eye, History, Search, Filter, MoreVertical, X, GitBranch } from 'lucide-react'
+import {
+  FileText, Upload, Download, Trash2, Search, Filter, X, GitBranch,
+  CheckCircle, AlertTriangle, Clock, Database, Cpu, Shield, Tag,
+  ChevronDown, RefreshCw, Layers, Zap, Eye
+} from 'lucide-react'
+
+// ── Category color map ──
+const CAT_COLORS = {
+  'SOP': { bg: 'rgba(16,185,129,0.12)', color: '#10b981', border: 'rgba(16,185,129,0.3)' },
+  'Standard': { bg: 'rgba(59,130,246,0.12)', color: '#3b82f6', border: 'rgba(59,130,246,0.3)' },
+  'SOTR': { bg: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: 'rgba(139,92,246,0.3)' },
+  'Blueprint': { bg: 'rgba(236,72,153,0.12)', color: '#ec4899', border: 'rgba(236,72,153,0.3)' },
+  'Report': { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: 'rgba(245,158,11,0.3)' },
+  'Compliance': { bg: 'rgba(239,68,68,0.12)', color: '#ef4444', border: 'rgba(239,68,68,0.3)' },
+  'Bid Document': { bg: 'rgba(6,182,212,0.12)', color: '#06b6d4', border: 'rgba(6,182,212,0.3)' },
+  'IMO Standard': { bg: 'rgba(99,102,241,0.12)', color: '#6366f1', border: 'rgba(99,102,241,0.3)' },
+  'ICG Document': { bg: 'rgba(14,165,233,0.12)', color: '#0ea5e9', border: 'rgba(14,165,233,0.3)' },
+  'Vessel Document': { bg: 'rgba(20,184,166,0.12)', color: '#14b8a6', border: 'rgba(20,184,166,0.3)' },
+  'General': { bg: 'rgba(107,114,128,0.12)', color: '#6b7280', border: 'rgba(107,114,128,0.3)' },
+}
+
+const SOURCE_LABELS = {
+  'knowledge_base': { label: 'Knowledge Base', icon: Database, color: '#8b5cf6' },
+  'admin_upload': { label: 'Admin Upload', icon: Shield, color: '#3b82f6' },
+  'agent_upload': { label: 'Agent Upload', icon: Cpu, color: '#10b981' },
+}
+
+function CategoryBadge({ category }) {
+  const c = CAT_COLORS[category] || CAT_COLORS['General']
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+      background: c.bg, color: c.color, border: `1px solid ${c.border}`,
+    }}>
+      <Tag size={10} />{category || 'General'}
+    </span>
+  )
+}
+
+function SourceBadge({ source }) {
+  const s = SOURCE_LABELS[source] || SOURCE_LABELS['admin_upload']
+  const Icon = s.icon
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+      background: `${s.color}15`, color: s.color,
+    }}>
+      <Icon size={10} />{s.label}
+    </span>
+  )
+}
+
+function ConfidenceDot({ confidence }) {
+  const pct = Math.round((confidence || 0) * 100)
+  const color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444'
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      {pct}%
+    </span>
+  )
+}
 
 export default function Documents() {
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [showUploadModal, setShowUploadModal] = useState(false)
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [uploadData, setUploadData] = useState({
-    category: '',
-    description: '',
-    version_notes: ''
-  })
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterSource, setFilterSource] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState([])
+  const [dragActive, setDragActive] = useState(false)
   const [versionHistory, setVersionHistory] = useState(null)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [selectedDoc, setSelectedDoc] = useState(null)
+  const fileInputRef = useRef(null)
 
-  useEffect(() => {
-    fetchDocs()
-  }, [])
+  useEffect(() => { fetchDocs() }, [])
 
   async function fetchDocs() {
     setLoading(true)
     try {
       const data = await apiFetch('/documents/')
-      setDocs(Array.isArray(data) ? data : (data?.documents || data?.items || []))
+      const items = Array.isArray(data) ? data : (data?.documents || [])
+      setDocs(items)
     } catch (e) {
       console.error('Fetch docs error:', e)
     } finally {
@@ -34,404 +95,354 @@ export default function Documents() {
     }
   }
 
-  async function handleUpload() {
-    if (!selectedFile) {
-      alert('Please select a file')
-      return
-    }
-    try {
-      const formData = new FormData()
-      formData.append('file', selectedFile)
-      formData.append('category', uploadData.category)
-      formData.append('description', uploadData.description)
-      formData.append('version_notes', uploadData.version_notes)
+  // ── Smart Upload (drag-and-drop + file select, NO manual category) ──
+  const handleFiles = useCallback(async (files) => {
+    if (!files || files.length === 0) return
+    setUploading(true)
+    const progress = Array.from(files).map(f => ({
+      name: f.name, status: 'uploading', category: null, message: 'Uploading...'
+    }))
+    setUploadProgress([...progress])
 
-      const token = getToken()
-      const res = await fetch('/api/documents/upload', {
-        method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: formData
-      })
-
-      if (res.ok) {
-        setShowUploadModal(false)
-        setSelectedFile(null)
-        setUploadData({ category: '', description: '', version_notes: '' })
-        fetchDocs()
-      } else {
-        alert('Failed to upload file')
-      }
-    } catch (e) {
-      console.error('Upload error:', e)
-      alert('Failed to upload file')
-    }
-  }
-
-  async function handleView(doc) {
     const token = getToken()
-    window.open(`/api/documents/${doc.id}/download?token=${token}`, '_blank')
-  }
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        // NO category field — server auto-classifies
 
-  async function handleDownload(doc) {
-    try {
-      const token = getToken()
-      const res = await fetch(`/api/documents/${doc.id}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      if (!res.ok) throw new Error('Download failed')
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = doc.original_filename || doc.filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      console.error('Download error:', e)
-      alert('Failed to download file')
+        const res = await fetch('/api/documents/upload', {
+          method: 'POST',
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: formData
+        })
+        const result = await res.json()
+        if (res.ok) {
+          const doc = result.document || result.duplicate_of
+          progress[i] = {
+            name: file.name,
+            status: result.message === 'Duplicate detected' ? 'duplicate' : 'success',
+            category: doc?.category || 'General',
+            sub_category: doc?.sub_category || '',
+            confidence: doc?.classification_confidence || 0,
+            message: result.message === 'Duplicate detected'
+              ? `Duplicate of existing document`
+              : `Classified as ${doc?.category || 'General'}`,
+          }
+        } else {
+          progress[i] = { name: file.name, status: 'error', message: result.detail || 'Upload failed' }
+        }
+      } catch (e) {
+        progress[i] = { name: file.name, status: 'error', message: e.message }
+      }
+      setUploadProgress([...progress])
     }
+    setUploading(false)
+    fetchDocs()
+  }, [])
+
+  const handleDrag = (e) => { e.preventDefault(); e.stopPropagation() }
+  const handleDragIn = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true) }
+  const handleDragOut = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false) }
+  const handleDrop = (e) => {
+    e.preventDefault(); e.stopPropagation(); setDragActive(false)
+    handleFiles(e.dataTransfer.files)
   }
 
-  async function handleHistory(doc) {
+  async function handleDelete(docId) {
+    if (!confirm('Delete this document?')) return
     try {
-      const data = await apiFetch(`/documents/${doc.id}/versions`)
-      setVersionHistory({ doc, versions: data?.versions || [] })
+      await apiFetch(`/documents/${docId}`, { method: 'DELETE' })
+      fetchDocs()
+    } catch (e) { console.error(e) }
+  }
+
+  async function handleViewHistory(docId) {
+    try {
+      const data = await apiFetch(`/documents/${docId}/versions`)
+      setVersionHistory(data)
       setShowHistoryModal(true)
-    } catch (e) {
-      console.error('History error:', e)
-      alert('Failed to fetch version history')
-    }
+    } catch (e) { console.error(e) }
   }
 
-  async function handleDelete(doc) {
-    if (!window.confirm(`Are you sure you want to delete "${doc.original_filename || doc.filename}"? This cannot be undone.`)) return
-    try {
-      await apiFetch(`/documents/${doc.id}`, { method: 'DELETE' })
-      setDocs(prev => prev.filter(d => d.id !== doc.id))
-    } catch (e) {
-      console.error('Delete error:', e)
-      alert('Failed to delete document')
-    }
-  }
-
-  const filteredDocs = docs.filter(d => {
-    const q = search.toLowerCase()
-    if (!q) return true
-    return d.filename?.toLowerCase().includes(q) || 
-      d.original_filename?.toLowerCase().includes(q) ||
-      d.category?.toLowerCase().includes(q) ||
-      d.tags?.toLowerCase().includes(q) ||
-      d.file_type?.toLowerCase().includes(q)
+  // ── Filter logic ──
+  const filtered = docs.filter(d => {
+    const matchSearch = !search ||
+      (d.original_filename || d.filename || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.category || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.tags || '').toLowerCase().includes(search.toLowerCase())
+    const matchCat = !filterCategory || d.category === filterCategory
+    const matchSrc = !filterSource || d.source === filterSource
+    return matchSearch && matchCat && matchSrc
   })
 
+  const categories = [...new Set(docs.map(d => d.category).filter(Boolean))]
+  const sources = [...new Set(docs.map(d => d.source).filter(Boolean))]
+
+  // ── Stats ──
+  const totalDocs = docs.length
+  const kbDocs = docs.filter(d => d.source === 'knowledge_base').length
+  const adminDocs = docs.filter(d => d.source === 'admin_upload').length
+  const agentDocs = docs.filter(d => d.source === 'agent_upload').length
+
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '32px' 
-      }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'var(--text-heading)' }}>Document Knowledge Base</h1>
-          <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0', fontSize: '14px' }}>Manage files used for RAG and agent training</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
+            Document Intelligence Hub
+          </h1>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+            Unified document management — auto-classified, indexed, and searchable
+          </p>
         </div>
-        <button onClick={() => setShowUploadModal(true)} style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '10px 18px',
-          background: 'var(--accent-blue)',
-          color: 'var(--text-heading)',
-          border: 'none',
-          borderRadius: '10px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          fontSize: '14px'
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 20px', borderRadius: 10, border: 'none',
+            background: 'linear-gradient(135deg, #1e6bff, #06b6d4)',
+            color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+            boxShadow: '0 4px 15px rgba(30,107,255,0.3)',
+            transition: 'transform 0.2s, box-shadow 0.2s',
+          }}
+          onMouseEnter={e => { e.target.style.transform = 'translateY(-1px)'; e.target.style.boxShadow = '0 6px 20px rgba(30,107,255,0.4)' }}
+          onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = '0 4px 15px rgba(30,107,255,0.3)' }}
+        >
+          <Upload size={16} /> Upload Documents
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.docx,.doc,.txt,.xlsx,.pptx,.png,.jpg,.jpeg"
+          style={{ display: 'none' }}
+          onChange={e => handleFiles(e.target.files)}
+        />
+      </div>
+
+      {/* Stats Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        {[
+          { label: 'Total Documents', value: totalDocs, icon: FileText, color: '#3b82f6' },
+          { label: 'Knowledge Base', value: kbDocs, icon: Database, color: '#8b5cf6' },
+          { label: 'Admin Uploads', value: adminDocs, icon: Shield, color: '#06b6d4' },
+          { label: 'Agent Uploads', value: agentDocs, icon: Cpu, color: '#10b981' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <div key={label} style={{
+            background: 'var(--card-bg)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14,
+          }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 10,
+              background: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Icon size={20} color={color} />
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-heading)' }}>{value}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Drag-and-Drop Zone */}
+      <div
+        onDragEnter={handleDragIn} onDragLeave={handleDragOut}
+        onDragOver={handleDrag} onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${dragActive ? '#1e6bff' : 'var(--border)'}`,
+          borderRadius: 14, padding: dragActive ? '40px 32px' : '24px 32px',
+          marginBottom: 24, textAlign: 'center', cursor: 'pointer',
+          background: dragActive ? 'rgba(30,107,255,0.06)' : 'var(--card-bg)',
+          transition: 'all 0.3s ease',
+        }}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <Zap size={28} color={dragActive ? '#1e6bff' : 'var(--text-secondary)'} style={{ marginBottom: 8 }} />
+        <div style={{ fontSize: 14, fontWeight: 600, color: dragActive ? '#1e6bff' : 'var(--text-heading)' }}>
+          {dragActive ? 'Drop files here to auto-classify & upload' : 'Drag & drop files here — AI auto-classifies on upload'}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+          PDF, DOCX, TXT, XLSX, PPTX, Images • No manual category needed
+        </div>
+      </div>
+
+      {/* Upload Progress */}
+      {uploadProgress.length > 0 && (
+        <div style={{
+          background: 'var(--card-bg)', border: '1px solid var(--border)',
+          borderRadius: 12, padding: 16, marginBottom: 20,
         }}>
-          <Upload size={18} />
-          Upload Files
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)' }}>
+              Upload Results
+            </span>
+            <button onClick={() => setUploadProgress([])}
+              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+              <X size={14} />
+            </button>
+          </div>
+          {uploadProgress.map((p, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0',
+              borderTop: i > 0 ? '1px solid var(--border)' : 'none',
+            }}>
+              {p.status === 'uploading' ? <Clock size={14} color="#f59e0b" /> :
+                p.status === 'success' ? <CheckCircle size={14} color="#10b981" /> :
+                  p.status === 'duplicate' ? <AlertTriangle size={14} color="#f59e0b" /> :
+                    <AlertTriangle size={14} color="#ef4444" />}
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{p.name}</span>
+              {p.category && <CategoryBadge category={p.category} />}
+              {p.confidence > 0 && <ConfidenceDot confidence={p.confidence} />}
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{p.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Search + Filters */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{
+          flex: 1, minWidth: 250, display: 'flex', alignItems: 'center', gap: 8,
+          background: 'var(--card-bg)', border: '1px solid var(--border)',
+          borderRadius: 10, padding: '0 14px',
+        }}>
+          <Search size={15} color="var(--text-secondary)" />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search documents, categories, tags..."
+            style={{
+              flex: 1, border: 'none', outline: 'none', background: 'transparent',
+              color: 'var(--text-primary)', fontSize: 13, padding: '10px 0',
+            }}
+          />
+          {search && <X size={14} color="var(--text-secondary)" style={{ cursor: 'pointer' }}
+            onClick={() => setSearch('')} />}
+        </div>
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+          style={{
+            padding: '8px 14px', borderRadius: 10, fontSize: 13,
+            background: 'var(--card-bg)', color: 'var(--text-primary)',
+            border: '1px solid var(--border)', cursor: 'pointer',
+          }}>
+          <option value="">All Categories</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
+          style={{
+            padding: '8px 14px', borderRadius: 10, fontSize: 13,
+            background: 'var(--card-bg)', color: 'var(--text-primary)',
+            border: '1px solid var(--border)', cursor: 'pointer',
+          }}>
+          <option value="">All Sources</option>
+          {sources.map(s => <option key={s} value={s}>
+            {SOURCE_LABELS[s]?.label || s}
+          </option>)}
+        </select>
+        <button onClick={fetchDocs} title="Refresh"
+          style={{
+            padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)',
+            background: 'var(--card-bg)', color: 'var(--text-secondary)',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+          }}>
+          <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
-      <div style={{
-        background: 'var(--card-bg)',
-        border: '1px solid var(--card-border)',
-        borderRadius: '16px',
-        overflow: 'hidden'
-      }}>
-        <div style={{
-          padding: '20px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          gap: '16px'
-        }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={18} style={{ 
-              position: 'absolute', 
-              left: '14px', 
-              top: '50%', 
-              transform: 'translateY(-50%)', 
-              color: 'var(--text-muted)' 
-            }} />
-            <input
-              type="text"
-              placeholder="Search documents..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px 10px 42px',
-                background: 'var(--card-bg)',
-                border: '1px solid var(--card-border)',
-                borderRadius: '8px',
-                color: 'var(--text-heading)',
-                fontSize: '14px',
-                outline: 'none'
-              }}
-            />
-          </div>
-          <button style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 16px',
-            background: 'var(--card-bg)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--card-border)',
-            borderRadius: '8px',
-            cursor: 'pointer'
-          }}>
-            <Filter size={18} />
-            Filter
-          </button>
+      {/* Document Table */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-secondary)' }}>
+          Loading documents...
         </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+      ) : filtered.length === 0 ? (
+        <div style={{
+          textAlign: 'center', padding: 60,
+          background: 'var(--card-bg)', borderRadius: 14, border: '1px solid var(--border)',
+        }}>
+          <FileText size={40} color="var(--text-secondary)" style={{ marginBottom: 12, opacity: 0.4 }} />
+          <div style={{ fontSize: 15, color: 'var(--text-secondary)' }}>
+            {search || filterCategory || filterSource ? 'No documents match your filters' : 'No documents yet — upload some files to get started'}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          background: 'var(--card-bg)', borderRadius: 14,
+          border: '1px solid var(--border)', overflow: 'hidden',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>FILENAME</th>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>CATEGORY</th>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>VERSION</th>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}>UPLOADED BY</th>
-                <th style={{ padding: '16px 20px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 600 }}></th>
+                {['Document', 'Category', 'Source', 'Confidence', 'Size', 'Version', 'Actions'].map(h => (
+                  <th key={h} style={{
+                    padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600,
+                    color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                  }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center' }}><Spinner size={28} /></td>
-                </tr>
-              ) : filteredDocs.length === 0 ? (
-                <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>No documents found.</td>
-                </tr>
-              ) : (
-                filteredDocs.map((doc, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '16px 20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{
-                          width: '36px',
-                          height: '36px',
-                          borderRadius: '8px',
-                          background: 'rgba(36, 99, 255, 0.1)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#7ab4ff'
-                        }}>
-                          <FileText size={20} />
+              {filtered.map((doc, i) => (
+                <tr key={doc.id || i} style={{
+                  borderBottom: '1px solid var(--border)',
+                  transition: 'background 0.15s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(30,107,255,0.03)'}
+                  onMouseLeave={e => e.currentTarget.style.background = ''}
+                >
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <FileText size={16} color="var(--accent-blue)" />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)' }}>
+                          {doc.original_filename || doc.filename}
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 600, color: 'var(--text-heading)', fontSize: '14px' }}>{doc.filename}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{doc.type || 'PDF'} • {new Date(doc.created_at).toLocaleDateString()}</div>
-                        </div>
+                        {doc.sub_category && (
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                            {doc.sub_category}
+                          </div>
+                        )}
                       </div>
-                    </td>
-                    <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                      <span style={{
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        background: doc.category === 'Global Standard' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(74, 139, 255, 0.1)',
-                        color: doc.category === 'Global Standard' ? '#22c55e' : '#7ab4ff',
-                        fontSize: '11px',
-                        fontWeight: 600
-                      }}>
-                        {doc.category || 'Uncategorised'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 20px' }}>
-                      <span style={{ 
-                        padding: '4px 8px', 
-                        borderRadius: '4px', 
-                        background: 'var(--bg-secondary)', 
-                        color: 'var(--text-primary)',
-                        fontSize: '11px',
-                        fontWeight: 600
-                      }}>
-                        v{doc.version || '1.0'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '16px 20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                      {doc.uploaded_by || 'System'}
-                    </td>
-                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                        <button onClick={() => handleView(doc)} title="View" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Eye size={18} /></button>
-                        <button onClick={() => handleDownload(doc)} title="Download" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Download size={18} /></button>
-                        <button onClick={() => handleHistory(doc)} title="History" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><History size={18} /></button>
-                        <button onClick={() => handleDelete(doc)} title="Delete" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}><Trash2 size={18} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                    </div>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <CategoryBadge category={doc.category} />
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <SourceBadge source={doc.source} />
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <ConfidenceDot confidence={doc.classification_confidence} />
+                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {doc.file_size ? `${(doc.file_size / 1024).toFixed(0)} KB` : '—'}
+                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                    v{doc.version || 1}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {doc.doc_group_id && (
+                        <button onClick={() => handleViewHistory(doc.id)} title="Version History"
+                          style={actionBtnStyle}>
+                          <GitBranch size={13} />
+                        </button>
+                      )}
+                      <button onClick={() => handleDelete(doc.id)} title="Delete"
+                        style={{ ...actionBtnStyle, color: '#ef4444' }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {showUploadModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--card-bg)',
-            border: '1px solid var(--border)',
-            borderRadius: '16px',
-            padding: '32px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 24px' }}>Upload Document</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{
-                padding: '24px',
-                border: '2px dashed var(--border)',
-                borderRadius: '12px',
-                textAlign: 'center',
-                cursor: 'pointer'
-              }} onClick={() => document.getElementById('fileInput').click()}>
-                <Upload size={32} style={{ color: '#7ab4ff', marginBottom: '12px' }} />
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px', margin: 0 }}>
-                  {selectedFile ? selectedFile.name : 'Click to select file'}
-                </p>
-                <input
-                  id="fileInput"
-                  type="file"
-                  style={{ display: 'none' }}
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
-                />
-              </div>
-              <select
-                value={uploadData.category}
-                onChange={(e) => setUploadData({...uploadData, category: e.target.value})}
-                style={{
-                  padding: '12px 16px',
-                  background: 'var(--bg-input, var(--surface))',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  color: 'var(--text-heading)',
-                  fontSize: '14px',
-                  outline: 'none',
-                  appearance: 'none'
-                }}
-              >
-                <option value="" disabled>Select Category</option>
-                <option value="Standard">Standard / Specification</option>
-                <option value="Blueprint">Blueprint / Drawing</option>
-                <option value="SOP">SOP / Procedure</option>
-                <option value="Report">Report / Assessment</option>
-                <option value="Bid Document">Bid / Tender Document</option>
-                <option value="Vessel Document">Vessel / Ship Document</option>
-                <option value="Compliance">Compliance / Regulatory</option>
-                <option value="Imagery">Imagery / Scan</option>
-                <option value="General">General</option>
-              </select>
-              <textarea
-                placeholder="Description (optional)"
-                value={uploadData.description}
-                onChange={(e) => setUploadData({...uploadData, description: e.target.value})}
-                rows={3}
-                style={{
-                  padding: '12px 16px',
-                  background: 'var(--bg-input, var(--surface))',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  color: 'var(--text-heading)',
-                  fontSize: '14px',
-                  outline: 'none',
-                  resize: 'none'
-                }}
-              />
-              <input
-                placeholder="Version notes (optional)"
-                value={uploadData.version_notes}
-                onChange={(e) => setUploadData({...uploadData, version_notes: e.target.value})}
-                style={{
-                  padding: '12px 16px',
-                  background: 'var(--bg-input, var(--surface))',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  color: 'var(--text-heading)',
-                  fontSize: '14px',
-                  outline: 'none'
-                }}
-              />
-              <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                <button
-                  onClick={handleUpload}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'var(--accent-blue)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontSize: '14px'
-                  }}
-                >
-                  Upload
-                </button>
-                <button
-                  onClick={() => {
-                    setShowUploadModal(false)
-                    setSelectedFile(null)
-                    setUploadData({ category: '', description: '', version_notes: '' })
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'var(--bg-secondary, var(--surface))',
-                    color: 'var(--text-heading)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontSize: '14px'
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+          <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-secondary)', borderTop: '1px solid var(--border)' }}>
+            Showing {filtered.length} of {totalDocs} documents
           </div>
         </div>
       )}
@@ -439,88 +450,54 @@ export default function Documents() {
       {/* Version History Modal */}
       {showHistoryModal && versionHistory && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000,
+        }} onClick={() => setShowHistoryModal(false)}>
           <div style={{
-            background: 'var(--card-bg, var(--surface))',
-            border: '1px solid var(--border)',
-            borderRadius: '16px',
-            padding: '32px',
-            width: '90%',
-            maxWidth: '600px',
-            maxHeight: '80vh',
-            overflow: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <GitBranch size={20} color="var(--accent-blue, #1e6bff)" />
-                <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>
-                  Version History
-                </h2>
-              </div>
-              <button
-                onClick={() => { setShowHistoryModal(false); setVersionHistory(null); }}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              >
-                <X size={20} />
+            background: 'var(--card-bg)', borderRadius: 16, padding: 28,
+            width: 500, maxHeight: '70vh', overflowY: 'auto',
+            border: '1px solid var(--border)', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, color: 'var(--text-heading)' }}>
+                <GitBranch size={18} style={{ marginRight: 8 }} />Version History
+              </h3>
+              <button onClick={() => setShowHistoryModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                <X size={18} />
               </button>
             </div>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-              Lineage for: <strong style={{ color: 'var(--text-heading)' }}>{versionHistory.doc.original_filename || versionHistory.doc.filename}</strong>
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-              {versionHistory.versions.map((v, i) => (
-                <div key={v.id} style={{ display: 'flex', gap: '16px', position: 'relative' }}>
-                  {/* Timeline line */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '24px', flexShrink: 0 }}>
-                    <div style={{
-                      width: '12px', height: '12px', borderRadius: '50%',
-                      background: v.id === versionHistory.doc.id ? 'var(--accent-blue, #1e6bff)' : 'var(--border)',
-                      border: v.id === versionHistory.doc.id ? '2px solid var(--accent-blue, #1e6bff)' : '2px solid var(--text-muted)',
-                      zIndex: 1
-                    }} />
-                    {i < versionHistory.versions.length - 1 && (
-                      <div style={{ width: '2px', flex: 1, background: 'var(--border)', minHeight: '40px' }} />
-                    )}
-                  </div>
-                  {/* Version details */}
-                  <div style={{
-                    flex: 1, padding: '10px 14px', marginBottom: '8px', borderRadius: '10px',
-                    background: v.id === versionHistory.doc.id ? 'rgba(30, 107, 255, 0.08)' : 'transparent',
-                    border: v.id === versionHistory.doc.id ? '1px solid rgba(30, 107, 255, 0.2)' : '1px solid var(--border)',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-heading)' }}>
-                        v{v.version} {v.id === versionHistory.doc.id ? '(current)' : ''}
-                      </span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {v.created_at ? new Date(v.created_at).toLocaleDateString() : ''}
-                      </span>
-                    </div>
-                    {v.version_notes && (
-                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                        {v.version_notes}
-                      </p>
-                    )}
-                    <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                      Uploaded by: {v.uploaded_by || 'System'} • {v.file_type?.toUpperCase()} • {((v.file_size || 0) / 1024).toFixed(1)} KB
-                    </p>
-                  </div>
+            {(versionHistory.versions || []).map((v, i) => (
+              <div key={v.id || i} style={{
+                padding: '14px 16px', borderRadius: 10, marginBottom: 8,
+                background: 'rgba(30,107,255,0.04)', border: '1px solid var(--border)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)' }}>
+                    v{v.version} — {v.original_filename}
+                  </span>
+                  <CategoryBadge category={v.category} />
                 </div>
-              ))}
-            </div>
+                {v.version_notes && (
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
+                    {v.version_notes}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : ''} • {v.uploaded_by}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
     </div>
   )
+}
+
+const actionBtnStyle = {
+  background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+  padding: '5px 7px', cursor: 'pointer', color: 'var(--text-secondary)',
+  display: 'flex', alignItems: 'center', transition: 'all 0.15s',
 }

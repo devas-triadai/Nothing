@@ -88,13 +88,18 @@ class Document(Base):
     page_count = Column(Integer, default=0)
     status = Column(String(20), default="processing")  # processing, indexed, failed
     category = Column(String(100), nullable=True)
+    sub_category = Column(String(100), nullable=True)  # fine-grained type
     tags = Column(Text, nullable=True)  # comma-separated auto-categorization tags
     description = Column(Text, nullable=True)
+    sha256_hash = Column(String(64), nullable=True, index=True)  # SHA-256 for tamper detection & dedup
+    source = Column(String(30), default="admin_upload")  # admin_upload, agent_upload, knowledge_base
+    classification_confidence = Column(Float, default=0.0)  # auto-classification confidence (0-1)
     # --- Lineage / Version fields ---
     version = Column(Integer, default=1)          # version number within its group
     version_notes = Column(Text, nullable=True)   # what changed in this version
     doc_group_id = Column(String(64), nullable=True, index=True)  # UUID grouping all versions
     parent_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # direct parent version
+    qdrant_doc_id = Column(String(100), nullable=True, index=True)  # matching doc_id in Qdrant for cross-sync
     # --------------------------------
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

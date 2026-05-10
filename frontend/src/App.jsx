@@ -10,6 +10,7 @@ import Settings from './pages/Settings';
 import UsageAnalytics from './pages/UsageAnalytics';
 import AuditLogs from './pages/AuditLogs';
 import Documents from './pages/Documents';
+import Genealogy from './pages/Genealogy';
 import Agents from './pages/Agents';
 
 export const AuthContext = createContext(null);
@@ -73,6 +74,7 @@ function App() {
               <Route path="usage-analytics" element={<UsageAnalytics />} />
               <Route path="audit-logs" element={<AuditLogs />} />
               <Route path="documents" element={<Documents />} />
+              <Route path="genealogy" element={<Genealogy />} />
               <Route path="agents" element={<Agents />} />
               <Route path="reports" element={<Reports />} />
               <Route path="settings" element={<Settings />} />

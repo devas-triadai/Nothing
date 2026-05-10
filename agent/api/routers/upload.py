@@ -107,7 +107,7 @@ async def list_documents(
     user: dict = Depends(get_current_user),
 ):
     """
-    List all ingested documents with their file info and chunk counts.
+    List all ingested documents with their file info, chunk counts, and classification.
     """
     store = get_store()
     documents = []
@@ -130,7 +130,12 @@ async def list_documents(
                 seen_docs[did] = {
                     "doc_id": did,
                     "filename": meta.get("filename", "Unknown"),
-                    "category": meta.get("category", "Uncategorised"),
+                    "category": meta.get("category") or "General",
+                    "sub_category": meta.get("sub_category", ""),
+                    "tags": meta.get("tags", ""),
+                    "source": meta.get("source", "user_upload"),
+                    "classification_confidence": meta.get("classification_confidence", 0),
+                    "doc_title": meta.get("doc_title", ""),
                     "chunks": 0,
                     "pages": set(),
                 }

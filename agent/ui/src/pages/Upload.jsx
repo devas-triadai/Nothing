@@ -375,6 +375,7 @@ export default function UploadPage() {
                 <tr style={styles.tableHeadRow}>
                   {[
                     { key: 'filename', label: 'File' },
+                    { key: 'category', label: 'Category' },
                     { key: 'type', label: 'Type' },
                     { key: 'chunks', label: 'Chunks' },
                     { key: 'page_count', label: 'Pages' },
@@ -408,10 +409,25 @@ export default function UploadPage() {
                       <td style={styles.td}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           {getFileIcon(doc.filename)}
-                          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
-                            {doc.filename}
-                          </span>
+                          <div>
+                            <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                              {doc.filename}
+                            </span>
+                            {doc.source === 'built-in' && (
+                              <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', fontWeight: 600 }}>KB</span>
+                            )}
+                          </div>
                         </div>
+                      </td>
+                      <td style={styles.td}>
+                        <span style={{
+                          display: 'inline-block', padding: '3px 10px', borderRadius: 6,
+                          fontSize: 11, fontWeight: 600,
+                          background: doc.category && doc.category !== 'General' ? 'rgba(59,130,246,0.1)' : 'rgba(107,114,128,0.1)',
+                          color: doc.category && doc.category !== 'General' ? '#3b82f6' : '#6b7280',
+                        }}>
+                          {doc.category || 'General'}
+                        </span>
                       </td>
                       <td style={styles.td}>
                         <span style={styles.typeBadge}>{ext}</span>

@@ -339,6 +339,12 @@ export default function Chat() {
   // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
   const [pptHistory, setPptHistory] = useState({});
 
+  const navigate = useNavigate();
+
+  const handleCompare = () => {
+    navigate('/compare', { state: { selectedDocIds } });
+  };
+
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const streamRef = useRef(null);
@@ -828,7 +834,15 @@ export default function Chat() {
       // onToken — guarded with session ID
       (data) => {
         if (activeSessionIdRef.current !== sessId) return; // session isolation guard
-        if (data.token) {
+        if (data.replace_all !== undefined) {
+          accumulatedText = data.replace_all;
+          setMessages(prev => {
+            if (!prev || prev.length === 0) return prev;
+            const copy = [...prev];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText };
+            return copy;
+          });
+        } else if (data.token) {
           accumulatedText += data.token;
           setMessages(prev => {
             if (!prev || prev.length === 0) return prev;

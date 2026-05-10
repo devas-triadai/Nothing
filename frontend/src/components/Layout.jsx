@@ -6,7 +6,7 @@ import { useTheme } from '../utils/ThemeContext';
 import {
   LayoutDashboard, Users, BarChart3, ScrollText,
   FileText, Bot, LogOut, Menu, X, Anchor, Shield,
-  Settings, ClipboardList, Sun, Moon
+  Settings, ClipboardList, Sun, Moon, GitBranch
 } from 'lucide-react';
 
 const navItems = [
@@ -15,6 +15,7 @@ const navItems = [
   { path: '/usage-analytics', icon: BarChart3, label: 'Usage Analytics' },
   { path: '/audit-logs', icon: ScrollText, label: 'Audit Logs' },
   { path: '/documents', icon: FileText, label: 'Documents' },
+  { path: '/genealogy', icon: GitBranch, label: 'Genealogy' },
   { path: '/agents', icon: Bot, label: 'Agents' },
   { path: '/reports', icon: ClipboardList, label: 'Reports' },
   { path: '/settings', icon: Settings, label: 'Settings' },

@@ -5,6 +5,7 @@ import Chat from './pages/Chat';
 import Upload from './pages/Upload';
 import Generate from './pages/Generate';
 import Compliance from './pages/Compliance';
+import Compare from './pages/Compare';
 
 function ProtectedRoute({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -78,6 +79,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Compliance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/compare"
+        element={
+          <ProtectedRoute>
+            <Compare />
           </ProtectedRoute>
         }
       />
