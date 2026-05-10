@@ -4,6 +4,12 @@
 
 cd /workspace/Nothing/agent
 
+# Ensure CMake is installed
+if ! command -v cmake &> /dev/null; then
+    echo "CMake not found. Installing via apt-get..."
+    apt-get update && apt-get install -y cmake
+fi
+
 if [ ! -d "llama.cpp" ]; then
     echo "Cloning llama.cpp repository..."
     git clone https://github.com/ggerganov/llama.cpp
