@@ -8,8 +8,12 @@ python-multipart>=0.0.18
 sse-starlette>=2.2.1
 
 # --- LLM Inference ---
-# Build with CUDA: CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python==0.3.20
-llama-cpp-python==0.3.20
+# llama-cpp-python is NO LONGER loaded in-process.
+# The LLM is now served by the native llama-server (C++ binary).
+# Our Python code talks to it via HTTP (requests library).
+# Keep llama-cpp-python commented here for reference / fallback:
+# llama-cpp-python==0.3.20
+requests>=2.31.0
 
 # --- Embeddings & Reranking ---
 sentence-transformers==2.7.0

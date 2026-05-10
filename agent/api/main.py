@@ -67,10 +67,10 @@ async def lifespan(app: FastAPI):
     load_reranker()
     logger.info("Reranker (bge-reranker-v2-m3) loaded.")
 
-    # ── 5. Load LLM ──
+    # ── 5. Connect to llama-server (external C++ process) ──
     from api.rag.llm import load_llm
     load_llm()
-    logger.info("LLM (Gemma 4 31B-IT) loaded.")
+    logger.info("Connected to llama-server (Gemma 4 31B-IT).")
 
     logger.info("━━━ All models loaded. Agent API ready. ━━━")
 

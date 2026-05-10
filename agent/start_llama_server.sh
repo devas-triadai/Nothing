@@ -1,0 +1,27 @@
+#!/bin/bash
+# AGRA - Llama-Server Startup Script
+# Clones, compiles (with CUDA), and runs the native llama-server for true continuous batching
+
+cd /workspace/Nothing/agent
+
+if [ ! -d "llama.cpp" ]; then
+    echo "Cloning llama.cpp repository..."
+    git clone https://github.com/ggerganov/llama.cpp
+    cd llama.cpp
+    echo "Compiling with CUDA support..."
+    make LLAMA_CUDA=1 -j
+else
+    echo "llama.cpp already exists."
+    cd llama.cpp
+fi
+
+echo "Starting llama-server with --parallel 5..."
+# Note: Adjust paths if models are stored differently.
+./llama-server \
+  -m ../../models/gemma4-31b-it/google_gemma-4-31B-it-Q4_K_L.gguf \
+  --mmproj ../../models/gemma4-31b-it/mmproj-gemma-4-31b-f16.gguf \
+  -c 8192 \
+  -ngl 99 \
+  --parallel 5 \
+  --port 8080 \
+  --host 0.0.0.0

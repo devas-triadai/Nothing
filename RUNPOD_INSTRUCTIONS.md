@@ -1,6 +1,6 @@
 # AGRA Phase 2 — RunPod Separated Deployment Guide
 
-This document outlines the exact, step-by-step terminal commands required to run the entirely air-gapped system across 4 separated instances in your RunPod Linux Environment.
+This document outlines the exact, step-by-step terminal commands required to run the entirely air-gapped system across 5 separated instances in your RunPod Linux Environment.
 
 ---
 
@@ -27,24 +27,30 @@ npm install --legacy-peer-deps
 npm run dev
 ```
 
-### Terminal 3: Agent Backend API (Port 8005)
-*This will download your 30-Billion parameter LLMs, Embedding models, and build the Python API.*
+### Terminal 3: LLM Server — llama-server (Port 8080)
+*This compiles the native C++ llama.cpp engine with CUDA and starts the LLM server with 5-way continuous batching. Vision (mmproj) is included. Start this BEFORE Terminal 4.*
 ```bash
 cd /workspace/Nothing
 chmod +x agent/download_models.sh
 bash agent/download_models.sh
 
+chmod +x agent/start_llama_server.sh
+bash agent/start_llama_server.sh
+```
+> **Note:** The first run compiles llama.cpp from source (~60 seconds). Subsequent runs start instantly.
+> The server will print `all slots are idle` when it is ready to accept requests.
+
+### Terminal 4: Agent Backend API (Port 8005)
+*This starts the Python API. It will wait for llama-server (Terminal 3) to be ready before accepting requests.*
+```bash
 cd /workspace/Nothing/agent
-CMAKE_ARGS="-DGGML_CUDA=on" pip install -r requirements.txt
+pip install -r requirements.txt
 uvicorn api.main:app --host 0.0.0.0 --port 8005 --workers 1
 ```
 
-### Terminal 4: Agent UI (Port 7860)
+### Terminal 5: Agent UI (Port 7860)
 *Because Terminal 2 already installed Node.js globally, you just need to `source` the bashrc to activate it in this window!*
 ```bash
-cd /workspace/Nothing
-source ~/.bashrc
-
 cd /workspace/Nothing/agent/ui
 npm install --legacy-peer-deps
 npm run build

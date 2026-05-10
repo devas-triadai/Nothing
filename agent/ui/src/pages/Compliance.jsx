@@ -379,7 +379,7 @@ export default function CompliancePage() {
             {/* Download Report */}
             {downloadUrl && !running && (
               <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <a href={downloadUrl} style={styles.downloadReportBtn} target="_blank" rel="noopener">
+                <a href={getApiUrl(downloadUrl)} style={styles.downloadReportBtn} target="_blank" rel="noopener">
                   <Download size={18} />
                   Download Compliance Report (.docx)
                 </a>

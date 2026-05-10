@@ -234,7 +234,7 @@ function SummaryGenerator({ documents }) {
       (data) => {
         setGenerating(false);
         if (data.download_url) {
-          setDownloadUrl(data.download_url);
+          setDownloadUrl(getApiUrl(data.download_url));
         }
       },
       (err) => {
@@ -357,7 +357,7 @@ function QuizGenerator({ documents }) {
         num_short_answer: numShort,
       });
       setQuizData(data.quiz);
-      setDownloadUrl(data.download_url);
+      setDownloadUrl(data.download_url ? getApiUrl(data.download_url) : null);
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Generation failed');
     } finally {
