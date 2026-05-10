@@ -206,7 +206,7 @@ function PPTGenerator({ documents }) {
    SUMMARY GENERATOR
    ═══════════════════════════════════════════════════════════════ */
 function SummaryGenerator({ documents }) {
-  const [selectedDoc, setSelectedDoc] = useState('');
+  const [selectedDocs, setSelectedDocs] = useState([]);
   const [summaryType, setSummaryType] = useState('executive');
   const [generating, setGenerating] = useState(false);
   const [summaryText, setSummaryText] = useState('');
@@ -214,7 +214,7 @@ function SummaryGenerator({ documents }) {
   const [error, setError] = useState('');
 
   const handleGenerate = () => {
-    if (!selectedDoc) return;
+    if (selectedDocs.length === 0) return;
     setGenerating(true);
     setSummaryText('');
     setDownloadUrl(null);
@@ -224,7 +224,7 @@ function SummaryGenerator({ documents }) {
 
     connectStream(
       getApiUrl('/api/agent/generate/summary'),
-      { doc_id: selectedDoc, summary_type: summaryType },
+      { doc_ids: selectedDocs, summary_type: summaryType },
       (data) => {
         if (data.token) {
           accumulated += data.token;
@@ -247,18 +247,25 @@ function SummaryGenerator({ documents }) {
   return (
     <div style={styles.generatorCard}>
       <div style={styles.formGroup}>
-        <label style={styles.label}>Select Document</label>
-        <select
-          value={selectedDoc}
-          onChange={e => setSelectedDoc(e.target.value)}
-          style={styles.select}
-          id="summary-doc-select"
-        >
-          <option value="">— Choose a document —</option>
+        <label style={styles.label}>Select Documents (Multiple allowed)</label>
+        <div style={styles.docCheckboxes}>
           {documents.map(doc => (
-            <option key={doc.doc_id} value={doc.doc_id}>{doc.filename}</option>
+            <label key={doc.doc_id} style={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={selectedDocs.includes(doc.doc_id)}
+                onChange={() => {
+                  setSelectedDocs(prev => prev.includes(doc.doc_id) ? prev.filter(id => id !== doc.doc_id) : [...prev, doc.doc_id]);
+                }}
+                style={styles.checkbox}
+              />
+              <span>{doc.filename}</span>
+            </label>
           ))}
-        </select>
+          {documents.length === 0 && (
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No documents indexed</span>
+          )}
+        </div>
       </div>
 
       <div style={styles.formGroup}>
@@ -296,7 +303,7 @@ function SummaryGenerator({ documents }) {
       <div style={styles.actionRow}>
         <button
           onClick={handleGenerate}
-          disabled={!selectedDoc || generating}
+          disabled={selectedDocs.length === 0 || generating}
           style={styles.generateBtn}
           id="generate-summary-btn"
         >
@@ -339,6 +346,8 @@ function QuizGenerator({ documents }) {
   const [selectedDoc, setSelectedDoc] = useState('');
   const [numMcq, setNumMcq] = useState(5);
   const [numShort, setNumShort] = useState(3);
+  const [difficulty, setDifficulty] = useState('medium');
+  const [scope, setScope] = useState('comprehensive');
   const [generating, setGenerating] = useState(false);
   const [quizData, setQuizData] = useState(null);
   const [downloadUrl, setDownloadUrl] = useState(null);
@@ -355,6 +364,8 @@ function QuizGenerator({ documents }) {
         doc_id: selectedDoc,
         num_mcq: numMcq,
         num_short_answer: numShort,
+        difficulty: difficulty,
+        scope: scope,
       });
       setQuizData(data.quiz);
       setDownloadUrl(data.download_url ? getApiUrl(data.download_url) : null);
@@ -398,6 +409,25 @@ function QuizGenerator({ documents }) {
             <span style={styles.numValue}>{numShort}</span>
             <button onClick={() => setNumShort(Math.min(10, numShort + 1))} style={styles.numBtn}>+</button>
           </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Difficulty Level</label>
+          <select value={difficulty} onChange={e => setDifficulty(e.target.value)} style={styles.select}>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Scope Focus</label>
+          <select value={scope} onChange={e => setScope(e.target.value)} style={styles.select}>
+            <option value="concepts">Core Concepts</option>
+            <option value="details">Technical Details</option>
+            <option value="comprehensive">Comprehensive</option>
+          </select>
         </div>
       </div>
 

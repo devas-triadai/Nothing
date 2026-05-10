@@ -198,18 +198,31 @@ class VectorStore:
         query_embedding: List[float],
         top_k: int = 10,
         doc_ids_filter: Optional[List[str]] = None,
+        date_range: Optional[tuple] = None,
+        doc_type: Optional[str] = None,
+        version: Optional[int] = None,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: dense cosine (weight 0.6) + BM25 keyword (weight 0.4).
         Returns top_k results sorted by combined score.
         """
         # ── Dense Search ──
-        qdrant_filter = None
+        must_conditions = []
         if doc_ids_filter:
             from qdrant_client.models import MatchAny
-            qdrant_filter = Filter(
-                must=[FieldCondition(key="metadata.doc_id", match=MatchAny(any=doc_ids_filter))]
-            )
+            must_conditions.append(FieldCondition(key="metadata.doc_id", match=MatchAny(any=doc_ids_filter)))
+        if doc_type:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.file_type", match=MatchValue(value=doc_type)))
+        if version is not None:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.version", match=MatchValue(value=version)))
+        if category:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.category", match=MatchValue(value=category)))
+            
+        qdrant_filter = Filter(must=must_conditions) if must_conditions else None
 
         response = self.client.query_points(
             collection_name=_COLLECTION,
@@ -238,7 +251,16 @@ class VectorStore:
             raw_scores = self._bm25_index.get_scores(query_tokens)
             max_bm25 = max(raw_scores) if max(raw_scores) > 0 else 1.0
             for i, score in enumerate(raw_scores):
+                if score <= 0: continue
                 pid = self._bm25_ids[i]
+                meta = self._chunk_meta.get(pid, {})
+                
+                # Apply rich metadata filters to BM25 results as well
+                if doc_ids_filter and meta.get("doc_id") not in doc_ids_filter: continue
+                if doc_type and meta.get("file_type") != doc_type: continue
+                if version is not None and meta.get("version") != version: continue
+                if category and meta.get("category") != category: continue
+                
                 normalised = float(score) / max_bm25
                 bm25_scores[pid] = normalised
                 if pid not in result_map:

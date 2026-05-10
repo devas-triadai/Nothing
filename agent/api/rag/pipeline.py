@@ -286,6 +286,10 @@ async def query_pipeline(
     user_id: int,
     token: str = "",
     doc_ids_filter: Optional[List[str]] = None,
+    date_range: Optional[tuple] = None,
+    doc_type: Optional[str] = None,
+    version: Optional[int] = None,
+    category: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Full RAG query: embed → hybrid search → rerank → build prompt → stream LLM.
@@ -343,6 +347,10 @@ async def query_pipeline(
         query_embedding=query_emb,
         top_k=50,
         doc_ids_filter=doc_ids_filter,
+        date_range=date_range,
+        doc_type=doc_type,
+        version=version,
+        category=category,
     )
 
     # ── Semantic Cache Check (Priority 2) ──
@@ -414,7 +422,29 @@ async def query_pipeline(
     base_prompt = house_rules if house_rules.strip() else _SYSTEM_PROMPT_FALLBACK
     context_str = _format_context(top_chunks)
     
-    system_msg = f"{base_prompt.strip()}\n\n---\nCONTEXT DOCUMENTS:\n{context_str}\n---"
+    # Check for superseded documents via Admin Backend
+    doc_ids_to_check = list(set(c["metadata"].get("doc_id") for c in top_chunks if "metadata" in c))
+    superseded_warning = ""
+    if token and doc_ids_to_check:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.get(
+                    f"{_ADMIN_BASE}/api/documents/check-superseded",
+                    params={"doc_ids": doc_ids_to_check},
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if res.status_code == 200:
+                    sup_data = res.json().get("superseded", {})
+                    if sup_data:
+                        warnings = []
+                        for q_id, info in sup_data.items():
+                            warnings.append(f"- A document provided in the context has been SUPERSEDED by: {info.get('superseded_by_name')}")
+                        if warnings:
+                            superseded_warning = "\n\nWARNING - OUTDATED INFORMATION DETECTED:\n" + "\n".join(warnings) + "\nYou MUST explicitly warn the user that they are asking about deprecated/superseded documents and mention the new document name."
+        except Exception as e:
+            logger.warning("Failed to check superseded docs: %s", e)
+
+    system_msg = f"{base_prompt.strip()}\n{superseded_warning}\n---\nCONTEXT DOCUMENTS:\n{context_str}\n---"
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
 

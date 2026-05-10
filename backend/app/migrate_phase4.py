@@ -1,0 +1,11 @@
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from app.database import engine
+from app.models.models import Base
+
+print("Migrating Phase 4: Document Genealogy (doc_edges)")
+Base.metadata.create_all(bind=engine)
+print("Migration complete.")

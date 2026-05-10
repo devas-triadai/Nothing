@@ -65,12 +65,12 @@ AVAILABLE LAYOUTS (use all types where appropriate):
 4. "two_column"     — Comparison/pros-cons. Fields: title, left_column {header, items[]}, right_column {header, items[]}, notes
 5. "table"          — Data tables. Fields: title, table_data {headers[], rows[[]]}, notes
 6. "diagram"        — Process flow/architecture/hierarchy. Fields: title, diagram_data {type, nodes[], edges[]}, notes
-   Diagram types: "flowchart", "hierarchy", "block_diagram", "cycle"
+   Diagram types: "flowchart", "hierarchy", "block_diagram", "cycle", "radial", "matrix", "pyramid", "swimlane"
    Node shapes: "rounded_rect", "rect", "diamond", "oval", "hexagon", "cylinder"
    Each node: {"id": "A", "label": "text", "shape": "rounded_rect"}
    Each edge: {"from": "A", "to": "B", "label": "optional text"}
 7. "chart"          — Data visualization. Fields: title, chart_data {type, title, data {labels[], values[]}}, notes
-   Chart types: "bar_chart", "pie_chart", "line_chart", "comparison_bar"
+   Chart types: "bar_chart", "pie_chart", "line_chart", "comparison_bar", "timeline"
    For comparison_bar: data {labels[], groups[{name, values[]}]}
 8. "image"          — Image/diagram from documents. Fields: title, caption, notes
 9. "thank_you"      — Last slide. Fields: title, subtitle
@@ -152,6 +152,17 @@ NOTE: {len(extracted_images)} images/diagrams were found in the source documents
 Include {min(len(extracted_images), 3)} slides with "layout": "image" to display them.
 Place image slides near relevant content sections."""
 
+    # ── 2.5 LLM Data Extraction Pre-Pass (Chart Data Enhancement) ──
+    # Extract numerical data into a structured format to guarantee charts/tables
+    try:
+        data_ext_prompt = f"Analyze the following text and extract any numerical data, statistics, or metrics into structured tabular formats. Text:\n{context_text[:4000]}"
+        data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
+        prepass_raw = await asyncio.to_thread(llm_engine.generate, data_ext_messages, 1024, 0.1)
+        extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
+    except Exception as e:
+        logger.debug("Data pre-pass failed: %s", e)
+        extracted_data_hint = ""
+
     # ── 3. Build LLM prompt ──
     if body.revision_prompt and body.previous_slides_json:
         prompt = f"""You previously generated a PowerPoint about: {body.topic}
@@ -164,6 +175,7 @@ User revision request (this becomes version v{body.version}):
 
 Additional context:
 {context_text}
+{extracted_data_hint}
 {has_images_hint}
 
 Return ONLY an updated JSON array with all layout fields preserved and changes applied."""
@@ -172,6 +184,7 @@ Return ONLY an updated JSON array with all layout fields preserved and changes a
 
 DOCUMENT CONTEXT:
 {context_text}
+{extracted_data_hint}
 
 {f'Style notes: {body.style_notes}' if body.style_notes else ''}
 {has_images_hint}
@@ -230,10 +243,16 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
     safe_topic = body.topic[:30].replace(' ', '_')
     output_filename = f"{job_id}.pptx"
     output_path = _OUTPUTS_DIR / output_filename
+    
+    # ── 6.5 ICG Master Template Integration ──
+    assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
+    template_path = str(assets_dir / "icg_master.pptx") if (assets_dir / "icg_master.pptx").exists() else None
+
     build_pptx(
         slides_data,
         str(output_path),
         title=body.topic,
+        template_path=template_path,
         extracted_images=extracted_images,
     )
 
@@ -260,7 +279,8 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 # ═══════════════════════════════════════════════════════════════
 
 class SummaryRequest(BaseModel):
-    doc_id: str
+    doc_ids: List[str] = Field(default_factory=list)
+    doc_id: Optional[str] = None  # Legacy support
     summary_type: str = Field(default="executive", pattern="^(executive|technical)$")
 
 
@@ -280,22 +300,33 @@ async def generate_summary(
         ah = request.headers.get("authorization", "")
         auth_tok = ah.replace("Bearer ", "") if ah else ""
     store = get_store()
-    chunks = store.get_chunks_by_doc(body.doc_id)
+    target_doc_ids = body.doc_ids if body.doc_ids else ([body.doc_id] if body.doc_id else [])
+    if not target_doc_ids:
+        raise HTTPException(status_code=400, detail="Must provide at least one doc_id.")
+
+    chunks = []
+    filenames = []
+    for did in target_doc_ids:
+        doc_chunks = store.get_chunks_by_doc(did)
+        if doc_chunks:
+            chunks.extend(doc_chunks)
+            if doc_chunks[0]["metadata"].get("filename") not in filenames:
+                filenames.append(doc_chunks[0]["metadata"].get("filename", "document"))
 
     if not chunks:
-        raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
+        raise HTTPException(status_code=404, detail="Documents not found in knowledge base.")
 
     # Combine all chunk text (truncate if too long for context)
     full_text = "\n\n".join(c["text"] for c in chunks)
-    if len(full_text) > 25000:
-        full_text = full_text[:25000] + "\n[Document truncated for summary generation]"
+    if len(full_text) > 30000:
+        full_text = full_text[:30000] + "\n[Content truncated for summary generation]"
 
-    filename = chunks[0]["metadata"].get("filename", "document")
+    filename_label = ", ".join(filenames) if len(filenames) <= 3 else f"{len(filenames)} Documents"
 
     type_label = "Executive Summary" if body.summary_type == "executive" else "Technical Summary"
-    prompt = f"""Generate a comprehensive {type_label} of the following document.
+    prompt = f"""Generate a comprehensive {type_label} of the following document(s).
 
-DOCUMENT: {filename}
+DOCUMENTS: {filename_label}
 
 CONTENT:
 {full_text}
@@ -341,7 +372,7 @@ Cite specific sections where relevant using [Page X] notation."""
         # Build DOCX
         docx_path = _OUTPUTS_DIR / f"{job_id}_summary.docx"
         doc = DocxDocument()
-        doc.add_heading(f"{type_label}: {filename}", level=1)
+        doc.add_heading(f"{type_label}: {filename_label}", level=1)
         doc.add_paragraph("".join(collected_text))
         
         # Add Watermark (FR-GEN-006)
@@ -376,6 +407,8 @@ class QuizRequest(BaseModel):
     doc_id: str
     num_mcq: int = Field(default=5, ge=1, le=20)
     num_short_answer: int = Field(default=3, ge=0, le=10)
+    difficulty: str = Field(default="medium", description="easy, medium, hard")
+    scope: str = Field(default="comprehensive", description="concepts, details, comprehensive")
 
 
 @router.post("/generate/quiz")
@@ -412,6 +445,9 @@ CONTENT:
 Generate EXACTLY:
 - {body.num_mcq} Multiple Choice Questions (MCQ) with 4 options each (A, B, C, D) and the correct answer
 - {body.num_short_answer} Short Answer Questions with model answers
+
+DIFFICULTY LEVEL: {body.difficulty.upper()}
+SCOPE FOCUS: {body.scope.upper()}
 
 Return ONLY valid JSON in this exact format:
 {{

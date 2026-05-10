@@ -285,13 +285,13 @@ def render_diagram_on_slide(slide, diagram_data: Dict[str, Any]) -> None:
         return
 
     # Layout based on type
-    if diagram_type == "hierarchy":
+    if diagram_type == "hierarchy" or diagram_type == "pyramid":
         positions, node_w, node_h = _layout_hierarchy(nodes, edges)
-    elif diagram_type == "block_diagram":
+    elif diagram_type == "block_diagram" or diagram_type == "swimlane" or diagram_type == "matrix":
         positions, node_w, node_h = _layout_block_diagram(nodes, edges)
-    elif diagram_type == "cycle":
+    elif diagram_type == "cycle" or diagram_type == "radial":
         positions, node_w, node_h = _layout_cycle(nodes)
-    else:  # flowchart default
+    else:  # flowchart / default
         positions, node_w, node_h = _layout_flowchart(nodes, edges)
 
     # Build node id → node map

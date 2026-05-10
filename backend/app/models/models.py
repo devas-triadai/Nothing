@@ -106,6 +106,24 @@ class Document(Base):
     # relationships
     child_versions = relationship("Document", foreign_keys=[parent_doc_id], backref=backref("parent_doc", remote_side=[id]), lazy="dynamic")
 
+class DocEdgeType(str, enum.Enum):
+    SUPERSEDES = "supersedes"
+    DERIVED_FROM = "derived_from"
+    REFERENCES = "references"
+    AMENDS = "amends"
+
+class DocEdge(Base):
+    __tablename__ = "doc_edges"
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    target_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    edge_type = Column(String(50), nullable=False, default=DocEdgeType.REFERENCES)
+    confidence = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    source_doc = relationship("Document", foreign_keys=[source_id], backref="outgoing_edges")
+    target_doc = relationship("Document", foreign_keys=[target_id], backref="incoming_edges")
+
 class AgentConfig(Base):
     __tablename__ = "agent_configs"
     id = Column(Integer, primary_key=True, index=True)

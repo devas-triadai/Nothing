@@ -41,11 +41,15 @@ Extract the following exact parameters into a JSON object. Return ONLY valid JSO
   "equipment_tags": ["list of equipment tags found"]
 }"""
 
+        # Preprocess using OpenCV before passing to VLM
+        from api.rag.vision import preprocess_engineering_drawing
+        processed_data_uri = preprocess_engineering_drawing(data_uri)
+
         messages = [
             {"role": "system", "content": "You are a military engineering parser. Return only JSON."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": data_uri}}
+                {"type": "image_url", "image_url": {"url": processed_data_uri}}
             ]}
         ]
 

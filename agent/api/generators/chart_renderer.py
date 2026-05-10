@@ -226,6 +226,43 @@ def render_comparison_bar(chart_data: Dict[str, Any]) -> str:
     return str(path)
 
 
+def render_timeline(chart_data: Dict[str, Any]) -> str:
+    """Render a horizontal timeline."""
+    plt = _setup_matplotlib()
+
+    title = chart_data.get("title", "Timeline")
+    data = chart_data.get("data", {})
+    labels = data.get("labels", [])
+    values = data.get("values", [])
+
+    if not labels or not values:
+        logger.warning("Timeline has no data — skipping.")
+        return ""
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    
+    y = np.zeros(len(labels))
+    ax.plot(values, y, "-o", color=_ICG_COLORS[0], markerfacecolor=_ICG_COLORS[1], markersize=10, linewidth=2)
+    
+    for i, (label, val) in enumerate(zip(labels, values)):
+        offset = 0.1 if i % 2 == 0 else -0.1
+        val_align = "bottom" if i % 2 == 0 else "top"
+        ax.text(val, offset, f"{label}\n({val})", ha="center", va=val_align, color=_TEXT_COLOR, fontsize=9)
+
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=15)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    ax.get_yaxis().set_visible(False)
+    plt.tight_layout()
+
+    path = _get_output_dir() / f"chart_{uuid.uuid4().hex[:8]}.png"
+    fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor=_BG_COLOR)
+    plt.close(fig)
+    return str(path)
+
+
 def render_chart(chart_data: Dict[str, Any]) -> str:
     """
     Route to the appropriate chart renderer based on type.
@@ -245,6 +282,8 @@ def render_chart(chart_data: Dict[str, Any]) -> str:
             return render_line_chart(chart_data)
         elif chart_type == "comparison_bar":
             return render_comparison_bar(chart_data)
+        elif chart_type == "timeline":
+            return render_timeline(chart_data)
         else:  # bar_chart default
             return render_bar_chart(chart_data)
     except Exception as e:

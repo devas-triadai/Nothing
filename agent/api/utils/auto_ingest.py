@@ -55,10 +55,10 @@ def _already_indexed(filename: str) -> bool:
 
 
 def _classify_file(file_path: Path, text_preview: str) -> dict:
-    """Run Tier 1 heuristic classification on a knowledge_base file."""
-    from api.utils.classifier import classify_tier1
+    """Run Tier 1 + Tier 2 classification on a knowledge_base file."""
+    from api.utils.classifier import classify_document
     ext = file_path.suffix.lower().lstrip(".")
-    result = classify_tier1(file_path.name, ext, text_preview)
+    result = classify_document(file_path.name, ext, text_preview)
     return result
 
 
@@ -85,8 +85,10 @@ def _register_with_admin(file_path: Path, doc_id: str, classification: dict) -> 
                 "source": "knowledge_base",
                 "classification_confidence": classification.get("confidence", 0.0),
                 "qdrant_doc_id": doc_id,
+                "derived_from": classification.get("derived_from"),
+                "references": classification.get("references", []),
             },
-            timeout=5.0,
+            timeout=10.0,
         )
         if resp.status_code == 200:
             logger.info("✓ Registered %s with admin backend.", file_path.name)
@@ -126,6 +128,16 @@ def _ingest_file(file_path: Path) -> None:
         classification.get("sub_category", ""),
         classification.get("confidence", 0),
     )
+    
+    # 2.5 LLM Metadata Extraction (Cross-references)
+    from api.rag import llm as llm_engine
+    try:
+        ref_prompt = f"Extract any standard numbers, codes, or document references mentioned in this text: {text_preview[:1500]}. Return ONLY a comma separated list, or 'None'."
+        refs = llm_engine.generate([{"role": "user", "content": ref_prompt}], max_tokens=100)
+        if refs and refs.lower() != 'none':
+            classification["references"] = [r.strip() for r in refs.split(",") if r.strip()]
+    except Exception as e:
+        logger.warning("LLM cross-reference extraction failed: %s", e)
 
     # 3. Chunk (with category metadata)
     chunks = chunk_pages(pages, doc_id, filename, category=category, description=summary)
@@ -153,6 +165,20 @@ def _ingest_file(file_path: Path) -> None:
 
     # 5. Store
     store = get_store()
+    
+    # 5.5 Semantic Lineage Detection (cosine > 0.85)
+    if all_embeddings:
+        try:
+            # Search for highly similar existing document using the first chunk's embedding
+            sim_candidates = store.hybrid_search(texts[0][:100], all_embeddings[0], top_k=3)
+            for cand in sim_candidates:
+                if cand.get("dense_score", 0) > 0.85 and cand["metadata"].get("doc_id") != doc_id:
+                    classification["derived_from"] = cand["metadata"]["doc_id"]
+                    logger.info("Semantic Lineage Detected: %s is derived from %s (sim=%.2f)", doc_id, cand['metadata']['doc_id'], cand['dense_score'])
+                    break
+        except Exception as e:
+            logger.warning("Semantic lineage detection failed: %s", e)
+
     count = store.upsert_chunks(chunks, all_embeddings)
     logger.info("✓ Auto-ingested %s → %d chunks, %d pages, category=%s.", filename, count, len(pages), category)
 

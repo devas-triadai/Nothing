@@ -115,18 +115,20 @@ Critically:
 - "Contradiction": If the subject documents contain conflicting specifications between themselves (Inter-Document Inconsistency) or with the standard.
 - "Selective Compliance": If the subject documents cite a standard but specifically omit or ignore a restrictive sub-clause.
 
-Return ONLY a valid JSON array of findings. Each finding must be:
+Return ONLY a valid JSON array of findings. Each finding must strictly follow this structure:
 {{
   "topic": "Broad category (e.g. Fire Safety, Propulsion, Hull Structure)",
-  "clause": "Clause/section reference from the standard",
+  "clause_id": "Exact clause/section reference from the standard",
   "requirement": "What the standard requires",
+  "acceptance_criterion": "The specific technical metric or condition required to pass",
   "verdict": "Compliant" | "Non-Compliant" | "Partial" | "Missing" | "Contradiction" | "Unverifiable",
+  "severity": "Critical" | "Major" | "Minor" | "None" (Use Critical for life-safety or core mission failure; None if Compliant),
   "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing, contradictory, or selectively compliant.",
   "recommendation": "Specific action needed (if not fully compliant)",
   "citation": "Relevant excerpt from the subject document, if any"
 }}
 
-Analyse at least 5-10 key clauses. Return valid JSON array only:"""
+Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
 
     messages = [
         {"role": "system", "content": "You are an expert compliance auditor. Return only valid JSON arrays."},
@@ -149,7 +151,7 @@ Analyse at least 5-10 key clauses. Return valid JSON array only:"""
         raise HTTPException(status_code=500, detail="Failed to parse compliance analysis. Please try again.")
 
     # Second pass: Missing Requirements
-    covered_clauses = [f.get("clause", "") for f in findings]
+    covered_clauses = [f.get("clause_id", "") for f in findings]
     covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
     
     missing_prompt = f"""You are a compliance analyst.
@@ -164,9 +166,11 @@ Identify any CRITICAL requirements or clauses in the STANDARD that were NOT chec
 Return ONLY a valid JSON array of these missing findings, using the exact same format:
 {{
   "topic": "Broad category",
-  "clause": "Clause reference",
+  "clause_id": "Clause reference",
   "requirement": "What the standard requires",
+  "acceptance_criterion": "The specific metric that is missing",
   "verdict": "Missing",
+  "severity": "Major",
   "finding": "This requirement was completely omitted from the subject document.",
   "recommendation": "Shipbuilder must provide details on this requirement.",
   "citation": "N/A"
@@ -197,6 +201,27 @@ If there are no major missing requirements, return an empty array []."""
                 finding["verdict"] = "Unverifiable"
                 finding["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + finding.get("finding", "")
 
+    # Third pass: Historical Feedback
+    history_findings = []
+    try:
+        history_query = f"historical non-compliance defect lessons learned failure {body.check_scope or ''}"
+        history_emb = embedder.embed_query(history_query)
+        historical_chunks = store.hybrid_search(history_query, history_emb, top_k=5)
+        
+        if historical_chunks:
+            hist_text = "\n\n".join(c["text"] for c in historical_chunks)
+            hist_prompt = f"""You are a compliance analyst. 
+Review these past historical records and lessons learned:
+{hist_text[:6000]}
+
+Based on the above, are there any common historical defects or past non-compliances that the auditor should specifically double-check in the current subject document?
+Summarize the top 2-3 historical warnings. Return a simple string paragraph. If nothing is relevant, return 'None'."""
+            hist_res = llm_engine.generate([{"role": "user", "content": hist_prompt}], max_tokens=500)
+            if hist_res.strip() and hist_res.strip().lower() != 'none':
+                history_findings.append(hist_res.strip())
+    except Exception as e:
+        logger.warning("Historical feedback pass failed: %s", e)
+
     # Stream findings as SSE
     job_id = str(uuid.uuid4())
 
@@ -212,15 +237,37 @@ If there are no major missing requirements, return an empty array []."""
         doc.add_paragraph(f"Scope: {body.check_scope or 'Full Document'}")
         doc.add_paragraph("")
 
-        # Summary table
+        # Summary metrics
         compliant = sum(1 for f in findings if f.get("verdict") == "Compliant")
         non_compliant = sum(1 for f in findings if f.get("verdict") == "Non-Compliant")
         partial = sum(1 for f in findings if f.get("verdict") == "Partial")
         missing = sum(1 for f in findings if f.get("verdict") == "Missing")
         contradiction = sum(1 for f in findings if f.get("verdict") == "Contradiction")
         unverifiable = sum(1 for f in findings if f.get("verdict") == "Unverifiable")
+        
+        critical_issues = sum(1 for f in findings if f.get("severity") == "Critical" and f.get("verdict") != "Compliant")
+        
+        total_evaluable = len(findings) - unverifiable
+        compliance_score = (compliant / total_evaluable * 100) if total_evaluable > 0 else 0
+        
+        overall_rec = "APPROVE"
+        if critical_issues > 0 or compliance_score < 70:
+            overall_rec = "REJECT"
+        elif non_compliant > 0 or missing > 0 or partial > 0:
+            overall_rec = "APPROVE WITH CONDITIONS (REVISE)"
 
-        doc.add_heading("Summary", level=2)
+        doc.add_heading("Executive Summary", level=2)
+        doc.add_paragraph(f"Overall Compliance Score: {compliance_score:.1f}%")
+        doc.add_paragraph(f"Final Recommendation: {overall_rec}").bold = True
+        doc.add_paragraph(f"Critical Deficiencies Found: {critical_issues}")
+        doc.add_paragraph("")
+        
+        if history_findings:
+            doc.add_heading("Historical Feedback & Lessons Learned", level=2)
+            doc.add_paragraph(history_findings[0])
+            doc.add_paragraph("")
+
+        doc.add_heading("Summary Statistics", level=2)
         summary_table = doc.add_table(rows=7, cols=2)
         summary_table.style = "Table Grid"
         cells = summary_table.rows[0].cells
@@ -246,12 +293,13 @@ If there are no major missing requirements, return an empty array []."""
         cells[1].text = str(unverifiable)
 
         doc.add_paragraph("")
-        doc.add_heading("Detailed Findings", level=2)
+        doc.add_heading("Detailed Findings Register", level=2)
 
         for i, f in enumerate(findings, 1):
-            doc.add_heading(f"Finding {i}: {f.get('clause', 'N/A')}", level=3)
-            doc.add_paragraph(f"Verdict: {f.get('verdict', 'N/A')}")
+            doc.add_heading(f"Finding {i}: {f.get('clause_id', 'N/A')}", level=3)
+            doc.add_paragraph(f"Verdict: {f.get('verdict', 'N/A')} | Severity: {f.get('severity', 'None')}")
             doc.add_paragraph(f"Requirement: {f.get('requirement', 'N/A')}")
+            doc.add_paragraph(f"Acceptance Criterion: {f.get('acceptance_criterion', 'N/A')}")
             doc.add_paragraph(f"Finding: {f.get('finding', 'N/A')}")
             doc.add_paragraph(f"Recommendation: {f.get('recommendation', 'N/A')}")
             doc.add_paragraph(f"Citation: {f.get('citation', 'N/A')}")
@@ -259,7 +307,7 @@ If there are no major missing requirements, return an empty array []."""
 
         doc.save(str(docx_path))
 
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'missing': missing, 'contradiction': contradiction, 'unverifiable': unverifiable}})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'missing': missing, 'contradiction': contradiction, 'unverifiable': unverifiable, 'score': round(compliance_score, 1), 'recommendation': overall_rec}})}\n\n"
 
         # Log usage
         elapsed_ms = (time.time() - compliance_start) * 1000

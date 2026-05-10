@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -10,8 +10,8 @@ import os
 import re
 
 from app.database import get_db
-from app.models.models import User, Document, AuditLog
-from app.routers.auth import require_superadmin
+from app.models.models import User, Document, AuditLog, DocEdge
+from app.routers.auth import require_superadmin, require_admin, get_current_user
 
 router = APIRouter()
 
@@ -574,5 +574,291 @@ def register_agent_doc(
     db.add(doc)
     db.commit()
     db.refresh(doc)
+    
+    # Process Lineage Data
+    try:
+        # 1. Semantic Derivation (from cosine similarity)
+        if hasattr(body, 'derived_from') and body.derived_from:
+            parent_doc = db.query(Document).filter(Document.qdrant_doc_id == body.derived_from).first()
+            if parent_doc:
+                edge = DocEdge(
+                    source_id=doc.id,
+                    target_id=parent_doc.id,
+                    edge_type=DocEdgeType.DERIVED_FROM,
+                    confidence=0.9
+                )
+                db.add(edge)
+                
+        # 2. LLM Extracted Cross-References
+        if hasattr(body, 'references') and body.references:
+            for ref in body.references:
+                # Find doc with similar filename
+                ref_doc = db.query(Document).filter(Document.original_filename.ilike(f"%{ref}%")).first()
+                if ref_doc:
+                    edge = DocEdge(
+                        source_id=doc.id,
+                        target_id=ref_doc.id,
+                        edge_type=DocEdgeType.REFERENCES,
+                        confidence=0.7
+                    )
+                    db.add(edge)
+        db.commit()
+    except Exception as e:
+        db.rollback()
 
     return {"message": "Registered", "document_id": doc.id}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE 4: DOCUMENT GENEALOGY & LINEAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DocLinkRequest(BaseModel):
+    target_id: int
+    edge_type: str  # supersedes, derived_from, references, amends
+
+@router.post("/{doc_id}/link")
+def link_documents(
+    doc_id: int,
+    body: DocLinkRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Manually link two documents (create an edge)."""
+    source_doc = db.query(Document).filter(Document.id == doc_id).first()
+    target_doc = db.query(Document).filter(Document.id == body.target_id).first()
+    if not source_doc or not target_doc:
+        raise HTTPException(status_code=404, detail="Source or target document not found")
+
+    # Check if edge already exists
+    existing = db.query(DocEdge).filter(
+        DocEdge.source_id == doc_id,
+        DocEdge.target_id == body.target_id,
+        DocEdge.edge_type == body.edge_type
+    ).first()
+    
+    if existing:
+        return {"message": "Link already exists"}
+
+    edge = DocEdge(
+        source_id=doc_id,
+        target_id=body.target_id,
+        edge_type=body.edge_type
+    )
+    db.add(edge)
+    
+    # Audit log
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="LINK_DOCUMENT",
+        resource_type="document",
+        resource_id=str(doc_id),
+        new_value=f"Linked to {body.target_id} via {body.edge_type}",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+    
+    return {"message": "Documents linked successfully", "edge_id": edge.id}
+
+@router.get("/lineage/all")
+def get_all_lineage(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get the full document DAG for the D3.js Genealogy visualization."""
+    docs = db.query(Document).all()
+    edges = db.query(DocEdge).all()
+    
+    nodes_data = []
+    for d in docs:
+        nodes_data.append({
+            "id": str(d.id),
+            "filename": d.original_filename,
+            "category": d.category or "General",
+            "version": d.version,
+            "group": d.doc_group_id,
+            "status": d.status,
+            "source": d.source,
+            "created_at": d.created_at.isoformat(),
+            "sha256": d.sha256_hash
+        })
+        
+    edges_data = []
+    # 1. Add explicit edges
+    for e in edges:
+        edges_data.append({
+            "source": str(e.source_id),
+            "target": str(e.target_id),
+            "type": e.edge_type,
+            "confidence": e.confidence
+        })
+        
+    # 2. Add implicit version edges (parent -> child)
+    for d in docs:
+        if d.parent_doc_id:
+            edges_data.append({
+                "source": str(d.parent_doc_id),
+                "target": str(d.id),
+                "type": "supersedes",
+                "confidence": 1.0
+            })
+            
+    return {
+        "nodes": nodes_data,
+        "edges": edges_data
+    }
+
+@router.get("/lineage/export")
+def export_lineage(
+    format: str = Query("json-ld", description="Export format: json-ld or graphml"),
+    db: Session = Depends(get_db)
+):
+    """Export the document DAG in industry-standard formats."""
+    docs = db.query(Document).all()
+    edges = db.query(DocEdge).all()
+    
+    if format == "json-ld":
+        context = {
+            "@context": {
+                "schema": "http://schema.org/",
+                "name": "schema:name",
+                "description": "schema:description",
+                "dateCreated": "schema:dateCreated",
+                "supersedes": "schema:supersedes",
+                "citation": "schema:citation"
+            },
+            "@graph": []
+        }
+        
+        for d in docs:
+            node = {
+                "@id": f"urn:agra:doc:{d.id}",
+                "@type": "schema:DigitalDocument",
+                "name": d.original_filename,
+                "dateCreated": d.created_at.isoformat()
+            }
+            # Add explicit edges
+            related = []
+            for e in edges:
+                if e.source_id == d.id:
+                    if e.edge_type == "supersedes":
+                        node["supersedes"] = f"urn:agra:doc:{e.target_id}"
+                    else:
+                        related.append(f"urn:agra:doc:{e.target_id}")
+            if related:
+                node["citation"] = related
+                
+            # Add implicit parent
+            if d.parent_doc_id:
+                node["supersedes"] = f"urn:agra:doc:{d.parent_doc_id}"
+                
+            context["@graph"].append(node)
+            
+        return context
+        
+    elif format == "graphml":
+        from fastapi.responses import Response
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
+            '  <key id="name" for="node" attr.name="name" attr.type="string"/>',
+            '  <graph id="G" edgedefault="directed">'
+        ]
+        for d in docs:
+            lines.append(f'    <node id="{d.id}">')
+            lines.append(f'      <data key="name">{d.original_filename}</data>')
+            lines.append(f'    </node>')
+            
+        for e in edges:
+            lines.append(f'    <edge source="{e.source_id}" target="{e.target_id}" label="{e.edge_type}"/>')
+            
+        for d in docs:
+            if d.parent_doc_id:
+                lines.append(f'    <edge source="{d.parent_doc_id}" target="{d.id}" label="supersedes"/>')
+                
+        lines.append('  </graph>\n</graphml>')
+        return Response(content="\n".join(lines), media_type="application/xml")
+        
+    raise HTTPException(status_code=400, detail="Unsupported format. Use 'json-ld' or 'graphml'.")
+
+@router.get("/check-superseded")
+def check_superseded(
+    doc_ids: List[str] = Query([]),
+    db: Session = Depends(get_db)
+):
+    """Check if any of the provided Qdrant doc_ids have been superseded."""
+    if not doc_ids:
+        return {"superseded": {}}
+        
+    # Find matching PostgreSQL documents
+    docs = db.query(Document).filter(Document.qdrant_doc_id.in_(doc_ids)).all()
+    
+    result = {}
+    for d in docs:
+        # Check if there is a child version
+        child = db.query(Document).filter(Document.parent_doc_id == d.id).first()
+        if child:
+            result[d.qdrant_doc_id] = {
+                "superseded_by_id": child.id,
+                "superseded_by_name": child.original_filename
+            }
+            continue
+            
+        # Check explicit edges
+        edge = db.query(DocEdge).filter(
+            DocEdge.source_id == d.id, 
+            DocEdge.edge_type == DocEdgeType.SUPERSEDES
+        ).first()
+        
+        if edge:
+            target = db.query(Document).filter(Document.id == edge.target_id).first()
+            if target:
+                result[d.qdrant_doc_id] = {
+                    "superseded_by_id": target.id,
+                    "superseded_by_name": target.original_filename
+                }
+                
+    return {"superseded": result}
+
+@router.get("/{id1}/diff/{id2}")
+def get_document_diff(
+    id1: int,
+    id2: int,
+    db: Session = Depends(get_db)
+):
+    """Generate a text diff between two documents."""
+    import difflib
+    
+    doc1 = db.query(Document).filter(Document.id == id1).first()
+    doc2 = db.query(Document).filter(Document.id == id2).first()
+    
+    if not doc1 or not doc2:
+        raise HTTPException(status_code=404, detail="One or both documents not found")
+        
+    path1 = os.path.join(UPLOAD_DIR, doc1.filename)
+    path2 = os.path.join(UPLOAD_DIR, doc2.filename)
+    
+    # Simple extraction for diff (assuming text or extracting via a basic util if needed)
+    # In a full production system this would use the Agent's OCR pipeline or cached text
+    text1 = ""
+    text2 = ""
+    
+    try:
+        if doc1.file_type == "txt":
+            with open(path1, "r", encoding="utf-8", errors="ignore") as f:
+                text1 = f.read()
+        if doc2.file_type == "txt":
+            with open(path2, "r", encoding="utf-8", errors="ignore") as f:
+                text2 = f.read()
+    except Exception as e:
+        pass
+        
+    diff = list(difflib.unified_diff(
+        text1.splitlines(),
+        text2.splitlines(),
+        fromfile=doc1.original_filename,
+        tofile=doc2.original_filename,
+        lineterm=""
+    ))
+    
+    return {"diff": diff}
