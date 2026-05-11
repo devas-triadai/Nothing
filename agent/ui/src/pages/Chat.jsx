@@ -341,9 +341,6 @@ export default function Chat() {
 
   const navigate = useNavigate();
 
-  const handleCompare = () => {
-    navigate('/compare', { state: { selectedDocIds } });
-  };
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
