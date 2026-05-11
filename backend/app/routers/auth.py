@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.database import get_db
-from app.models.models import User, UserSession, AuditLog
+from app.models.models import User, UserSession, AuditLog, UserRole
 from app.utils.security import verify_password, create_access_token, decode_access_token
 
 router = APIRouter()
@@ -35,6 +35,15 @@ def require_superadmin(current_user: User = Depends(get_current_user)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super Admin access required"
+        )
+    return current_user
+
+
+def require_admin(current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN] and not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
         )
     return current_user
 
