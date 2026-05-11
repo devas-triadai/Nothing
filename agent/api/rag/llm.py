@@ -14,6 +14,7 @@ import os
 from typing import Generator, List, Dict, Any, Optional
 
 import requests  # stdlib-compatible HTTP — no async needed
+import httpx
 
 logger = logging.getLogger("agra.llm")
 
