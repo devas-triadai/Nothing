@@ -198,6 +198,7 @@ def ingest_document(
     description: Optional[str] = None,
     parent_doc_id: Optional[str] = None,
     version_notes: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
@@ -215,7 +216,7 @@ def ingest_document(
 
     # ── Stage 2: Chunking ──
     yield {"stage": "chunking", "progress": 0, "message": "Chunking text…"}
-    chunks = chunker.chunk_pages(pages, doc_id, filename, category=category, description=description)
+    chunks = chunker.chunk_pages(pages, doc_id, filename, category=category, description=description, source=source or "admin_upload")
     if not chunks:
         yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}
         return
@@ -241,30 +242,6 @@ def ingest_document(
     yield {"stage": "storing", "progress": 0, "message": "Storing in vector database…"}
     count = store.upsert_chunks(chunks, all_embeddings)
     yield {"stage": "storing", "progress": 100, "message": f"Stored {count} chunks in Qdrant."}
-
-    # ── Notify admin backend (best effort) ──
-    if token:
-        try:
-            # We must use a multipart form since the backend expects Form(...) data for /upload
-            files = {'file': (filename, b'dummy content for metadata registration', 'text/plain')}
-            data = {
-                "category": category or "Uncategorised",
-                "description": description or f"Ingested by AGRA Agent (doc_id: {doc_id})",
-            }
-            if parent_doc_id:
-                data["parent_doc_id"] = parent_doc_id
-            if version_notes:
-                data["version_notes"] = version_notes
-                
-            httpx.post(
-                f"{_ADMIN_BASE}/api/documents/upload",
-                headers={"Authorization": f"Bearer {token}"},
-                data=data,
-                files=files,
-                timeout=5.0,
-            )
-        except Exception as e:
-            logger.warning("Failed to register document with admin backend: %s", e)
 
     yield {
         "stage": "done",
@@ -516,6 +493,7 @@ async def query_pipeline(
                         "module": "agent_chat",
                         "response_time_ms": elapsed_ms,
                         "status": "success",
+                        "metadata_": question,  # raw user question for audit trail
                     },
                 )
         except Exception as e:

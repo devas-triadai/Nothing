@@ -84,6 +84,7 @@ class UsageLogEntry(BaseModel):
     response_time_ms: float = 0.0
     status: str = "success"        # 'success' | 'error'
     user_id: Optional[int] = None  # Override if not pulling from JWT
+    metadata_: Optional[str] = None  # e.g. raw user question text
 
 
 @router.post("/log", status_code=201)
@@ -105,6 +106,7 @@ def log_usage(
         output_tokens=entry.output_tokens,
         response_time_ms=entry.response_time_ms,
         status=entry.status,
+        metadata_=entry.metadata_,
     )
     db.add(log)
     db.commit()
@@ -152,6 +154,7 @@ def get_usage_logs(
             "output_tokens": log.output_tokens,
             "response_time_ms": log.response_time_ms,
             "status": log.status,
+            "metadata_": log.metadata_,
             "created_at": log.created_at
         })
     return {"total": total, "logs": result}

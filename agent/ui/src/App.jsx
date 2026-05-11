@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { getToken, setToken, getDashboardUrl } from './utils/auth';
 import Chat from './pages/Chat';
-import Upload from './pages/Upload';
 import Generate from './pages/Generate';
 import Compliance from './pages/Compliance';
 import Compare from './pages/Compare';
@@ -56,14 +55,6 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Chat />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/upload"
-        element={
-          <ProtectedRoute>
-            <Upload />
           </ProtectedRoute>
         }
       />

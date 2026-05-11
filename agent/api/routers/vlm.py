@@ -22,15 +22,17 @@ router = APIRouter()
 async def analyze_image(
     prompt: str = Form(...),
     image: UploadFile = File(...),
+    use_ocr: bool = Form(True),
     user: dict = Depends(get_current_user),
 ):
     """
     Analyze an uploaded image (architectural drawing, schematic, etc.) using the VLM.
+    Optionally runs hybrid OCR (Tesseract 5 + TrOCR) first to ground the VLM in exact text.
     Streams the response back to the client.
     """
     start_time = time.time()
     username = user.get("sub", "unknown")
-    logger.info("VLM Request from %s: %s", username, prompt[:50])
+    logger.info("VLM Request from %s: %s (use_ocr=%s)", username, prompt[:50], use_ocr)
 
     # Validate image
     if not image.content_type.startswith("image/"):
@@ -44,16 +46,44 @@ async def analyze_image(
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
     data_uri = f"data:{image.content_type};base64,{base64_image}"
 
-    # Build multimodal message format for llama-cpp-python (Llava15ChatHandler)
+    # ── Optional: Hybrid OCR grounding ──
+    ocr_context = ""
+    if use_ocr:
+        try:
+            from api.rag import tesseract_ocr as hybrid_ocr
+            ocr_result = hybrid_ocr.extract_all(image_bytes)
+            printed = ocr_result.get("printed_text", "")
+            handwritten = ocr_result.get("handwritten_text", "")
+            printed_conf = ocr_result.get("printed_confidence", 0.0)
+            if printed or handwritten:
+                ocr_context = f"""
+[SYSTEM — OCR-EXTRACTED TEXT FROM IMAGE]
+The following text was mechanically extracted from the image before this analysis:
+
+PRINTED TEXT (confidence {printed_conf:.1f}%):
+{printed if printed else 'None detected.'}
+
+HANDWRITTEN NOTES / STAMPS:
+{handwritten if handwritten else 'None detected.'}
+
+When answering, ground any quoted numbers, labels, or dimensions in the OCR text above.
+[/SYSTEM]
+"""
+        except Exception as e:
+            logger.warning("OCR grounding failed for VLM, continuing without it: %s", e)
+
+    # Build multimodal message format for llama-server (OpenAI-compatible vision)
+    full_prompt = f"{prompt}\n{ocr_context}" if ocr_context else prompt
+
     messages = [
         {
             "role": "system",
-            "content": "You are a highly skilled military architect and systems engineer for the Indian Coast Guard. You excel at analyzing technical drawings, schematics, and UI mockups."
+            "content": "You are a highly skilled military architect and systems engineer for the Indian Coast Guard. You excel at analyzing technical drawings, schematics, and UI mockups. When OCR text is provided, you must ground your analysis in it."
         },
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": prompt},
+                {"type": "text", "text": full_prompt},
                 {"type": "image_url", "image_url": {"url": data_uri}}
             ]
         }

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -8,6 +8,7 @@ import hashlib
 import uuid
 import os
 import re
+import httpx
 
 from app.database import get_db
 from app.models.models import User, Document, AuditLog, DocEdge
@@ -23,6 +24,9 @@ if not _DATA_DIR.exists():
     _DATA_DIR = _Path(__file__).resolve().parent.parent.parent / "agra_data"
 UPLOAD_DIR = str(_DATA_DIR / "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Agent API endpoint for ingestion
+_AGENT_BASE = os.getenv("AGENT_BASE_URL", "http://localhost:8005")
 
 
 class DocumentUpdate(BaseModel):
@@ -94,6 +98,7 @@ async def upload_document(
     parent_doc_id: Optional[int] = Form(None),
     source: Optional[str] = Form("admin_upload"),
     qdrant_doc_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin)
 ):
@@ -193,6 +198,30 @@ async def upload_document(
     db.add(audit)
     db.commit()
     db.refresh(doc)
+
+    # ── Trigger Agent ingestion in background (Single Source of Truth) ──
+    async def _call_agent_ingest():
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{_AGENT_BASE}/api/agent/admin/ingest",
+                    data={
+                        "file_path": file_path,
+                        "filename": file.filename,
+                        "doc_id": doc.qdrant_doc_id or str(doc.id),
+                        "category": doc.category,
+                        "description": doc.description,
+                        "parent_doc_id": str(parent_doc_id) if parent_doc_id else None,
+                        "version_notes": version_notes,
+                    },
+                )
+                resp.raise_for_status()
+                logger.info("Triggered agent ingestion for %s (doc_id=%s)", file.filename, doc.qdrant_doc_id)
+        except Exception as e:
+            logger.error("Failed to trigger agent ingestion for %s: %s", file.filename, e)
+
+    background_tasks.add_task(_call_agent_ingest)
+
     return {"message": "Document uploaded", "document": _doc_to_dict(doc, db)}
 
 

@@ -1,21 +1,24 @@
 """
-AGRA Phase 2 — Router: Document Upload & Management
-Upload files, trigger ingestion, list/delete documents.
+AGRA Phase 4 — Router: Admin-to-Agent Document Ingestion (Single Source of Truth)
+
+This module is NO LONGER exposed to the Agent UI frontend.
+It provides one internal endpoint: POST /admin/ingest
+
+Called exclusively by the backend after a Superadmin uploads a file.
+Runs the full OCR → chunk → embed → store pipeline in a background thread
+so the backend request returns immediately.
 """
 
 import json
 import logging
-import shutil
-import uuid
+import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query, Form
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Form
+from pydantic import BaseModel
 
-from api.utils.auth_check import get_current_user
 from api.rag.pipeline import ingest_document
-from api.rag.vector_store import get_store
 
 logger = logging.getLogger("agra.upload")
 
@@ -28,161 +31,83 @@ if not _DATA_DIR.exists():
 _UPLOADS_DIR = _DATA_DIR / "uploads"
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-_ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png"}
-_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+class AdminIngestRequest(BaseModel):
+    file_path: str
+    filename: str
+    doc_id: str
+    category: Optional[str] = None
+    description: Optional[str] = None
+    parent_doc_id: Optional[str] = None
+    version_notes: Optional[str] = None
 
 
-@router.post("/upload")
-async def upload_document(
-    file: UploadFile = File(...),
+def _run_ingestion_sync(req: AdminIngestRequest):
+    """
+    Synchronous wrapper around the generator-based ingest_document.
+    Executed in a background thread so it doesn't block the event loop.
+    """
+    logger.info("[Admin Ingest] Starting for doc_id=%s file=%s", req.doc_id, req.filename)
+    try:
+        events = []
+        for event in ingest_document(
+            file_path=req.file_path,
+            filename=req.filename,
+            doc_id=req.doc_id,
+            uploaded_by_user_id=0,
+            token="",
+            category=req.category,
+            description=req.description,
+            parent_doc_id=req.parent_doc_id,
+            version_notes=req.version_notes,
+        ):
+            events.append(event)
+
+        last_event = events[-1] if events else {}
+        if last_event.get("error"):
+            logger.error("[Admin Ingest] Failed for doc_id=%s: %s", req.doc_id, last_event)
+        else:
+            logger.info("[Admin Ingest] Completed for doc_id=%s (%d events)", req.doc_id, len(events))
+    except Exception as e:
+        logger.error("[Admin Ingest] Exception for doc_id=%s: %s", req.doc_id, e, exc_info=True)
+
+
+@router.post("/admin/ingest")
+async def admin_ingest(
+    background_tasks: BackgroundTasks,
+    file_path: str = Form(...),
+    filename: str = Form(...),
+    doc_id: str = Form(...),
     category: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     parent_doc_id: Optional[str] = Form(None),
     version_notes: Optional[str] = Form(None),
-    user: dict = Depends(get_current_user),
 ):
     """
-    Upload a document for ingestion into the RAG knowledge base.
-    Returns an SSE stream of ingestion progress events.
+    INTERNAL endpoint — called by the backend after a Superadmin uploads a file.
+    Triggers the full RAG ingestion pipeline asynchronously.
     """
-    # Validate file extension
-    filename = file.filename or "untitled"
-    suffix = Path(filename).suffix.lower()
-    if suffix not in _ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '{suffix}'. Allowed: {', '.join(_ALLOWED_EXTENSIONS)}",
-        )
-
-    # Check for duplicates by filename in Qdrant (not just disk, to allow retries if crashed)
-    if get_store().document_exists(filename):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Document '{filename}' has already been successfully ingested.",
-        )
-
-    # Read and validate size
-    content = await file.read()
-    if len(content) > _MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large ({len(content) / 1024 / 1024:.1f} MB). Max: 50 MB.",
-        )
-
-    # Save to disk
-    doc_id = str(uuid.uuid4())
-    safe_name = f"{doc_id}_{filename}"
-    save_path = _UPLOADS_DIR / safe_name
-    save_path.write_bytes(content)
-
-    logger.info("Uploaded %s (%d bytes) → %s", filename, len(content), save_path)
-
-    # Stream ingestion progress as SSE
-    def event_stream():
-        for event in ingest_document(
-            file_path=str(save_path),
-            filename=filename,
-            doc_id=doc_id,
-            uploaded_by_user_id=0,  # Extracted from JWT if needed
-            token=user.get("_raw_token", ""),
-            category=category,
-            description=description,
-            parent_doc_id=parent_doc_id,
-            version_notes=version_notes,
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+    req = AdminIngestRequest(
+        file_path=file_path,
+        filename=filename,
+        doc_id=doc_id,
+        category=category,
+        description=description,
+        parent_doc_id=parent_doc_id,
+        version_notes=version_notes,
     )
 
+    # Run in background thread so the backend gets an immediate 200 OK
+    def _thread_worker():
+        _run_ingestion_sync(req)
 
-@router.get("/documents")
-async def list_documents(
-    user: dict = Depends(get_current_user),
-):
-    """
-    List all ingested documents with their file info, chunk counts, and classification.
-    """
-    store = get_store()
-    documents = []
-    seen_docs = {}
+    thread = threading.Thread(target=_thread_worker, daemon=True)
+    thread.start()
 
-    # Scan Qdrant for unique doc_ids
-    offset = None
-    while True:
-        results, offset = store.client.scroll(
-            collection_name="agra_docs",
-            limit=500,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for pt in results:
-            meta = pt.payload.get("metadata", {})
-            did = meta.get("doc_id", "")
-            if did and did not in seen_docs:
-                seen_docs[did] = {
-                    "doc_id": did,
-                    "filename": meta.get("filename", "Unknown"),
-                    "category": meta.get("category") or "General",
-                    "sub_category": meta.get("sub_category", ""),
-                    "tags": meta.get("tags", ""),
-                    "source": meta.get("source", "user_upload"),
-                    "classification_confidence": meta.get("classification_confidence", 0),
-                    "doc_title": meta.get("doc_title", ""),
-                    "chunks": 0,
-                    "pages": set(),
-                }
-            if did:
-                seen_docs[did]["chunks"] += 1
-                seen_docs[did]["pages"].add(meta.get("page", 0))
-        if offset is None:
-            break
-
-    for doc in seen_docs.values():
-        doc["page_count"] = len(doc["pages"])
-        doc["pages"] = sorted(doc["pages"])
-        # Check if file still exists on disk
-        matching = list(_UPLOADS_DIR.glob(f"{doc['doc_id']}_*"))
-        doc["file_exists"] = len(matching) > 0
-        doc["status"] = "indexed"
-        documents.append(doc)
-
-    return {"documents": documents, "total": len(documents)}
-
-
-@router.delete("/documents/{doc_id}")
-async def delete_document(
-    doc_id: str,
-    user: dict = Depends(get_current_user),
-):
-    """
-    Delete a document from the vector store and uploads folder.
-    """
-    store = get_store()
-
-    # Delete from Qdrant
-    deleted_count = store.delete_document(doc_id)
-
-    # Delete file from uploads
-    files_deleted = 0
-    for f in _UPLOADS_DIR.glob(f"{doc_id}_*"):
-        f.unlink(missing_ok=True)
-        files_deleted += 1
-
-    if deleted_count == 0 and files_deleted == 0:
-        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found.")
-
-    logger.info("Deleted doc_id=%s: %d chunks, %d files.", doc_id, deleted_count, files_deleted)
+    logger.info("[Admin Ingest] Queued doc_id=%s in background thread", doc_id)
     return {
-        "deleted": True,
+        "message": "Ingestion queued",
         "doc_id": doc_id,
-        "chunks_removed": deleted_count,
-        "files_removed": files_deleted,
+        "filename": filename,
+        "status": "queued",
     }

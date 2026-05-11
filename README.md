@@ -27,6 +27,11 @@ AGRA is a fully secure, air-gapped, local AI-powered RAG (Retrieval-Augmented Ge
 - **Document Management:** Full CRUD operations on the knowledge base with instant download and view buttons.
 - **Analytics & Reports:** Export usage analytics, active session data, and system health metrics directly to CSV.
 
+### 5. Military-Grade Multimodal VLM + Hybrid OCR (Phase 4)
+- **Hybrid 3-Model Vision Pipeline:** Engineering drawings and schematics are processed through OpenCV preprocessing → **Tesseract 5** (printed text, dimensions, labels) → **TrOCR** (handwritten annotations, stamps, signatures) → **Gemma 4 31B-IT VLM** (vision reasoning with OCR-grounded prompt).
+- **OCR-Grounded Parameter Extraction:** The VLM receives both the image and the exact mechanically extracted text, eliminating hallucination on critical dimensions and tolerances.
+- **Deterministic + Generative:** Tesseract/TrOCR guarantee exact text accuracy; Gemma 4 31B provides semantic understanding of the drawing structure. This hybrid exceeds the original report spec (which used LLaVA 1.5).
+
 ---
 
 ## 🏗️ Project Structure
@@ -70,6 +75,10 @@ Nothing/
 | **Database**  | SQLite (dev) / PostgreSQL (prod)  |
 | **Auth**      | JWT (access + refresh tokens)     |
 | **Styling**   | Vanilla CSS with CSS Variables    |
+| **VLM**     | Gemma 4 31B-IT (via llama-server) |
+| **Printed OCR** | Tesseract 5 (pytesseract)       |
+| **Handwriting OCR** | TrOCR (HuggingFace transformers) |
+| **Vision Preprocess** | OpenCV (deskew, denoise, binarize) |
 
 ---
 
@@ -85,6 +94,24 @@ uvicorn app.main:app --reload --port 8000
 ```
 - The API will be available at `http://localhost:8000`
 - Swagger docs at `http://localhost:8000/docs`
+
+### Agent API Setup
+
+```bash
+cd agent
+pip install -r requirements.txt
+uvicorn api.main:app --reload --port 8005
+```
+- The agent API will be available at `http://localhost:8005`
+
+> **System Dependency:** Tesseract 5 must be installed at the OS level for printed-text OCR:
+> ```bash
+> # Ubuntu / Debian
+> sudo apt-get install tesseract-ocr
+> # macOS
+> brew install tesseract
+> ```
+> TrOCR (handwriting) is downloaded automatically via HuggingFace on first use (~1.3 GB).
 
 ### Frontend Dashboard Setup
 

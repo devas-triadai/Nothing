@@ -147,6 +147,7 @@ def chunk_text(
     page_number: int = 1,
     category: Optional[str] = None,
     description: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk a block of text into segments of ~512 tokens with 64-token overlap.
@@ -212,6 +213,7 @@ def chunk_text(
                     "chunk_index": chunk_index,
                     "category": category,
                     "description": description,
+                    "source": source or "admin_upload",
                 },
             })
             chunk_index += 1
@@ -261,6 +263,7 @@ def chunk_pages(
     doc_title: Optional[str] = None,
     category: Optional[str] = None,
     description: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk multiple pages at once with contextual headers.
@@ -294,12 +297,13 @@ def chunk_pages(
             current_section = detected
 
         page_chunks = chunk_text(
-            page_text, 
-            doc_id, 
-            filename, 
+            page_text,
+            doc_id,
+            filename,
             page_num,
             category=category,
             description=description,
+            source=source,
         )
 
         # Prepend contextual header and store section in metadata

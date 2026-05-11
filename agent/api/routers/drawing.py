@@ -32,21 +32,49 @@ def _run_drawing_extraction(job_id: str, data_uri: str, db_session: Session):
         job.status = "processing"
         db_session.commit()
 
-        prompt = """You are a naval architect. Analyze this engineering drawing.
-Extract the following exact parameters into a JSON object. Return ONLY valid JSON and nothing else.
-{
-  "dimensions": ["length: X m", "beam: Y m"],
-  "tolerances": ["list of tolerances found"],
-  "materials": ["list of materials found"],
-  "equipment_tags": ["list of equipment tags found"]
-}"""
-
-        # Preprocess using OpenCV before passing to VLM
+        # ── Step 1: OpenCV preprocessing ──
         from api.rag.vision import preprocess_engineering_drawing
         processed_data_uri = preprocess_engineering_drawing(data_uri)
 
+        # ── Step 2: Hybrid OCR (Tesseract 5 + TrOCR) ──
+        from api.rag import tesseract_ocr as hybrid_ocr
+        # Decode the processed image for OCR
+        if processed_data_uri.startswith("data:"):
+            _, b64 = processed_data_uri.split(",", 1)
+            img_bytes = base64.b64decode(b64)
+        else:
+            img_bytes = base64.b64decode(processed_data_uri)
+
+        ocr_result = hybrid_ocr.extract_all(img_bytes)
+
+        printed_text = ocr_result.get("printed_text", "")
+        handwritten_text = ocr_result.get("handwritten_text", "")
+        printed_conf = ocr_result.get("printed_confidence", 0.0)
+
+        # ── Step 3: Build enhanced prompt with OCR grounding ──
+        ocr_context = f"""OCR-EXTRACTED PRINTED TEXT (confidence {printed_conf:.1f}%):
+{printed_text if printed_text else 'No printed text detected.'}
+
+OCR-EXTRACTED HANDWRITTEN NOTES / STAMPS:
+{handwritten_text if handwritten_text else 'No handwriting detected.'}"""
+
+        prompt = f"""You are a naval architect and military engineering analyst for the Indian Coast Guard.
+You are analyzing an engineering drawing. In addition to the image, exact text has been extracted by OCR.
+
+{ocr_context}
+
+Using BOTH the image and the OCR text above, extract the following exact parameters.
+Return ONLY valid JSON and nothing else.
+{{
+  "dimensions": ["length: X m", "beam: Y m", "draft: Z m"],
+  "tolerances": ["list of tolerances found"],
+  "materials": ["list of materials found"],
+  "equipment_tags": ["list of equipment tags found"],
+  "compliance_notes": ["any compliance or regulatory notes"]
+}}"""
+
         messages = [
-            {"role": "system", "content": "You are a military engineering parser. Return only JSON."},
+            {"role": "system", "content": "You are a military engineering parser. You must ground all extracted values in the provided OCR text or visible image annotations. Return only JSON."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": processed_data_uri}}
@@ -55,13 +83,20 @@ Extract the following exact parameters into a JSON object. Return ONLY valid JSO
 
         raw_output = llm_engine.generate(messages, max_tokens=2048, temperature=0.1)
         cleaned = _clean_json(raw_output)
-        
+
         try:
             start = cleaned.find("{")
             end = cleaned.rfind("}") + 1
             result_json = json.loads(cleaned[start:end])
         except Exception:
             result_json = {"raw": cleaned}
+
+        # Inject OCR metadata into result for traceability
+        result_json["_ocr_metadata"] = {
+            "printed_text": printed_text,
+            "handwritten_text": handwritten_text,
+            "printed_confidence": printed_conf,
+        }
 
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
         job.status = "completed"

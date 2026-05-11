@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   MessageSquare, Plus, Send, Paperclip, ChevronDown, ChevronRight,
-  Upload, FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
+  FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
   ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle, Edit2,
 } from 'lucide-react';
@@ -977,23 +977,11 @@ export default function Chat() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // If it's an image, attach it to the message for VLM
+    // Only images are accepted for inline VLM attachment.
+    // Documents must be uploaded by a Superadmin via the Dashboard.
     if (file.type.startsWith('image/')) {
       setSelectedImage(file);
-      e.target.value = '';
-      return;
     }
-
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const resp = await fetch(getApiUrl('/api/agent/upload'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (resp.ok) setInput(prev => prev + ` [Uploaded: ${file.name}]`);
-    } catch (err) { console.error('Upload failed:', err); }
     e.target.value = '';
   };
 
@@ -1247,7 +1235,6 @@ export default function Chat() {
         )}
 
         <div style={styles.navSection}>
-          <Link to="/upload" style={styles.navLink}><Upload size={15} />{!sidebarCollapsed && <span>{isHindi ? 'दस्तावेज़' : 'Documents'}</span>}</Link>
           <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>{isHindi ? 'अनुपालन' : 'Compliance'}</span>}</Link>
           <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
         </div>
@@ -1434,7 +1421,7 @@ export default function Chat() {
             {showDocSelector && (
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '8px', maxHeight: '150px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {documents.length === 0 ? (
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No documents available. Upload some first.</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No documents indexed yet. Contact your administrator.</span>
                 ) : (
                   <>
                     <button

@@ -34,6 +34,7 @@ docx2txt>=0.8
 # --- OCR (scanned documents) ---
 paddlepaddle>=2.6.0
 paddleocr>=2.9.0
+pytesseract>=0.3.10         # Tesseract 5 Python wrapper (system binary required)
 
 # --- Tokenization / Chunking ---
 tiktoken>=0.8.0               # cl100k_base tokenizer for chunking
