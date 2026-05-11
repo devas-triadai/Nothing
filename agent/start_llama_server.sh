@@ -31,8 +31,8 @@ fi
 echo "Starting llama-server with --parallel 5..."
 # Note: Adjust paths if models are stored differently.
 ./build/bin/llama-server \
-  -m ../../models/gemma4-31b-it/google_gemma-4-31B-it-Q4_K_L.gguf \
-  --mmproj ../../models/gemma4-31b-it/mmproj-gemma-4-31b-f16.gguf \
+  -m ../models/gemma4-31b-it/google_gemma-4-31B-it-Q4_K_L.gguf \
+  --mmproj ../models/gemma4-31b-it/mmproj-gemma-4-31b-f16.gguf \
   -c 8192 \
   -ngl 99 \
   --parallel 5 \
