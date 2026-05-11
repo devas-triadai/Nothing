@@ -375,6 +375,24 @@ class VectorStore:
         all_chunks.sort(key=lambda c: c["metadata"].get("chunk_index", 0))
         return all_chunks
 
+    def list_unique_documents(self) -> List[Dict[str, Any]]:
+        """Return a list of unique document metadata from the store."""
+        unique_docs = {}
+        for pid, meta in self._chunk_meta.items():
+            doc_id = meta.get("doc_id")
+            if doc_id and doc_id not in unique_docs:
+                unique_docs[doc_id] = {
+                    "doc_id": doc_id,
+                    "filename": meta.get("filename", "Unknown"),
+                    "category": meta.get("category", "General"),
+                    "page_count": meta.get("page_count", 0),
+                    "chunks": 0,
+                }
+            if doc_id:
+                unique_docs[doc_id]["chunks"] += 1
+
+        return list(unique_docs.values())
+
     def collection_count(self) -> int:
         """Total number of points in the collection."""
         info = self.client.get_collection(collection_name=_COLLECTION)

@@ -382,6 +382,7 @@ async def bulk_upload_documents(
     files: List[UploadFile] = File(...),
     category: Optional[str] = Form(None),
     auto_categorize: bool = Form(True),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin)
 ):
@@ -432,7 +433,31 @@ async def bulk_upload_documents(
             doc_group_id=doc_group_id,
         )
         db.add(doc)
-        results.append({"filename": file.filename, "status": "uploaded", "category": detected_category, "tags": detected_tags, "confidence": detected_conf})
+        db.flush()  # Get doc.id without committing yet
+        results.append({"filename": file.filename, "status": "uploaded", "category": detected_category, "tags": detected_tags, "confidence": detected_conf, "doc_id": doc.id})
+
+        # ── Trigger Agent ingestion for this file (Single Source of Truth) ──
+        async def _call_agent_ingest_one():
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"{_AGENT_BASE}/api/agent/admin/ingest",
+                        data={
+                            "file_path": file_path,
+                            "filename": file.filename,
+                            "doc_id": doc.qdrant_doc_id or str(doc.id),
+                            "category": doc.category,
+                            "description": doc.description,
+                            "parent_doc_id": None,
+                            "version_notes": None,
+                        },
+                    )
+                    resp.raise_for_status()
+                    logger.info("Triggered agent ingestion for bulk file %s (doc_id=%s)", file.filename, doc.qdrant_doc_id)
+            except Exception as e:
+                logger.error("Failed to trigger agent ingestion for bulk file %s: %s", file.filename, e)
+
+        background_tasks.add_task(_call_agent_ingest_one)
 
     audit = AuditLog(
         user_id=current_user.id,

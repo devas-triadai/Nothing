@@ -1261,8 +1261,8 @@ export default function Chat() {
             <h1 style={styles.welcomeTitle}>{isHindi ? 'एग्रा इंटेलिजेंस एजेंट' : 'AGRA Intelligence Agent'}</h1>
             <p style={styles.welcomeDesc}>
               {isHindi 
-                ? 'प्रश्न पूछें, प्रेजेंटेशन बनाएं, क्विज़ जनरेट करें, या सारांश प्राप्त करें — सब आपके अपलोड किए गए दस्तावेज़ों से।'
-                : 'Ask questions, generate presentations, create quizzes, or get summaries — all from your uploaded documents.'}
+                ? 'प्रश्न पूछें, प्रेजेंटेशन बनाएं, क्विज़ जनरेट करें, या सारांश प्राप्त करें — सब सिस्टम के प्रमाणित दस्तावेज़ों से।'
+                : 'Ask questions, generate presentations, create quizzes, or get summaries — all from the system\'s vetted documents.'}
             </p>
             <div style={styles.suggestionsGrid}>
               {[

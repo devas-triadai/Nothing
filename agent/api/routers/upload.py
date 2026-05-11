@@ -60,6 +60,7 @@ def _run_ingestion_sync(req: AdminIngestRequest):
             description=req.description,
             parent_doc_id=req.parent_doc_id,
             version_notes=req.version_notes,
+            source="admin_upload",
         ):
             events.append(event)
 
@@ -85,7 +86,7 @@ async def admin_ingest(
 ):
     """
     INTERNAL endpoint — called by the backend after a Superadmin uploads a file.
-    Triggers the full RAG ingestion pipeline asynchronously.
+    Triggers the full RAG ingestion pipeline asynchronously using FastAPI BackgroundTasks.
     """
     req = AdminIngestRequest(
         file_path=file_path,
@@ -97,17 +98,25 @@ async def admin_ingest(
         version_notes=version_notes,
     )
 
-    # Run in background thread so the backend gets an immediate 200 OK
-    def _thread_worker():
-        _run_ingestion_sync(req)
+    # Use FastAPI BackgroundTasks for proper async background execution
+    background_tasks.add_task(_run_ingestion_sync, req)
 
-    thread = threading.Thread(target=_thread_worker, daemon=True)
-    thread.start()
-
-    logger.info("[Admin Ingest] Queued doc_id=%s in background thread", doc_id)
+    logger.info("[Admin Ingest] Queued doc_id=%s via BackgroundTasks", doc_id)
     return {
         "message": "Ingestion queued",
         "doc_id": doc_id,
         "filename": filename,
         "status": "queued",
     }
+
+
+@router.get("/documents")
+async def list_documents():
+    """
+    List all documents currently available in the Agent's vector store.
+    Used by the UI to populate the context selector.
+    """
+    from api.rag.vector_store import get_store
+    store = get_store()
+    docs = store.list_unique_documents()
+    return {"documents": docs}
