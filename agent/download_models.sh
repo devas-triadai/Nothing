@@ -76,7 +76,7 @@ $HF_CMD download \
 echo "  Downloading Multimodal Projector (mmproj) for VLM..."
 $HF_CMD download \
     bartowski/google_gemma-4-31B-it-GGUF \
-    --include "mmproj-gemma-4-31b-f16.gguf" \
+    --include "mmproj-google_gemma-4-31B-it-f16.gguf" \
     --local-dir "${MODELS_DIR}/gemma4-31b-it"
 
 echo "✅ Gemma 4 31B-IT and projector downloaded successfully."
