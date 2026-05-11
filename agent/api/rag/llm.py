@@ -137,7 +137,7 @@ async def generate_hyde_document(query: str) -> str:
 
     try:
         # Non-streaming call for HyDE
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{_LLAMA_SERVER_URL}/v1/chat/completions",
                 json={
@@ -146,14 +146,20 @@ async def generate_hyde_document(query: str) -> str:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": 0.3,
+                    "temperature": 0.4,  # Increased slightly to avoid deterministic empty outputs
                     "max_tokens": 150,
                     "stream": False
                 }
             )
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+            content = data["choices"][0]["message"].get("content", "").strip()
+            
+            if not content:
+                logger.warning("LLM returned empty content for HyDE. Falling back to original query.")
+                return query
+                
+            return content
     except Exception as e:
         logger.warning("HyDE generation failed, falling back to raw query. Error: %s", e)
         return query
