@@ -11,6 +11,7 @@ messages with image_url when launched with --mmproj.
 import json
 import logging
 import os
+import re
 from typing import Generator, List, Dict, Any, Optional
 
 import requests  # stdlib-compatible HTTP — no async needed
@@ -168,8 +169,8 @@ async def generate_hyde_document(query: str) -> str:
     )
 
     try:
-        # Non-streaming call for HyDE
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        # Non-streaming call for HyDE - increased timeout for reasoning models
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{_LLAMA_SERVER_URL}/v1/chat/completions",
                 json={
