@@ -78,7 +78,12 @@ def generate(
     resp = requests.post(_CHAT_ENDPOINT, json=payload, timeout=300)
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    msg = data["choices"][0]["message"]
+    content = msg.get("content", "")
+    # Fallback for reasoning models that put output in reasoning_content
+    if not content.strip() and "reasoning_content" in msg:
+        content = msg["reasoning_content"]
+    return content.strip()
 
 
 def stream_generate(
@@ -148,14 +153,19 @@ async def generate_hyde_document(query: str) -> str:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": 0.4,  # Increased slightly to avoid deterministic empty outputs
-                    "max_tokens": 150,
+                    "temperature": 0.4,
+                    "max_tokens": 1024,
                     "stream": False
                 }
             )
             resp.raise_for_status()
             data = resp.json()
-            content = data["choices"][0]["message"].get("content", "").strip()
+            msg = data["choices"][0]["message"]
+            content = msg.get("content", "").strip()
+            
+            # Fallback for reasoning models
+            if not content and "reasoning_content" in msg:
+                content = msg["reasoning_content"].strip()
             
             if not content:
                 logger.warning("LLM returned empty content for HyDE. Raw response: %s", data)

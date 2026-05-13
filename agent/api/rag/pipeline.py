@@ -352,8 +352,8 @@ async def query_pipeline(
 
     # ── 4. CRAG-Style Retry Loop (Priority 3) ──
     # Three-tier threshold: CONFIDENT → proceed; RETRY → rewrite & search again; REFUSE
-    _CONFIDENT_THRESHOLD = 0.50
-    _RETRY_THRESHOLD = 0.25
+    _CONFIDENT_THRESHOLD = 0.40
+    _RETRY_THRESHOLD = 0.15
 
     max_score = max((c.get("combined_score", 0) for c in candidates), default=0)
 

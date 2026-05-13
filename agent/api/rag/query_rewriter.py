@@ -81,7 +81,7 @@ def rewrite_query(
     try:
         rewritten = llm_engine.generate(
             messages,
-            max_tokens=128,
+            max_tokens=512,
             temperature=0.2,
         )
         rewritten = rewritten.strip().strip('"').strip("'")
