@@ -381,10 +381,13 @@ async def query_pipeline(
         return
 
     # ── 3. CRAG-Style Retry Loop ──
-    _CONFIDENT_THRESHOLD = 0.25
-    _RETRY_THRESHOLD = 0.10
+    # Thresholds calibrated for RRF scores. RRF max ≈ 2/(60+1) = 0.0328.
+    _CONFIDENT_THRESHOLD = 0.015
+    _RETRY_THRESHOLD = 0.005
 
     max_score = max((c.get("combined_score", 0) for c in candidates), default=0)
+    logger.info("Stage: max_score=%.4f (confident≥%.3f, retry≥%.3f)",
+                max_score, _CONFIDENT_THRESHOLD, _RETRY_THRESHOLD)
 
     if not candidates or max_score < _RETRY_THRESHOLD:
         yield {"token": _REFUSAL}
@@ -397,7 +400,11 @@ async def query_pipeline(
             max_score, _CONFIDENT_THRESHOLD,
         )
         from api.rag.query_rewriter import rewrite_query
-        retry_query = rewrite_query(question, session_history, feedback="low_relevance")
+        # Offload blocking LLM call to executor to keep event loop responsive
+        _loop = asyncio.get_event_loop()
+        retry_query = await _loop.run_in_executor(
+            None, rewrite_query, question, session_history, "low_relevance"
+        )
         retry_emb = embedder.embed_query(retry_query)
         retry_candidates = store.hybrid_search(
             query_text=retry_query,
