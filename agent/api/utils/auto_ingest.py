@@ -114,7 +114,7 @@ def _register_with_admin(file_path: Path, doc_id: str, classification: dict) -> 
         logger.warning("Failed to register %s with admin backend: %s", file_path.name, e)
 
 
-def _ingest_file(file_path: Path) -> None:
+def _ingest_file(file_path: Path) -> bool:
     """Ingest a single knowledge-base file using the standard pipeline."""
     from api.rag import ocr, embedder
     from api.rag.chunker import chunk_pages
@@ -201,6 +201,8 @@ def _ingest_file(file_path: Path) -> None:
     # 6. Register with admin backend (best effort)
     _register_with_admin(file_path, doc_id, classification)
 
+    return True
+
 
 def _run_auto_ingest() -> None:
     """Scan knowledge_base/ and ingest any files not yet indexed."""
@@ -247,11 +249,14 @@ def _run_auto_ingest() -> None:
             skipped += 1
             continue
         
-        success = _ingest_file(f)
-        if success:
-            ingested += 1
-        else:
-            logger.error("Failed to ingest %s", f.name)
+        try:
+            result = _ingest_file(f)
+            if result:
+                ingested += 1
+            else:
+                logger.warning("Skipped %s (no text or chunks)", f.name)
+        except Exception as e:
+            logger.error("Failed to auto-ingest %s: %s", f.name, e, exc_info=True)
 
     if ingested > 0:
         logger.info("Rebuilding BM25 index for fresh data...")
