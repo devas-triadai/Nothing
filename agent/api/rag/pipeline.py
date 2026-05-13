@@ -274,6 +274,7 @@ async def query_pipeline(
     """
     start_time = time.time()
     store = get_store()
+    _loop = asyncio.get_event_loop()
 
     # Force FastAPI to flush HTTP headers immediately to prevent proxy timeouts
     yield {"token": ""}
@@ -316,7 +317,10 @@ async def query_pipeline(
 
     if not is_fast:
         from api.rag.query_rewriter import rewrite_query
-        rewritten = rewrite_query(question, session_history)
+        # Offload blocking sync LLM call to executor — keeps event loop alive
+        rewritten = await _loop.run_in_executor(
+            None, rewrite_query, question, session_history, None
+        )
         hyde_doc = await llm_engine.generate_hyde_document(rewritten)
         logger.info("HyDE generated for query: %s", hyde_doc[:100].replace('\n', ' '))
     else:
@@ -329,7 +333,9 @@ async def query_pipeline(
         search_queries.append(hyde_doc)
 
     logger.info("Stage: embedding query …")
-    query_emb = embedder.embed_query(hyde_doc if hyde_doc else rewritten)
+    query_emb = await _loop.run_in_executor(
+        None, embedder.embed_query, hyde_doc if hyde_doc else rewritten
+    )
     logger.info("Stage: hybrid search over %d query variants …", len(search_queries))
 
     candidates = []
@@ -401,11 +407,12 @@ async def query_pipeline(
         )
         from api.rag.query_rewriter import rewrite_query
         # Offload blocking LLM call to executor to keep event loop responsive
-        _loop = asyncio.get_event_loop()
         retry_query = await _loop.run_in_executor(
             None, rewrite_query, question, session_history, "low_relevance"
         )
-        retry_emb = embedder.embed_query(retry_query)
+        retry_emb = await _loop.run_in_executor(
+            None, embedder.embed_query, retry_query
+        )
         retry_candidates = store.hybrid_search(
             query_text=retry_query,
             query_embedding=retry_emb,
@@ -427,7 +434,9 @@ async def query_pipeline(
 
     # 4. Rerank → top 8
     logger.info("Stage: reranking %d candidates …", len(candidates))
-    top_chunks = reranker.rerank(question, candidates, top_k=8)
+    top_chunks = await _loop.run_in_executor(
+        None, reranker.rerank, question, candidates, 8
+    )
     logger.info("Stage: reranked to %d chunks. Fetching house rules …", len(top_chunks))
 
     # 5. Build prompt
@@ -444,7 +453,7 @@ async def query_pipeline(
             async with httpx.AsyncClient(timeout=5.0) as client:
                 res = await client.get(
                     f"{_ADMIN_BASE}/api/documents/check-superseded",
-                    params={"doc_ids": doc_ids_to_check},
+                    params=[("doc_ids", d) for d in doc_ids_to_check],
                     headers={"Authorization": f"Bearer {token}"}
                 )
                 if res.status_code == 200:
@@ -471,7 +480,6 @@ async def query_pipeline(
     # 6. Stream LLM response (run in thread to avoid blocking async event loop)
     full_response = []
     token_queue: asyncio.Queue = asyncio.Queue()
-    loop = asyncio.get_event_loop()
 
     def _run_llm():
         try:
@@ -482,14 +490,14 @@ async def query_pipeline(
                     logger.info("Stage: LLM first token received.")
                     first = False
                 # asyncio.Queue is NOT thread-safe — must bridge via call_soon_threadsafe
-                loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+                _loop.call_soon_threadsafe(token_queue.put_nowait, tok)
             logger.info("Stage: LLM stream finished.")
-            loop.call_soon_threadsafe(token_queue.put_nowait, None)  # sentinel
+            _loop.call_soon_threadsafe(token_queue.put_nowait, None)  # sentinel
         except Exception as e:
             logger.error("LLM generation error: %s", e, exc_info=True)
-            loop.call_soon_threadsafe(token_queue.put_nowait, None)
+            _loop.call_soon_threadsafe(token_queue.put_nowait, None)
 
-    llm_thread = loop.run_in_executor(None, _run_llm)
+    llm_thread = _loop.run_in_executor(None, _run_llm)
 
     while True:
         tok = await token_queue.get()
@@ -542,10 +550,15 @@ async def query_pipeline(
         except Exception as e:
             logger.warning("Failed to log usage: %s", e)
 
+    # Normalize RRF to a human-friendly 0-1 confidence scale.
+    # Theoretical RRF max with k=60: 2/(60+1) ≈ 0.0328.
+    _rrf_max = 2.0 / (60.0 + 1.0)
+    confidence = min(max_score / _rrf_max, 1.0) if _rrf_max else 0.0
+
     yield {
         "done": True,
         "sources": sources,
         "response_time_ms": elapsed_ms,
         "chunks_used": len(top_chunks),
-        "confidence_score": max_score,
+        "confidence_score": round(confidence, 3),
     }

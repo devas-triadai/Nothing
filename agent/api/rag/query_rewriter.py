@@ -56,20 +56,22 @@ def rewrite_query(
             parts.append(f"{role}: {content}")
         history_str = "\n".join(parts)
 
-    prompt_text = _REWRITE_PROMPT.format(
-        history=history_str,
-        question=question,
+    # Add feedback hint if retrying
+    feedback_hint = ""
+    if feedback == "low_relevance":
+        feedback_hint = " The initial search returned low-relevance results; try broader or alternative terms."
+
+    _SYSTEM_REWRITE = (
+        "You rewrite user questions into concise keyword-rich search queries for a "
+        "maritime compliance knowledge base. Reply with ONLY the rewritten query as a single "
+        "plain sentence. No quotes, no labels (like 'Query:' or 'User Input:'), no preamble, "
+        "no explanations, no markdown, no bullets, no context echo. Just the raw search query."
+        + feedback_hint
     )
 
-    # Add feedback hint if retrying
-    if feedback == "low_relevance":
-        prompt_text += "\n(Note: The initial search returned low-relevance results. Try broader or alternative terms.)"
-
-    _SYSTEM_REWRITE = "You are a search query optimizer for a maritime compliance knowledge base. Rewrite the user's question into an optimal search query. Output ONLY the rewritten query — no explanations, no preamble. Fix typos and expand abbreviations. Do NOT output any markdown, asterisks, bullet points, or internal reasoning context."
-    
     messages = [
         {"role": "system", "content": _SYSTEM_REWRITE},
-        {"role": "user", "content": f"Context: {history_str}\n\nQuestion: {question}"},
+        {"role": "user", "content": question},
     ]
 
     try:
@@ -79,6 +81,18 @@ def rewrite_query(
             temperature=0.2,
         )
         rewritten = rewritten.strip().strip('"').strip("'")
+
+        # Strip common hallucinated prefixes
+        for prefix in (
+            "rewritten search query:", "search query:", "query:",
+            "user input:", "user question:", "current question:", "question:",
+            "context:", "rewritten:", "current:", "input:",
+        ):
+            if rewritten.lower().startswith(prefix):
+                rewritten = rewritten[len(prefix):].strip().strip('"').strip("'")
+
+        # Take only the first non-empty line (drop "Context: ..." follow-ups)
+        rewritten = next((ln.strip() for ln in rewritten.splitlines() if ln.strip()), "")
 
         # Sanity check — if rewritten is empty or too short, fall back
         if len(rewritten) < 5:
