@@ -149,7 +149,15 @@ def stream_generate(
 
     logger.debug("stream_generate() → POST %s (max_tokens=%d, stream=True)", _CHAT_ENDPOINT, max_tokens)
     resp = requests.post(_CHAT_ENDPOINT, json=payload, stream=True, timeout=300)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        try:
+            err_body = resp.text[:500]
+        except Exception:
+            err_body = "<unreadable>"
+        logger.error("LLM stream_generate HTTP %s: %s | Body: %s", resp.status_code, e, err_body)
+        raise
 
     for line in resp.iter_lines(decode_unicode=True):
         if not line:

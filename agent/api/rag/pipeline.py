@@ -134,9 +134,10 @@ RULES:
 """
 
 
-def _format_context(chunks: List[Dict[str, Any]]) -> str:
+def _format_context(chunks: List[Dict[str, Any]], max_chars_per_chunk: int = 400) -> str:
     """Format retrieved chunks into NUMBERED context blocks for the prompt.
     The number [N] is what the LLM should use for inline citations.
+    Truncates each chunk to avoid exceeding the LLM context window (3328 tokens).
     """
     lines = []
     for i, c in enumerate(chunks, 1):
@@ -145,7 +146,10 @@ def _format_context(chunks: List[Dict[str, Any]]) -> str:
         page = meta.get("page", "?")
         clause = meta.get("section_title", "Unknown Clause")
         lines.append(f"[{i}] {fname} — Page {page} (Clause: {clause})")
-        lines.append(c["text"])
+        text = c.get("text", "")
+        if len(text) > max_chars_per_chunk:
+            text = text[:max_chars_per_chunk] + "\n[chunk truncated]"
+        lines.append(text)
         lines.append("")
     return "\n".join(lines)
 
@@ -496,14 +500,18 @@ async def query_pipeline(
     messages.append({"role": "user", "content": question})
 
     # 6. Stream LLM response (run in thread to avoid blocking async event loop)
+    # Reserve ~1500 tokens for generation so we don't blow the 3328 context window.
+    _CTX_LIMIT = 3328
+    _PROMPT_RESERVE = 1800
+    llm_max_tokens = max(256, _CTX_LIMIT - _PROMPT_RESERVE)
     full_response = []
     token_queue: asyncio.Queue = asyncio.Queue()
 
     def _run_llm():
         try:
-            logger.info("Stage: LLM stream starting (max_tokens=2048) …")
+            logger.info("Stage: LLM stream starting (max_tokens=%d) …", llm_max_tokens)
             first = True
-            for tok in llm_engine.stream_generate(messages, max_tokens=2048):
+            for tok in llm_engine.stream_generate(messages, max_tokens=llm_max_tokens):
                 if first:
                     logger.info("Stage: LLM first token received.")
                     first = False
@@ -513,6 +521,7 @@ async def query_pipeline(
             _loop.call_soon_threadsafe(token_queue.put_nowait, None)  # sentinel
         except Exception as e:
             logger.error("LLM generation error: %s", e, exc_info=True)
+            _loop.call_soon_threadsafe(token_queue.put_nowait, {"error": str(e)})
             _loop.call_soon_threadsafe(token_queue.put_nowait, None)
 
     llm_thread = _loop.run_in_executor(None, _run_llm)
@@ -520,6 +529,9 @@ async def query_pipeline(
     while True:
         tok = await token_queue.get()
         if tok is None:
+            break
+        if isinstance(tok, dict) and tok.get("error"):
+            yield {"token": f"\n\n[LLM Error: {tok['error']}]\n"}
             break
         full_response.append(tok)
         yield {"token": tok}

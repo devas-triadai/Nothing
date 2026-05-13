@@ -220,8 +220,9 @@ function SummaryCard({ filename, downloadUrl }) {
 // ── Source Side Panel with Citation Highlighting ──
 function SourcePanel({ source, onClose, apiUrl }) {
   if (!source) return null;
+  const token = getToken();
   const downloadHref = source.doc_id
-    ? `${apiUrl}/api/agent/download/${source.doc_id}`
+    ? `${apiUrl}/api/agent/download/doc/${source.doc_id}?token=${encodeURIComponent(token || '')}`
     : null;
   const isPDF = source.document?.toLowerCase().endsWith('.pdf');
   // Use #search= for native browser PDF text highlighting
@@ -1365,7 +1366,7 @@ export default function Chat() {
                       {msg.summary?.downloadUrl && !msg.streaming && (
                         <SummaryCard
                           filename="Summary Document"
-                          downloadUrl={getApiUrl(msg.summary.downloadUrl)}
+                          downloadUrl={`${getApiUrl(msg.summary.downloadUrl)}?token=${encodeURIComponent(token || '')}`}
                         />
                       )}
 

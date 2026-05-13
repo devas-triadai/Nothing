@@ -80,42 +80,26 @@ def _clean_json(raw: str) -> str:
     return cleaned
 
 
-# ── Master LLM System Prompt for Intelligent Slide Design ──
-_PPT_SYSTEM_PROMPT = """You are an elite PowerPoint architect for Indian Coast Guard presentations.
-
-You MUST analyze the content and decide the BEST visual layout for each slide.
-DO NOT use only bullet slides — use a MIX of layouts to create engaging, professional presentations.
-
-AVAILABLE LAYOUTS (use all types where appropriate):
+# ── Master LLM Prompt for Intelligent Slide Design ──
+# NOTE: Gemma 4 IT does NOT reliably honour system-prompt JSON constraints,
+# so ALL instructions live in the user message.
+_PPT_SLIDE_LAYOUTS = """
+AVAILABLE LAYOUTS (use a MIX — aim for 40%+ non-bullet):
 1. "title"          — First slide only. Fields: title, subtitle
 2. "section_header" — Section transition. Fields: title, subtitle
 3. "bullets"        — Standard content. Fields: title, bullets (list of 3-6 strings), notes
-4. "two_column"     — Comparison/pros-cons. Fields: title, left_column {header, items[]}, right_column {header, items[]}, notes
+4. "two_column"     — Comparison. Fields: title, left_column {header, items[]}, right_column {header, items[]}, notes
 5. "table"          — Data tables. Fields: title, table_data {headers[], rows[[]]}, notes
-6. "diagram"        — Process flow/architecture/hierarchy. Fields: title, diagram_data {type, nodes[], edges[]}, notes
+6. "diagram"        — Process/hierarchy. Fields: title, diagram_data {type, nodes[], edges[]}, notes
    Diagram types: "flowchart", "hierarchy", "block_diagram", "cycle", "radial", "matrix", "pyramid", "swimlane"
-   Node shapes: "rounded_rect", "rect", "diamond", "oval", "hexagon", "cylinder"
    Each node: {"id": "A", "label": "text", "shape": "rounded_rect"}
    Each edge: {"from": "A", "to": "B", "label": "optional text"}
-7. "chart"          — Data visualization. Fields: title, chart_data {type, title, data {labels[], values[]}}, notes
+7. "chart"          — Data viz. Fields: title, chart_data {type, title, data {labels[], values[]}}, notes
    Chart types: "bar_chart", "pie_chart", "line_chart", "comparison_bar", "timeline"
    For comparison_bar: data {labels[], groups[{name, values[]}]}
-8. "image"          — Image/diagram from documents. Fields: title, caption, notes
+8. "image"          — Image from docs. Fields: title, caption, notes
 9. "thank_you"      — Last slide. Fields: title, subtitle
-
-LAYOUT SELECTION RULES:
-- If content describes a PROCESS or WORKFLOW → use "diagram" with type "flowchart"
-- If content describes an ORGANIZATION or HIERARCHY → use "diagram" with type "hierarchy"
-- If content describes a SYSTEM ARCHITECTURE → use "diagram" with type "block_diagram"
-- If content has NUMERICAL DATA or STATISTICS → use "chart"
-- If content COMPARES two things → use "two_column"
-- If content has STRUCTURED DATA with multiple attributes → use "table"
-- If content references existing IMAGES or DIAGRAMS → use "image"
-- Use "section_header" between major topic transitions
-- The LAST slide must be "thank_you"
-- AIM for at least 40% non-bullet slides
-
-Return ONLY a valid JSON array. No markdown. No explanations."""
+"""
 
 
 class PPTRequest(BaseModel):
@@ -217,7 +201,9 @@ Additional context:
 
 Return ONLY an updated JSON array with all layout fields preserved and changes applied."""
     else:
-        prompt = f"""Create a professional PowerPoint with exactly {body.num_slides} slides about: {body.topic}
+        prompt = f"""You are an elite PowerPoint architect for Indian Coast Guard presentations.
+
+Create a professional PowerPoint with exactly {body.num_slides} slides about: {body.topic}
 
 DOCUMENT CONTEXT:
 {context_text}
@@ -225,6 +211,8 @@ DOCUMENT CONTEXT:
 
 {f'Style notes: {body.style_notes}' if body.style_notes else ''}
 {has_images_hint}
+
+{_PPT_SLIDE_LAYOUTS}
 
 Requirements:
 - Slide 1 MUST be "layout": "title"
@@ -235,37 +223,44 @@ Requirements:
 - Include section_header slides between major topic shifts
 - Every slide must have "layout", "title", and layout-specific fields
 
-Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
+Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text, no markdown, no explanations:"""
 
-    messages = [
-        {"role": "system", "content": _PPT_SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
-
-    raw = await asyncio.to_thread(
-        llm_engine.generate, messages,
-        max_tokens=3000, temperature=0.2,
-        response_format={"type": "json_object"}, raw=True,
-    )
-
-    # ── 4. Parse and validate slide JSON ──
-    try:
-        cleaned = _clean_json(raw)
-        start = cleaned.find("[")
-        end = cleaned.rfind("]") + 1
-        if start == -1 or end == 0:
-            start = cleaned.find("{")
-            end = cleaned.rfind("}") + 1
+    # ── 4. Generate slides with retry ──
+    # Attempt 1: full intelligent prompt
+    # Attempt 2 (fallback): simplified bullet-only prompt
+    slides_data = None
+    for attempt, (temp, prompt_text) in enumerate([
+        (0.1, prompt),
+        (0.0, f"Create exactly {body.num_slides} slides about: {body.topic}\n\nContext:\n{context_text}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets."),
+    ], 1):
+        messages = [{"role": "user", "content": prompt_text}]
+        try:
+            raw = await asyncio.to_thread(
+                llm_engine.generate, messages,
+                max_tokens=3000, temperature=temp, raw=True,
+            )
+            cleaned = _clean_json(raw)
+            start = cleaned.find("[")
+            end = cleaned.rfind("]") + 1
             if start == -1 or end == 0:
-                raise ValueError("No JSON array or object found in LLM response")
-            wrapper = json.loads(cleaned[start:end])
-            slides_data = wrapper.get("slides", list(wrapper.values())[0] if wrapper else [])
-        else:
-            slides_data = json.loads(cleaned[start:end])
-        if not isinstance(slides_data, list) or len(slides_data) == 0:
-            raise ValueError("Expected a non-empty JSON array of slides")
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error("Failed to parse slide JSON: %s\nRaw: %s", e, raw[:500])
+                start = cleaned.find("{")
+                end = cleaned.rfind("}") + 1
+                if start == -1 or end == 0:
+                    raise ValueError("No JSON array or object found")
+                wrapper = json.loads(cleaned[start:end])
+                slides_data = wrapper.get("slides", list(wrapper.values())[0] if wrapper else [])
+            else:
+                slides_data = json.loads(cleaned[start:end])
+            if isinstance(slides_data, list) and len(slides_data) > 0:
+                logger.info("PPT JSON parsed successfully on attempt %d", attempt)
+                break
+            raise ValueError("Empty or non-array slides")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("PPT attempt %d failed: %s\nRaw (first 400 chars): %s", attempt, e, raw[:400])
+            slides_data = None
+
+    if not slides_data:
+        logger.error("PPT generation failed after all retries.")
         raise HTTPException(status_code=500, detail="Failed to generate slide structure. Please try again.")
 
     # ── 5. Validate layout fields and add defaults ──

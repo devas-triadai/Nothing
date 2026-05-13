@@ -15,12 +15,15 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Depends
+import httpx
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 
 from api.utils.auth_check import get_current_user
+
+_ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", "http://localhost:8000")
 
 # ── Logging ──
 logging.basicConfig(
@@ -220,6 +223,53 @@ async def download_file(
         path=str(file_path),
         media_type=media_types.get(suffix, "application/octet-stream"),
         filename=filename,
+    )
+
+
+# ── Original Document Download Proxy ──
+@app.get("/api/agent/download/doc/{doc_id}", tags=["Downloads"])
+async def download_original_document(
+    doc_id: int,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Proxy download for an original uploaded document from the backend."""
+    token = request.query_params.get("token") or (
+        request.headers.get("Authorization", "").replace("Bearer ", "")
+    )
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+
+    backend_url = f"{_ADMIN_BASE}/api/documents/{doc_id}/download"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                backend_url,
+                headers={"Authorization": f"Bearer {token}"},
+                follow_redirects=True,
+            )
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="Document not found on backend")
+        if resp.status_code == 403:
+            raise HTTPException(status_code=403, detail="Access denied — superadmin required on backend")
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Backend error: {e.response.text[:200]}",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Backend unreachable: {e}")
+
+    content_disposition = resp.headers.get("content-disposition", "")
+    media_type = resp.headers.get("content-type", "application/octet-stream")
+
+    return StreamingResponse(
+        content=resp.iter_bytes(),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": content_disposition or f'attachment; filename="doc_{doc_id}.pdf"'
+        },
     )
 
 

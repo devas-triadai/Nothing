@@ -225,6 +225,67 @@ async def upload_document(
     return {"message": "Document uploaded", "document": _doc_to_dict(doc, db)}
 
 
+# ─── All lineage trees (for the full lineage graph view) ─────────────────────
+# MUST be defined BEFORE parameterized routes like /{doc_id} so FastAPI
+# does not try to parse "lineage" as an integer doc_id.
+@router.get("/lineage/all")
+def get_all_lineage(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    all_docs = db.query(Document).order_by(Document.created_at.asc()).all()
+    nodes = [_doc_to_dict(d, db) for d in all_docs]
+    edges = [
+        {"from": d.parent_doc_id, "to": d.id}
+        for d in all_docs
+        if d.parent_doc_id is not None
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+# ─── Check superseded documents ──────────────────────────────────────────────
+# MUST be defined BEFORE parameterized routes like /{doc_id} so FastAPI
+# does not try to parse "check-superseded" as an integer doc_id.
+@router.get("/check-superseded")
+def check_superseded(
+    doc_ids: List[str] = Query([]),
+    db: Session = Depends(get_db)
+):
+    """Check if any of the provided Qdrant doc_ids have been superseded."""
+    if not doc_ids:
+        return {"superseded": {}}
+
+    # Find matching PostgreSQL documents
+    docs = db.query(Document).filter(Document.qdrant_doc_id.in_(doc_ids)).all()
+
+    result = {}
+    for d in docs:
+        # Check if there is a child version
+        child = db.query(Document).filter(Document.parent_doc_id == d.id).first()
+        if child:
+            result[d.qdrant_doc_id] = {
+                "superseded_by_id": child.id,
+                "superseded_by_name": child.original_filename
+            }
+            continue
+
+        # Check explicit edges
+        edge = db.query(DocEdge).filter(
+            DocEdge.source_id == d.id,
+            DocEdge.edge_type == DocEdgeType.SUPERSEDES
+        ).first()
+
+        if edge:
+            target = db.query(Document).filter(Document.id == edge.target_id).first()
+            if target:
+                result[d.qdrant_doc_id] = {
+                    "superseded_by_id": target.id,
+                    "superseded_by_name": target.original_filename
+                }
+
+    return {"superseded": result}
+
+
 # ─── Get single document ──────────────────────────────────────────────────────
 @router.get("/{doc_id}")
 def get_document(
@@ -292,22 +353,6 @@ def get_lineage_tree(
     return {"group_id": group_id, "nodes": nodes, "edges": edges}
 
 
-# ─── All lineage trees (for the full lineage graph view) ─────────────────────
-@router.get("/lineage/all")
-def get_all_lineage(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_superadmin)
-):
-    all_docs = db.query(Document).order_by(Document.created_at.asc()).all()
-    nodes = [_doc_to_dict(d, db) for d in all_docs]
-    edges = [
-        {"from": d.parent_doc_id, "to": d.id}
-        for d in all_docs
-        if d.parent_doc_id is not None
-    ]
-    return {"nodes": nodes, "edges": edges}
-
-
 # ─── Update document metadata ─────────────────────────────────────────────────
 @router.put("/{doc_id}")
 def update_document(
@@ -361,7 +406,7 @@ def delete_document(
 def download_document(
     doc_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_superadmin)
+    current_user: User = Depends(get_current_user)
 ):
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
@@ -835,44 +880,6 @@ def export_lineage(
         
     raise HTTPException(status_code=400, detail="Unsupported format. Use 'json-ld' or 'graphml'.")
 
-@router.get("/check-superseded")
-def check_superseded(
-    doc_ids: List[str] = Query([]),
-    db: Session = Depends(get_db)
-):
-    """Check if any of the provided Qdrant doc_ids have been superseded."""
-    if not doc_ids:
-        return {"superseded": {}}
-        
-    # Find matching PostgreSQL documents
-    docs = db.query(Document).filter(Document.qdrant_doc_id.in_(doc_ids)).all()
-    
-    result = {}
-    for d in docs:
-        # Check if there is a child version
-        child = db.query(Document).filter(Document.parent_doc_id == d.id).first()
-        if child:
-            result[d.qdrant_doc_id] = {
-                "superseded_by_id": child.id,
-                "superseded_by_name": child.original_filename
-            }
-            continue
-            
-        # Check explicit edges
-        edge = db.query(DocEdge).filter(
-            DocEdge.source_id == d.id, 
-            DocEdge.edge_type == DocEdgeType.SUPERSEDES
-        ).first()
-        
-        if edge:
-            target = db.query(Document).filter(Document.id == edge.target_id).first()
-            if target:
-                result[d.qdrant_doc_id] = {
-                    "superseded_by_id": target.id,
-                    "superseded_by_name": target.original_filename
-                }
-                
-    return {"superseded": result}
 
 @router.get("/{id1}/diff/{id2}")
 def get_document_diff(
