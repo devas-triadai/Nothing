@@ -347,7 +347,7 @@ async def query_pipeline(
         )
         logger.info("  → hybrid_search returned %d hits", len(res))
         candidates.extend(res)
-    logger.info("Stage: total %d candidates collected. Checking semantic cache …", len(candidates))
+    logger.info("Stage: total %d candidates collected. Deduplicating …", len(candidates))
 
     # Deduplicate candidates by point ID
     seen_ids = set()
@@ -358,9 +358,11 @@ async def query_pipeline(
             unique_candidates.append(c)
             seen_ids.add(cid)
     candidates = unique_candidates
+    logger.info("Stage: dedup → %d unique candidates. Checking semantic cache …", len(candidates))
 
     # ── Semantic Cache Check ──
     cache_hit = semantic_cache.check_cache(rewritten, query_emb)
+    logger.info("Stage: semantic cache check complete (hit=%s)", bool(cache_hit))
     if cache_hit:
         logger.info("Serving response from semantic cache.")
         words = cache_hit["response"].split(" ")
