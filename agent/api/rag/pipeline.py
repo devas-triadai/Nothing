@@ -328,7 +328,9 @@ async def query_pipeline(
     if hyde_doc:
         search_queries.append(hyde_doc)
 
+    logger.info("Stage: embedding query …")
     query_emb = embedder.embed_query(hyde_doc if hyde_doc else rewritten)
+    logger.info("Stage: hybrid search over %d query variants …", len(search_queries))
 
     candidates = []
     for q in search_queries:
@@ -411,10 +413,13 @@ async def query_pipeline(
             return
 
     # 4. Rerank → top 8
+    logger.info("Stage: reranking %d candidates …", len(candidates))
     top_chunks = reranker.rerank(question, candidates, top_k=8)
+    logger.info("Stage: reranked to %d chunks. Fetching house rules …", len(top_chunks))
 
     # 5. Build prompt
     house_rules = await _fetch_house_rules(token)
+    logger.info("Stage: house rules fetched. Building prompt …")
     base_prompt = house_rules if house_rules.strip() else _SYSTEM_PROMPT_FALLBACK
     context_str = _format_context(top_chunks)
 
@@ -457,9 +462,15 @@ async def query_pipeline(
 
     def _run_llm():
         try:
+            logger.info("Stage: LLM stream starting (max_tokens=2048) …")
+            first = True
             for tok in llm_engine.stream_generate(messages, max_tokens=2048):
+                if first:
+                    logger.info("Stage: LLM first token received.")
+                    first = False
                 # asyncio.Queue is NOT thread-safe — must bridge via call_soon_threadsafe
                 loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+            logger.info("Stage: LLM stream finished.")
             loop.call_soon_threadsafe(token_queue.put_nowait, None)  # sentinel
         except Exception as e:
             logger.error("LLM generation error: %s", e, exc_info=True)
