@@ -446,7 +446,11 @@ async def query_pipeline(
     context_str = _format_context(top_chunks)
 
     # Check for superseded documents via Admin Backend
-    doc_ids_to_check = list(set(c["metadata"].get("doc_id") for c in top_chunks if "metadata" in c))
+    doc_ids_to_check = list({
+        c["metadata"].get("doc_id")
+        for c in top_chunks
+        if "metadata" in c and c["metadata"].get("doc_id")
+    })
     superseded_warning = ""
     if token and doc_ids_to_check:
         try:

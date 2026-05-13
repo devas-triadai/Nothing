@@ -121,14 +121,19 @@ async def generate_ppt(
     start_time = time.time()
 
     # ── 1. Gather context from documents ──
+    _loop = asyncio.get_event_loop()
     context_chunks = []
     if body.doc_ids:
         for did in body.doc_ids:
             context_chunks.extend(store.get_chunks_by_doc(did))
     else:
-        query_emb = embedder.embed_query(body.topic)
-        candidates = store.hybrid_search(body.topic, query_emb, top_k=20)
-        context_chunks = rerank(body.topic, candidates, top_k=10)
+        query_emb = await _loop.run_in_executor(None, embedder.embed_query, body.topic)
+        candidates = await _loop.run_in_executor(
+            None, store.hybrid_search, body.topic, query_emb, 20
+        )
+        context_chunks = await _loop.run_in_executor(
+            None, rerank, body.topic, candidates, 10
+        )
 
     context_text = "\n\n".join(c["text"][:500] for c in context_chunks[:15])
 
@@ -153,15 +158,16 @@ Include {min(len(extracted_images), 3)} slides with "layout": "image" to display
 Place image slides near relevant content sections."""
 
     # ── 2.5 LLM Data Extraction Pre-Pass (Chart Data Enhancement) ──
-    # Extract numerical data into a structured format to guarantee charts/tables
-    try:
-        data_ext_prompt = f"Analyze the following text and extract any numerical data, statistics, or metrics into structured tabular formats. Text:\n{context_text[:4000]}"
-        data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
-        prepass_raw = await asyncio.to_thread(llm_engine.generate, data_ext_messages, 1024, 0.1)
-        extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
-    except Exception as e:
-        logger.debug("Data pre-pass failed: %s", e)
-        extracted_data_hint = ""
+    # Skip pre-pass if context is tiny — reduces LLM load and failure rate
+    extracted_data_hint = ""
+    if len(context_text) > 500:
+        try:
+            data_ext_prompt = f"Analyze the following text and extract any numerical data, statistics, or metrics into structured tabular formats. Text:\n{context_text[:2000]}"
+            data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
+            prepass_raw = await asyncio.to_thread(llm_engine.generate, data_ext_messages, 512, 0.1)
+            extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
+        except Exception as e:
+            logger.debug("Data pre-pass failed: %s", e)
 
     # ── 3. Build LLM prompt ──
     if body.revision_prompt and body.previous_slides_json:
@@ -205,7 +211,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
         {"role": "user", "content": prompt},
     ]
 
-    raw = await asyncio.to_thread(llm_engine.generate, messages, 3000, 0.4)
+    raw = await asyncio.to_thread(llm_engine.generate, messages, 3000, 0.2)
 
     # ── 4. Parse and validate slide JSON ──
     try:
