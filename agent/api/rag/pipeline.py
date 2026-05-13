@@ -333,7 +333,8 @@ async def query_pipeline(
     logger.info("Stage: hybrid search over %d query variants …", len(search_queries))
 
     candidates = []
-    for q in search_queries:
+    for i, q in enumerate(search_queries):
+        logger.info("  → hybrid_search variant %d/%d (qlen=%d) …", i + 1, len(search_queries), len(q))
         res = store.hybrid_search(
             query_text=q,
             query_embedding=query_emb,
@@ -344,7 +345,9 @@ async def query_pipeline(
             version=version,
             category=category,
         )
+        logger.info("  → hybrid_search returned %d hits", len(res))
         candidates.extend(res)
+    logger.info("Stage: total %d candidates collected. Checking semantic cache …", len(candidates))
 
     # Deduplicate candidates by point ID
     seen_ids = set()
