@@ -123,7 +123,8 @@ class VectorStore:
                 break
             for pt in results:
                 pid = str(pt.id)
-                text = pt.payload.get("text", "")
+                ciphertext = pt.payload.get("text", "")
+                text = decrypt_text(ciphertext)
                 self._bm25_corpus.append(self._tokenise(text))
                 self._bm25_ids.append(pid)
                 self._chunk_texts[pid] = text

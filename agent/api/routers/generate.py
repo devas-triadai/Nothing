@@ -205,7 +205,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
         {"role": "user", "content": prompt},
     ]
 
-    raw = await asyncio.to_thread(llm_engine.generate, messages, 4096, 0.4)
+    raw = await asyncio.to_thread(llm_engine.generate, messages, 3000, 0.4)
 
     # ── 4. Parse and validate slide JSON ──
     try:

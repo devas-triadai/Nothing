@@ -64,6 +64,7 @@ def generate(
     No lock needed; llama-server handles concurrency internally.
     """
     payload = {
+        "model": "local-model",
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -93,6 +94,7 @@ def stream_generate(
     No lock needed; llama-server handles concurrency internally.
     """
     payload = {
+        "model": "local-model",
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -156,7 +158,7 @@ async def generate_hyde_document(query: str) -> str:
             content = data["choices"][0]["message"].get("content", "").strip()
             
             if not content:
-                logger.warning("LLM returned empty content for HyDE. Falling back to original query.")
+                logger.warning("LLM returned empty content for HyDE. Raw response: %s", data)
                 return query
                 
             return content
