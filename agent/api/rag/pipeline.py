@@ -452,18 +452,20 @@ async def query_pipeline(
 
     # 6. Stream LLM response (run in thread to avoid blocking async event loop)
     full_response = []
-    token_queue = asyncio.Queue()
+    token_queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
 
     def _run_llm():
         try:
             for tok in llm_engine.stream_generate(messages, max_tokens=2048):
-                token_queue.put_nowait(tok)
-            token_queue.put_nowait(None)  # sentinel
+                # asyncio.Queue is NOT thread-safe — must bridge via call_soon_threadsafe
+                loop.call_soon_threadsafe(token_queue.put_nowait, tok)
+            loop.call_soon_threadsafe(token_queue.put_nowait, None)  # sentinel
         except Exception as e:
             logger.error("LLM generation error: %s", e, exc_info=True)
-            token_queue.put_nowait(None)
+            loop.call_soon_threadsafe(token_queue.put_nowait, None)
 
-    llm_thread = asyncio.get_event_loop().run_in_executor(None, _run_llm)
+    llm_thread = loop.run_in_executor(None, _run_llm)
 
     while True:
         tok = await token_queue.get()
