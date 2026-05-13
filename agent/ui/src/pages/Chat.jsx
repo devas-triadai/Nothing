@@ -375,10 +375,15 @@ export default function Chat() {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  // Abort active stream when switching sessions (session isolation)
+  // Abort active stream when switching sessions (session isolation).
+  // IMPORTANT: only abort if we are leaving an *existing* session (prev activeSessionId
+  // is truthy). When creating the very first session from null we must NOT abort
+  // the stream that handleSend just started — otherwise the first message is
+  // silently dropped.
   useEffect(() => {
     return () => {
-      if (streamRef.current?.abort) {
+      // activeSessionId captured here is the value from the PREVIOUS render.
+      if (activeSessionId && streamRef.current?.abort) {
         streamRef.current.abort();
       }
       streamRef.current = null;

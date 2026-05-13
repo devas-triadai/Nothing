@@ -452,10 +452,13 @@ async def query_pipeline(
     context_str = _format_context(top_chunks)
 
     # Check for superseded documents via Admin Backend
+    # Skip builtin docs — they are auto-ingested at startup and never exist in
+    # the PostgreSQL backend DB, so the superseded check is meaningless for them.
     doc_ids_to_check = list({
         c["metadata"].get("doc_id")
         for c in top_chunks
         if "metadata" in c and c["metadata"].get("doc_id")
+        and not c["metadata"].get("doc_id", "").startswith("builtin:")
     })
     superseded_warning = ""
     if token and doc_ids_to_check:
@@ -474,6 +477,11 @@ async def query_pipeline(
                             warnings.append(f"- A document provided in the context has been SUPERSEDED by: {info.get('superseded_by_name')}")
                         if warnings:
                             superseded_warning = "\n\nWARNING - OUTDATED INFORMATION DETECTED:\n" + "\n".join(warnings) + "\nYou MUST explicitly warn the user that they are asking about deprecated/superseded documents and mention the new document name."
+                else:
+                    logger.warning(
+                        "check-superseded returned %s: %s",
+                        res.status_code, res.text[:200]
+                    )
         except Exception as e:
             logger.warning("Failed to check superseded docs: %s", e)
 
