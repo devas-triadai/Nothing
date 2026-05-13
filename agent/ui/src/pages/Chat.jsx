@@ -399,9 +399,23 @@ export default function Chat() {
     const sid = sessId || activeSessionId;
     if (!sid) return;
     setSessions(prev => {
-      const updated = prev.map(s =>
-        s.id === sid ? { ...s, messages: msgs, updatedAt: Date.now() } : s
-      );
+      const exists = prev.find(s => s.id === sid);
+      let updated;
+      if (exists) {
+        updated = prev.map(s =>
+          s.id === sid ? { ...s, messages: msgs, updatedAt: Date.now() } : s
+        );
+      } else {
+        // If it doesn't exist (race condition), create it
+        const newSess = { 
+          id: sid, 
+          title: msgs.find(m => m.role === 'user')?.content?.slice(0, 50) || 'New Chat',
+          messages: msgs, 
+          createdAt: Date.now(), 
+          updatedAt: Date.now() 
+        };
+        updated = [newSess, ...prev];
+      }
       saveSessions(updated);
       return updated;
     });

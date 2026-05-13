@@ -217,12 +217,26 @@ def _run_auto_ingest() -> None:
         logger.info("knowledge_base/ is empty — nothing to auto-ingest.")
         return
 
+    # CRITICAL: Force re-ingest if index looks corrupted or too small
+    from api.rag.vector_store import get_store
+    store = get_store()
+    try:
+        total_chunks = store.client.count(collection_name="agra_docs").count
+        if total_chunks < 100 and len(files) >= 11:
+            logger.warning("Search index looks suspiciously small (%d chunks). Forcing full re-ingest.", total_chunks)
+            # We don't delete here, we just don't skip
+            force_reingest = True
+        else:
+            force_reingest = False
+    except Exception:
+        force_reingest = True
+
     logger.info("Found %d files in knowledge_base/. Checking index...", len(files))
 
     ingested = 0
     skipped = 0
     for f in files:
-        if _already_indexed(f.name):
+        if not force_reingest and _already_indexed(f.name):
             logger.debug("Already indexed: %s", f.name)
             skipped += 1
             continue
