@@ -499,7 +499,7 @@ async def query_pipeline(
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 await client.post(
-                    f"{_ADMIN_BASE}/api/usage/",
+                    f"{_ADMIN_BASE}/api/usage/log",
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
@@ -510,7 +510,7 @@ async def query_pipeline(
                         "module": "agent_chat",
                         "response_time_ms": elapsed_ms,
                         "status": "success",
-                        "metadata_": question,  # raw user question for audit trail
+                        "metadata_": question,
                     },
                 )
         except Exception as e:

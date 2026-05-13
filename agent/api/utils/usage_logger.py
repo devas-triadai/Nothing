@@ -30,6 +30,7 @@ def log_usage(
     output_tokens: int = 0,
     status: str = "success",
     user_id: Optional[int] = None,
+    metadata_: Optional[str] = None,
 ) -> None:
     """
     Log a usage event to the backend analytics service.
@@ -59,6 +60,8 @@ def log_usage(
             }
             if user_id is not None:
                 payload["user_id"] = user_id
+            if metadata_ is not None:
+                payload["metadata_"] = metadata_
 
             headers = {
                 "Content-Type": "application/json",

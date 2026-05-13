@@ -80,6 +80,7 @@ async def chat(
                 token=raw_token,
                 response_time_ms=elapsed_ms,
                 output_tokens=token_count,
+                metadata_=body.question,
             )
 
     return StreamingResponse(
