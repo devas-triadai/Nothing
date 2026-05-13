@@ -287,7 +287,7 @@ async def query_pipeline(
         if doc_ids_filter:
             doc_ids = doc_ids_filter
         else:
-            doc_ids = _get_all_doc_ids()
+            doc_ids = await _loop.run_in_executor(None, _get_all_doc_ids)
 
         if not doc_ids:
             yield {"token": "No documents are indexed yet. Please upload documents first."}
@@ -341,15 +341,17 @@ async def query_pipeline(
     candidates = []
     for i, q in enumerate(search_queries):
         logger.info("  → hybrid_search variant %d/%d (qlen=%d) …", i + 1, len(search_queries), len(q))
-        res = store.hybrid_search(
-            query_text=q,
-            query_embedding=query_emb,
-            top_k=20,
-            doc_ids_filter=doc_ids_filter,
-            date_range=date_range,
-            doc_type=doc_type,
-            version=version,
-            category=category,
+        res = await _loop.run_in_executor(
+            None,
+            store.hybrid_search,
+            q,
+            query_emb,
+            20,
+            doc_ids_filter,
+            date_range,
+            doc_type,
+            version,
+            category,
         )
         logger.info("  → hybrid_search returned %d hits", len(res))
         candidates.extend(res)
@@ -368,7 +370,9 @@ async def query_pipeline(
     logger.info("Stage: dedup → %d unique candidates. Checking semantic cache …", len(candidates))
 
     # ── Semantic Cache Check ──
-    cache_hit = semantic_cache.check_cache(rewritten, query_emb)
+    cache_hit = await _loop.run_in_executor(
+        None, semantic_cache.check_cache, rewritten, query_emb
+    )
     logger.info("Stage: semantic cache check complete (hit=%s)", bool(cache_hit))
     if cache_hit:
         logger.info("Serving response from semantic cache.")
@@ -413,11 +417,13 @@ async def query_pipeline(
         retry_emb = await _loop.run_in_executor(
             None, embedder.embed_query, retry_query
         )
-        retry_candidates = store.hybrid_search(
-            query_text=retry_query,
-            query_embedding=retry_emb,
-            top_k=50,
-            doc_ids_filter=doc_ids_filter,
+        retry_candidates = await _loop.run_in_executor(
+            None,
+            store.hybrid_search,
+            retry_query,
+            retry_emb,
+            50,
+            doc_ids_filter,
         )
         retry_max = max((c.get("combined_score", 0) for c in retry_candidates), default=0)
         if retry_max > max_score:
@@ -528,7 +534,9 @@ async def query_pipeline(
 
     # Add to Semantic Cache
     if len(full_text) > 10 and max_score >= _CONFIDENT_THRESHOLD:
-        semantic_cache.add_to_cache(rewritten, query_emb, full_text, sources)
+        await _loop.run_in_executor(
+            None, semantic_cache.add_to_cache, rewritten, query_emb, full_text, sources
+        )
 
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 

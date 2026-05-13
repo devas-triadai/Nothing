@@ -389,7 +389,12 @@ export default function Chat() {
     if (activeSessionId) {
       localStorage.setItem(ACTIVE_KEY, activeSessionId);
       const sess = sessions.find(s => s.id === activeSessionId);
-      setMessages(sess?.messages || []);
+      const loaded = sess?.messages || [];
+      // Recover from stale streaming state (e.g. page closed mid-stream)
+      const cleaned = loaded.map(m =>
+        m.streaming ? { ...m, streaming: false, isError: m.content ? false : true } : m
+      );
+      setMessages(cleaned);
     } else {
       setMessages([]);
     }
