@@ -14,21 +14,15 @@ from api.rag import llm as llm_engine
 
 logger = logging.getLogger("agra.query_rewriter")
 
-_REWRITE_PROMPT = """You are a search query optimizer for a maritime compliance knowledge base containing IMO SOLAS, MARPOL, STCW regulations, and Indian Coast Guard Standard Operating Procedures.
+_REWRITE_PROMPT = """You are a search query optimizer for a maritime compliance knowledge base.
 
-Your task: Rewrite the user's question into an optimal search query that will retrieve the most relevant document chunks.
+Your task: Rewrite the user's question into an optimal search query.
 
 RULES:
-1. Output ONLY the rewritten query — no explanations, no preamble.
-2. Expand abbreviations (e.g., "OPV" → "Offshore Patrol Vessel OPV").
-3. Add relevant technical keywords that would appear in the source documents.
-4. Fix obvious typos and spelling errors.
-5. If the question references previous conversation, incorporate that context.
-6. Keep the rewritten query to 1-2 sentences maximum.
-7. Preserve the original intent — do not change what is being asked.
-
-CONVERSATION CONTEXT (last 2 turns):
-{history}
+1. Output STRICTLY ONLY the rewritten query. 
+2. NO preamble, NO explanations, NO scratchpad, NO "Thinking" process.
+3. Fix typos and expand abbreviations.
+4. Output should be a single, keyword-rich sentence.
 
 USER QUESTION: {question}
 

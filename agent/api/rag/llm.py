@@ -24,6 +24,30 @@ _CHAT_ENDPOINT = f"{_LLAMA_SERVER_URL}/v1/chat/completions"
 
 _MAX_TOKENS_DEFAULT = 2048
 
+def clean_llm_output(text: str) -> str:
+    """Strip out common reasoning/thinking patterns from model output."""
+    if not text:
+        return ""
+    # Remove <thought>...</thought> tags
+    text = re.sub(r'<thought>.*?</thought>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove markdown headers or bullet points that look like thinking blocks
+    lines = text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        l = line.strip()
+        # Skip lines that look like internal metadata
+        if l.startswith(('* User Context:', '* User Question:', '* Goal:', '* Constraints:', '* Thinking:', 'REWRITTEN SEARCH QUERY:')):
+            continue
+        if l:
+            cleaned_lines.append(line)
+    
+    result = "\n".join(cleaned_lines).strip()
+    # If the model still gave a long list, just take the first non-empty line as the query
+    if len(result.split('\n')) > 3:
+        return result.split('\n')[0].strip()
+    return result
+
+
 
 def _wait_for_server(timeout: int = 300) -> bool:
     """Block until llama-server is ready (called once at startup)."""
@@ -83,7 +107,8 @@ def generate(
     # Fallback for reasoning models that put output in reasoning_content
     if not content.strip() and "reasoning_content" in msg:
         content = msg["reasoning_content"]
-    return content.strip()
+    
+    return clean_llm_output(content)
 
 
 def stream_generate(
@@ -171,7 +196,7 @@ async def generate_hyde_document(query: str) -> str:
                 logger.warning("LLM returned empty content for HyDE. Raw response: %s", data)
                 return query
                 
-            return content
+            return clean_llm_output(content)
     except Exception as e:
-        logger.warning("HyDE generation failed, falling back to raw query. Error: %s", e)
+        logger.warning("HyDE generation failed (%s: %s), falling back to raw query.", type(e).__name__, e)
         return query
