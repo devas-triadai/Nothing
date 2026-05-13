@@ -82,11 +82,19 @@ def generate(
     temperature: float = 0.3,
     top_p: float = 0.9,
     stop: Optional[List[str]] = None,
+    response_format: Optional[Dict[str, str]] = None,
+    raw: bool = False,
     **kwargs,
 ) -> str:
     """
     Blocking generation — sends chat messages, returns full response string.
     No lock needed; llama-server handles concurrency internally.
+
+    Args:
+        response_format: e.g. {"type": "json_object"} to force JSON output
+                         (llama-server OpenAI-compatible API).
+        raw: If True, skip clean_llm_output() and return the raw response.
+             Use this for structured generation (JSON, code, etc.).
     """
     payload = {
         "model": "local-model",
@@ -98,8 +106,10 @@ def generate(
     }
     if stop:
         payload["stop"] = stop
+    if response_format:
+        payload["response_format"] = response_format
 
-    logger.debug("generate() → POST %s (max_tokens=%d)", _CHAT_ENDPOINT, max_tokens)
+    logger.debug("generate() → POST %s (max_tokens=%d raw=%s)", _CHAT_ENDPOINT, max_tokens, raw)
     resp = requests.post(_CHAT_ENDPOINT, json=payload, timeout=300)
     resp.raise_for_status()
     data = resp.json()
@@ -108,7 +118,9 @@ def generate(
     # Fallback for reasoning models that put output in reasoning_content
     if not content.strip() and "reasoning_content" in msg:
         content = msg["reasoning_content"]
-    
+
+    if raw:
+        return content
     return clean_llm_output(content)
 
 

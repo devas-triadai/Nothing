@@ -37,19 +37,47 @@ _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _clean_json(raw: str) -> str:
     """
-    Strip markdown code fences from LLM output before JSON parsing.
+    Strip markdown code fences and extract the first JSON array or object
+    from LLM output before parsing.
 
     Gemma 4 (and most instruction-tuned LLMs) wrap JSON in:
         ```json\n{...}\n```
-    or:
-        ```\n[...]\n```
-
-    This helper removes those fences and returns the bare JSON string.
+    or embed it inside preamble text.  This helper finds the first '[' or
+    '{' and returns from there to the matching closing bracket/brace.
     """
     # Remove ```json ... ``` or ``` ... ``` fences
     cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+
+    # If text still contains preamble, try to extract the first JSON block
+    arr_start = cleaned.find('[')
+    obj_start = cleaned.find('{')
+
+    if arr_start != -1 and (obj_start == -1 or arr_start < obj_start):
+        # Find matching closing bracket — naive but works for well-formed JSON
+        depth = 0
+        for i, ch in enumerate(cleaned[arr_start:], start=arr_start):
+            if ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    return cleaned[arr_start:i + 1]
+        return cleaned[arr_start:]
+
+    if obj_start != -1:
+        depth = 0
+        for i, ch in enumerate(cleaned[obj_start:], start=obj_start):
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return cleaned[obj_start:i + 1]
+        return cleaned[obj_start:]
+
+    return cleaned
 
 
 # ── Master LLM System Prompt for Intelligent Slide Design ──
@@ -164,7 +192,10 @@ Place image slides near relevant content sections."""
         try:
             data_ext_prompt = f"Analyze the following text and extract any numerical data, statistics, or metrics into structured tabular formats. Text:\n{context_text[:2000]}"
             data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
-            prepass_raw = await asyncio.to_thread(llm_engine.generate, data_ext_messages, 512, 0.1)
+            prepass_raw = await asyncio.to_thread(
+                llm_engine.generate, data_ext_messages,
+                max_tokens=512, temperature=0.1, raw=True,
+            )
             extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
         except Exception as e:
             logger.debug("Data pre-pass failed: %s", e)
@@ -211,7 +242,11 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
         {"role": "user", "content": prompt},
     ]
 
-    raw = await asyncio.to_thread(llm_engine.generate, messages, 3000, 0.2)
+    raw = await asyncio.to_thread(
+        llm_engine.generate, messages,
+        max_tokens=3000, temperature=0.2,
+        response_format={"type": "json_object"}, raw=True,
+    )
 
     # ── 4. Parse and validate slide JSON ──
     try:
@@ -479,7 +514,11 @@ Return ONLY valid JSON in this exact format:
         {"role": "user", "content": prompt},
     ]
 
-    raw = await asyncio.to_thread(llm_engine.generate, messages, 4096, 0.5)
+    raw = await asyncio.to_thread(
+        llm_engine.generate, messages,
+        max_tokens=4096, temperature=0.5,
+        response_format={"type": "json_object"}, raw=True,
+    )
 
     try:
         cleaned = _clean_json(raw)
