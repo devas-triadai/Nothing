@@ -5,12 +5,33 @@ import logging
 
 logger = logging.getLogger("agra.crypto")
 
-# Fetch key or generate one for dev
+from pathlib import Path
+
+# Data directory for persistent key storage
+_DATA_DIR = Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+if not _DATA_DIR.exists():
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+_KEY_FILE = _DATA_DIR / ".agra_key"
+
+# Fetch key: Env Var > Key File > Generate New
 _ENCRYPTION_KEY = os.environ.get("AGRA_ENCRYPTION_KEY")
+
+if not _ENCRYPTION_KEY:
+    if _KEY_FILE.exists():
+        _ENCRYPTION_KEY = _KEY_FILE.read_text().strip()
+        logger.info("Loaded persistent AGRA_ENCRYPTION_KEY from %s", _KEY_FILE)
+    else:
+        _ENCRYPTION_KEY = Fernet.generate_key().decode('utf-8')
+        try:
+            _KEY_FILE.write_text(_ENCRYPTION_KEY)
+            logger.info("Generated and saved new persistent AGRA_ENCRYPTION_KEY to %s", _KEY_FILE)
+        except Exception as e:
+            logger.warning("Could not save AGRA_ENCRYPTION_KEY to file: %s. Key will be ephemeral.", e)
+
 if not _ENCRYPTION_KEY:
     _ENCRYPTION_KEY = Fernet.generate_key().decode('utf-8')
-    os.environ["AGRA_ENCRYPTION_KEY"] = _ENCRYPTION_KEY
-    logger.warning("No AGRA_ENCRYPTION_KEY found. Generated an ephemeral key for this session.")
+    logger.warning("Using ephemeral encryption key.")
 
 _fernet = Fernet(_ENCRYPTION_KEY.encode('utf-8'))
 
