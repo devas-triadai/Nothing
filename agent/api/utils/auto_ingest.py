@@ -30,25 +30,41 @@ _ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", _ADMIN_BASE)
 
 
 def _already_indexed(filename: str) -> bool:
-    """Check if a knowledge-base file is already in the vector store."""
+    """Check if a knowledge-base file is already in the vector store and decryptable."""
     from api.rag.vector_store import get_store
+    from api.utils.crypto import decrypt_text
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
     store = get_store()
     try:
+        # Check for existence
         offset = None
         while True:
             results, offset = store.client.scroll(
                 collection_name="agra_docs",
-                limit=500,
-                offset=offset,
+                limit=10, # Just check a few
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="metadata.filename", match=MatchValue(value=filename))]
+                ),
                 with_payload=True,
                 with_vectors=False,
             )
+            if not results:
+                return False
+                
+            # CRITICAL: Verify Decryptability
+            # If the first chunk's text is still encrypted (fails to decrypt or starts with gAAAA),
+            # then the key has changed and we MUST re-ingest.
             for pt in results:
-                meta = pt.payload.get("metadata", {})
-                if meta.get("filename") == filename:
-                    return True
-            if offset is None:
-                break
+                text_raw = pt.payload.get("text", "")
+                decrypted = decrypt_text(text_raw)
+                if decrypted.startswith("gAAAA") or decrypted == text_raw:
+                    # If it starts with gAAAA, it's still ciphertext. 
+                    # If it's exactly the same and looks like ciphertext, it's garbage.
+                    if text_raw.startswith("gAAAA"):
+                        logger.warning("Detected undecryptable document '%s' (key mismatch). Triggering re-ingest.", filename)
+                        return False
+            
+            return True # Exists and looks readable
     except Exception as e:
         logger.warning("Error checking index for %s: %s", filename, e)
     return False
