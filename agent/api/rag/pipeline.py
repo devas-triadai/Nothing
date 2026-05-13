@@ -349,14 +349,15 @@ async def query_pipeline(
         candidates.extend(res)
     logger.info("Stage: total %d candidates collected. Deduplicating …", len(candidates))
 
-    # Deduplicate candidates by point ID
+    # Deduplicate candidates by point ID (vector_store uses 'pid' key)
     seen_ids = set()
     unique_candidates = []
     for c in candidates:
-        cid = c.get("id")
-        if cid not in seen_ids:
+        cid = c.get("pid") or c.get("id")
+        if cid is None or cid not in seen_ids:
             unique_candidates.append(c)
-            seen_ids.add(cid)
+            if cid is not None:
+                seen_ids.add(cid)
     candidates = unique_candidates
     logger.info("Stage: dedup → %d unique candidates. Checking semantic cache …", len(candidates))
 
