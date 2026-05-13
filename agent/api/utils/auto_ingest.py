@@ -220,19 +220,25 @@ def _run_auto_ingest() -> None:
     # CRITICAL: Force re-ingest if index looks corrupted or too small
     from api.rag.vector_store import get_store
     store = get_store()
+    force_reingest = False
     try:
         total_chunks = store.client.count(collection_name="agra_docs").count
-        if total_chunks < 100 and len(files) >= 11:
-            logger.warning("Search index looks suspiciously small (%d chunks). Forcing full re-ingest.", total_chunks)
-            # We don't delete here, we just don't skip
+        if total_chunks < 100 and len(files) >= 5:
+            logger.warning("Search index looks poisoned (%d chunks). Executing TACTICAL RESET.", total_chunks)
+            store.client.delete_collection("agra_docs")
+            # The store will recreate it on next access or we can trigger it
+            from qdrant_client.models import VectorParams, Distance
+            store.client.create_collection(
+                collection_name="agra_docs",
+                vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+            )
             force_reingest = True
-        else:
-            force_reingest = False
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to check/reset index: %s", e)
         force_reingest = True
 
     logger.info("Found %d files in knowledge_base/. Checking index...", len(files))
-
+    
     ingested = 0
     skipped = 0
     for f in files:
@@ -240,16 +246,18 @@ def _run_auto_ingest() -> None:
             logger.debug("Already indexed: %s", f.name)
             skipped += 1
             continue
-        try:
-            _ingest_file(f)
+        
+        success = _ingest_file(f)
+        if success:
             ingested += 1
-        except Exception as e:
-            logger.error("Failed to auto-ingest %s: %s", f.name, e, exc_info=True)
+        else:
+            logger.error("Failed to ingest %s", f.name)
 
-    logger.info(
-        "Auto-ingest complete: %d ingested, %d already present, %d total.",
-        ingested, skipped, len(files),
-    )
+    if ingested > 0:
+        logger.info("Rebuilding BM25 index for fresh data...")
+        store._rebuild_bm25()
+    
+    logger.info("Auto-ingest complete: %d ingested, %d skipped, %d total.", ingested, skipped, len(files))
 
 
 def start_auto_ingest_background() -> None:
