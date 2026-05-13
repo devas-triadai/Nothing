@@ -36,8 +36,8 @@ _INTENT_PPT = re.compile(
     re.IGNORECASE,
 )
 _INTENT_QUIZ = re.compile(
-    r'\b(creat|generat|build|make)e?\b.{0,40}\b(quiz|assessment|test|questions?)\b'
-    r'|\b(quiz|test me|assess)\b',
+    r'\b(creat|generat|build|make)e?\b.{0,40}\b(quiz|assessment|test|questions?|q\s*&\s*a|q\s+and\s+a|question\s+and\s+answer)\b'
+    r'|\b(quiz|test me|assess|q\s*&\s*a|q\s+and\s+a|question\s+and\s+answer)\b',
     re.IGNORECASE,
 )
 _INTENT_SUMMARY = re.compile(

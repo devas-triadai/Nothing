@@ -39,45 +39,50 @@ def _clean_json(raw: str) -> str:
     """
     Strip markdown code fences and extract the first JSON array or object
     from LLM output before parsing.
-
-    Gemma 4 (and most instruction-tuned LLMs) wrap JSON in:
-        ```json\n{...}\n```
-    or embed it inside preamble text.  This helper finds the first '[' or
-    '{' and returns from there to the matching closing bracket/brace.
     """
-    # Remove ```json ... ``` or ``` ... ``` fences
-    cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
+    # 1. Strip markdown fences aggressively (anywhere in text)
+    cleaned = re.sub(r'```(?:json)?\s*', '', raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r'```', '', cleaned)
     cleaned = cleaned.strip()
 
-    # If text still contains preamble, try to extract the first JSON block
-    arr_start = cleaned.find('[')
-    obj_start = cleaned.find('{')
+    # 2. Try to find the outermost JSON array using regex (DOTALL = multiline)
+    #    This finds the first '[' and greedily matches to the last ']' on the same depth level
+    arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+    if arr_match:
+        return arr_match.group(0)
 
-    if arr_start != -1 and (obj_start == -1 or arr_start < obj_start):
-        # Find matching closing bracket — naive but works for well-formed JSON
-        depth = 0
-        for i, ch in enumerate(cleaned[arr_start:], start=arr_start):
-            if ch == '[':
-                depth += 1
-            elif ch == ']':
-                depth -= 1
-                if depth == 0:
-                    return cleaned[arr_start:i + 1]
-        return cleaned[arr_start:]
-
-    if obj_start != -1:
-        depth = 0
-        for i, ch in enumerate(cleaned[obj_start:], start=obj_start):
-            if ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    return cleaned[obj_start:i + 1]
-        return cleaned[obj_start:]
+    # 3. Fallback: outermost JSON object
+    obj_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if obj_match:
+        return obj_match.group(0)
 
     return cleaned
+
+
+def _build_fallback_slides(topic: str, context_text: str, num_slides: int = 10) -> list:
+    """
+    Generate a basic bullet-slide deck when the LLM fails to return valid JSON.
+    Splits context into chunks and creates one slide per chunk.
+    """
+    slides = [
+        {"layout": "title", "title": topic, "subtitle": "AGRA Generated Presentation"},
+    ]
+    # Split context into roughly equal chunks for bullet slides
+    sentences = [s.strip() for s in re.split(r'[.\n]+', context_text) if len(s.strip()) > 20]
+    chunk_size = max(1, len(sentences) // max(1, num_slides - 2))
+    idx = 0
+    for i in range(num_slides - 2):
+        chunk = sentences[idx:idx + chunk_size]
+        idx += chunk_size
+        if not chunk:
+            chunk = [f"Section {i + 1} content placeholder"]
+        slides.append({
+            "layout": "bullets",
+            "title": f"{topic} — Key Point {i + 1}",
+            "bullets": [s[:200] for s in chunk[:6]],
+        })
+    slides.append({"layout": "thank_you", "title": "Thank You", "subtitle": "AGRA — AI-Powered Knowledge Management"})
+    return slides
 
 
 # ── Master LLM Prompt for Intelligent Slide Design ──
@@ -237,20 +242,11 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         try:
             raw = await asyncio.to_thread(
                 llm_engine.generate, messages,
-                max_tokens=3000, temperature=temp, raw=True,
+                max_tokens=2500, temperature=temp, raw=True,
             )
             cleaned = _clean_json(raw)
-            start = cleaned.find("[")
-            end = cleaned.rfind("]") + 1
-            if start == -1 or end == 0:
-                start = cleaned.find("{")
-                end = cleaned.rfind("}") + 1
-                if start == -1 or end == 0:
-                    raise ValueError("No JSON array or object found")
-                wrapper = json.loads(cleaned[start:end])
-                slides_data = wrapper.get("slides", list(wrapper.values())[0] if wrapper else [])
-            else:
-                slides_data = json.loads(cleaned[start:end])
+            # _clean_json now returns the outermost JSON array or object via regex
+            slides_data = json.loads(cleaned)
             if isinstance(slides_data, list) and len(slides_data) > 0:
                 logger.info("PPT JSON parsed successfully on attempt %d", attempt)
                 break
@@ -260,8 +256,8 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
             slides_data = None
 
     if not slides_data:
-        logger.error("PPT generation failed after all retries.")
-        raise HTTPException(status_code=500, detail="Failed to generate slide structure. Please try again.")
+        logger.warning("PPT generation failed after all LLM retries. Using fallback slide builder.")
+        slides_data = _build_fallback_slides(body.topic, context_text, body.num_slides)
 
     # ── 5. Validate layout fields and add defaults ──
     valid_layouts = {"title", "section_header", "bullets", "two_column", "table", "diagram", "chart", "image", "thank_you"}

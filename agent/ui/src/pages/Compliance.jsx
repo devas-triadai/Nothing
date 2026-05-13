@@ -106,6 +106,17 @@ export default function CompliancePage() {
     );
   };
 
+  const isStandard = (doc) => {
+    if (!doc) return false;
+    const cat = (doc.category || '').toLowerCase();
+    return doc.doc_id?.startsWith('builtin:') ||
+      cat.includes('standard') || cat.includes('sotr') ||
+      cat.includes('imo') || cat.includes('rule');
+  };
+
+  const subjectDocs = documents.filter(d => !isStandard(d));
+  const standardDocs = documents.filter(d => isStandard(d));
+
   const getSubjectNames = () => {
     const names = documents.filter(d => subjectDocIds.includes(d.doc_id)).map(d => d.filename);
     if (names.length === 0) return 'Documents';
@@ -166,7 +177,11 @@ export default function CompliancePage() {
                 <div style={{ textAlign: 'center', padding: '40px' }}>
                   <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} color="var(--primary)" />
                 </div>
-              ) : documents.map(doc => (
+              ) : subjectDocs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', gridColumn: '1 / -1' }}>
+                  No uploaded documents available. Please upload documents via the Dashboard.
+                </div>
+              ) : subjectDocs.map(doc => (
                 <div
                   key={doc.doc_id}
                   style={{
@@ -209,8 +224,29 @@ export default function CompliancePage() {
             <p style={styles.stepDesc}>
               Choose one or more standard/regulatory documents to check against. Selected subjects: <strong style={{ color: 'var(--primary)' }}>{getSubjectNames()}</strong>
             </p>
+            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={standardDocIds.length === standardDocs.length && standardDocs.length > 0}
+                onChange={() => {
+                  if (standardDocIds.length === standardDocs.length) {
+                    setStandardDocIds([]);
+                  } else {
+                    setStandardDocIds(standardDocs.map(d => d.doc_id));
+                  }
+                }}
+                style={{ accentColor: 'var(--primary)', width: 16, height: 16 }}
+              />
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Select All Rules / Standards ({standardDocs.length})
+              </span>
+            </div>
             <div style={styles.docGrid}>
-              {documents
+              {standardDocs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', gridColumn: '1 / -1' }}>
+                  No standard documents available.
+                </div>
+              ) : standardDocs
                 .filter(d => !subjectDocIds.includes(d.doc_id))
                 .map(doc => (
                   <div

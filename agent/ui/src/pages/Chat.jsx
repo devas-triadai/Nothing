@@ -329,7 +329,7 @@ export default function Chat() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
   const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
-  const [selectedImage, setSelectedImage] = useState(null); // VLM image attachment
+  const [selectedFiles, setSelectedFiles] = useState([]); // VLM image attachments
   const [isPollingDrawing, setIsPollingDrawing] = useState(false);
   
   // Phase 5: Multi-document context selection
@@ -651,9 +651,7 @@ export default function Chat() {
         }
       },
       (data) => {
-        docDownloadUrl = data.download_url
-          ? getApiUrl(data.download_url)
-          : null;
+        docDownloadUrl = data.download_url || null;
         updateMsgs(accumulated, docDownloadUrl);
         setIsStreaming(false);
       },
@@ -691,9 +689,9 @@ export default function Chat() {
 
   const handleSend = async () => {
     const question = input.trim();
-    if ((!question && !selectedImage) || isSessionStreaming) return;
+    if ((!question && selectedFiles.length === 0) || isSessionStreaming) return;
 
-    const userMsg = { role: 'user', content: question, timestamp: Date.now(), image: selectedImage ? URL.createObjectURL(selectedImage) : null };
+    const userMsg = { role: 'user', content: question, timestamp: Date.now(), image: selectedFiles.length > 0 ? URL.createObjectURL(selectedFiles[0]) : null };
     const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
     const updatedMsgs = [...messages, userMsg, aiMsg];
 
@@ -720,10 +718,10 @@ export default function Chat() {
       });
     }
 
-    if (selectedImage) {
-      // VLM Flow
-      const imgToUpload = selectedImage;
-      setSelectedImage(null); // Clear after grabbing
+    if (selectedFiles.length > 0) {
+      // VLM Flow — use the first image file
+      const imgToUpload = selectedFiles[0];
+      setSelectedFiles([]); // Clear after grabbing
 
       const formData = new FormData();
       formData.append('image', imgToUpload);
@@ -999,13 +997,36 @@ export default function Chat() {
   };
 
   const handleFileAttach = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    // Only images are accepted for inline VLM attachment.
-    // Documents must be uploaded by a Superadmin via the Dashboard.
-    if (file.type.startsWith('image/')) {
-      setSelectedImage(file);
+    const images = [];
+    const rejected = [];
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        images.push(file);
+      } else if (['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'].includes(file.type)) {
+        rejected.push(file.name);
+      } else {
+        rejected.push(file.name);
+      }
+    }
+
+    if (images.length > 0) {
+      setSelectedFiles(prev => [...prev, ...images]);
+    }
+    if (rejected.length > 0) {
+      // Show a brief inline toast instead of silently dropping
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `⚠️ Documents (${rejected.join(', ')}) must be uploaded via the Dashboard for RAG indexing. Only images can be attached here for VLM analysis.`,
+        timestamp: Date.now(),
+        isToast: true,
+      }]);
+      // Auto-remove toast after 5s
+      setTimeout(() => {
+        setMessages(prevMsgs => prevMsgs.filter(m => !(m.isToast && m.content.includes(rejected[0]))));
+      }, 5000);
     }
     e.target.value = '';
   };
@@ -1113,21 +1134,22 @@ export default function Chat() {
   };
 
   const handleDrawingExtract = async () => {
-    if (!selectedImage) return;
+    if (selectedFiles.length === 0) return;
     setIsPollingDrawing(true);
-    
+    const targetImage = selectedFiles[0];
+
     // Add temporary message
-    const tempUrl = URL.createObjectURL(selectedImage);
+    const tempUrl = URL.createObjectURL(targetImage);
     setMessages(prev => [...prev, {
       role: 'user',
       content: 'Please extract parameters from this drawing.',
       image: tempUrl,
-      timestamp: new Date().toISOString()
+      timestamp: Date.now(),
     }]);
 
     try {
       const formData = new FormData();
-      formData.append('image', selectedImage);
+      formData.append('image', targetImage);
       
       const resp = await fetch(getApiUrl('/api/agent/drawing/extract_parameters'), {
         method: 'POST',
@@ -1146,7 +1168,7 @@ export default function Chat() {
         if (statusData.status === 'completed') {
           clearInterval(interval);
           setIsPollingDrawing(false);
-          setSelectedImage(null);
+          setSelectedFiles([]);
           
           setMessages(prev => [...prev, {
             role: 'assistant',
@@ -1422,25 +1444,32 @@ export default function Chat() {
         <div style={styles.inputBarWrap}>
 
 
-          {selectedImage && (
-            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-              <img src={URL.createObjectURL(selectedImage)} alt="Preview" style={{ height: '30px', borderRadius: '4px' }} />
-              <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{selectedImage.name}</span>
-              <button onClick={() => setSelectedImage(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
-              <button 
-                onClick={handleDrawingExtract} 
-                style={{ padding: '4px 8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', marginLeft: '8px', opacity: isPollingDrawing ? 0.6 : 1 }}
-                disabled={isPollingDrawing}
-              >
-                {isPollingDrawing ? "Extracting Parameters (VLM)..." : "Extract Parameters"}
-              </button>
+          {selectedFiles.length > 0 && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+              {selectedFiles.map((file, idx) => (
+                <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px' }}>
+                  {file.type.startsWith('image/') && <img src={URL.createObjectURL(file)} alt="" style={{ height: '22px', borderRadius: '3px' }} />}
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{file.name}</span>
+                  <button onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
+                </div>
+              ))}
+              <button onClick={() => setSelectedFiles([])} style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear all</button>
+              {selectedFiles.length === 1 && (
+                <button
+                  onClick={handleDrawingExtract}
+                  style={{ padding: '4px 8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', marginLeft: 'auto', opacity: isPollingDrawing ? 0.6 : 1 }}
+                  disabled={isPollingDrawing}
+                >
+                  {isPollingDrawing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Extract'}
+                </button>
+              )}
             </div>
           )}
           <div style={styles.inputBar}>
             <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
               <Paperclip size={17} />
             </button>
-            <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png" onChange={handleFileAttach} />
+            <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf,.docx,.doc,.txt" onChange={handleFileAttach} />
             <textarea
               ref={inputRef}
               value={input}

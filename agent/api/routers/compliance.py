@@ -103,10 +103,10 @@ async def compliance_check(
 TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT(S) against the STANDARD(S).
 
 SUBJECT DOCUMENTS ({subject_filenames_str}):
-{subject_text[:15000]}
+{subject_text[:8000]}
 
 APPLICABLE STANDARDS:
-{standards_text[:12000]}
+{standards_text[:6000]}
 {scope_note}
 
 For each relevant clause/requirement in the standard, evaluate the subject documents' compliance.
@@ -135,7 +135,11 @@ Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
         {"role": "user", "content": prompt},
     ]
 
-    findings_raw = llm_engine.generate(messages, max_tokens=4096, temperature=0.3)
+    try:
+        findings_raw = llm_engine.generate(messages, max_tokens=2048, temperature=0.3)
+    except Exception as e:
+        logger.error("Compliance LLM call failed: %s", e)
+        raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
 
     try:
         cleaned = _clean_json(findings_raw)
@@ -157,7 +161,7 @@ Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
     missing_prompt = f"""You are a compliance analyst.
     
 STANDARD:
-{standards_text[:12000]}
+{standards_text[:6000]}
 
 The following clauses were already checked:
 {covered_str}
