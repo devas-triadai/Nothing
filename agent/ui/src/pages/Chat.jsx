@@ -1409,63 +1409,7 @@ export default function Chat() {
 
         {/* ── Input Bar ── */}
         <div style={styles.inputBarWrap}>
-          {/* Phase 5: Context Selector - Restricted to Super Admins */}
-          {isSuperAdmin && (
-            <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <button 
-                  onClick={() => setShowDocSelector(!showDocSelector)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', padding: 0 }}
-                >
-                  <FileText size={14} />
-                  {selectedDocIds.length > 0 ? `Context: ${selectedDocIds.length} docs selected` : 'Context: All Documents'}
-                  {showDocSelector ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </button>
-                
-                {selectedDocIds.length >= 2 && (
-                  <button
-                    onClick={handleCompare}
-                    disabled={isSessionStreaming || isProcessingBg}
-                    style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '10px', padding: '2px 8px', cursor: 'pointer', opacity: (isSessionStreaming || isProcessingBg) ? 0.5 : 1 }}
-                  >
-                    Compare Bids
-                  </button>
-                )}
-              </div>
-              
-              {showDocSelector && (
-                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '8px', maxHeight: '150px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {documents.length === 0 ? (
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No documents indexed yet. Contact your administrator.</span>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setSelectedDocIds([])}
-                        style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid', fontSize: '11px', cursor: 'pointer', background: selectedDocIds.length === 0 ? 'var(--primary)' : 'transparent', borderColor: selectedDocIds.length === 0 ? 'var(--primary)' : 'var(--border)', color: selectedDocIds.length === 0 ? '#fff' : 'var(--text-secondary)' }}
-                      >
-                        All Documents
-                      </button>
-                      {documents.map(doc => {
-                        const isSelected = selectedDocIds.includes(doc.doc_id);
-                        return (
-                          <button
-                            key={doc.doc_id}
-                            onClick={() => {
-                              setSelectedDocIds(prev => isSelected ? prev.filter(id => id !== doc.doc_id) : [...prev, doc.doc_id]);
-                            }}
-                            style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid', fontSize: '11px', cursor: 'pointer', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: isSelected ? 'rgba(74,139,255,0.1)' : 'transparent', borderColor: isSelected ? 'var(--primary)' : 'var(--border)', color: isSelected ? 'var(--primary)' : 'var(--text-secondary)' }}
-                            title={doc.filename}
-                          >
-                            {doc.filename}
-                          </button>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+
 
           {selectedImage && (
             <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>

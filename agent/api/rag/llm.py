@@ -31,19 +31,19 @@ def clean_llm_output(text: str) -> str:
         return ""
     # Remove <thought>...</thought> tags
     text = re.sub(r'<thought>.*?</thought>', '', text, flags=re.DOTALL | re.IGNORECASE)
-    # Remove markdown headers or bullet points that look like thinking blocks
     lines = text.split('\n')
     cleaned_lines = []
     for line in lines:
         l = line.strip()
-        # Skip lines that look like internal metadata
-        if l.startswith(('* User Context:', '* User Question:', '* Goal:', '* Constraints:', '* Thinking:', 'REWRITTEN SEARCH QUERY:')):
+        # Skip lines that look like internal metadata or reasoning
+        if any(tag in l for tag in ('User Context:', 'User Question:', 'Goal:', 'Constraints:', 'Thinking:', 'REWRITTEN SEARCH QUERY:', 'Role:', 'Task:')) or l.startswith(('Context:', 'Question:')):
             continue
         if l:
-            cleaned_lines.append(line)
+            # Strip leading bullet indicators if present
+            l_clean = re.sub(r'^[\*\-\+]\s*', '', l)
+            cleaned_lines.append(l_clean)
     
     result = "\n".join(cleaned_lines).strip()
-    # If the model still gave a long list, just take the first non-empty line as the query
     if len(result.split('\n')) > 3:
         return result.split('\n')[0].strip()
     return result

@@ -65,7 +65,7 @@ def rewrite_query(
     if feedback == "low_relevance":
         prompt_text += "\n(Note: The initial search returned low-relevance results. Try broader or alternative terms.)"
 
-    _SYSTEM_REWRITE = "You are a search query optimizer for a maritime compliance knowledge base. Rewrite the user's question into an optimal search query. Output ONLY the rewritten query — no explanations, no preamble. Fix typos and expand abbreviations."
+    _SYSTEM_REWRITE = "You are a search query optimizer for a maritime compliance knowledge base. Rewrite the user's question into an optimal search query. Output ONLY the rewritten query — no explanations, no preamble. Fix typos and expand abbreviations. Do NOT output any markdown, asterisks, bullet points, or internal reasoning context."
     
     messages = [
         {"role": "system", "content": _SYSTEM_REWRITE},
@@ -75,7 +75,7 @@ def rewrite_query(
     try:
         rewritten = llm_engine.generate(
             messages,
-            max_tokens=512,
+            max_tokens=64,
             temperature=0.2,
         )
         rewritten = rewritten.strip().strip('"').strip("'")
