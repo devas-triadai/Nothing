@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ShieldCheck, FileCheck, AlertTriangle, CheckCircle2,
   XCircle, HelpCircle, Loader2, Download, ChevronRight,
-  Search, FileText,
+  Search, FileText, Upload, X,
 } from 'lucide-react';
 import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
@@ -39,12 +39,23 @@ export default function CompliancePage() {
   const [error, setError] = useState('');
 
   const findingsEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Inline upload state
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  const refreshDocuments = async () => {
+    try {
+      const { data } = await api.get('/documents');
+      setDocuments(data.documents || []);
+    } catch (err) {
+      console.error('Failed to refresh documents', err);
+    }
+  };
 
   useEffect(() => {
-    api.get('/documents')
-      .then(({ data }) => setDocuments(data.documents || []))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    refreshDocuments().finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -112,6 +123,74 @@ export default function CompliancePage() {
     return doc.doc_id?.startsWith('builtin:') ||
       cat.includes('standard') || cat.includes('sotr') ||
       cat.includes('imo') || cat.includes('rule');
+  };
+
+  const handleInlineUpload = async (file, categoryHint) => {
+    setUploading(true);
+    setUploadError('');
+    try {
+      const token = localStorage.getItem('agra_token') || '';
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('document_type', categoryHint === 'standard' ? 'standard' : 'bid');
+      formData.append('auto_extract', 'true');
+
+      const res = await fetch(getApiUrl('/api/agent/upload'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let newDocId = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim();
+              if (!dataStr) continue;
+              try {
+                const evt = JSON.parse(dataStr);
+                if (evt.stage === 'done') newDocId = evt.doc_id;
+                if (evt.stage === 'error') throw new Error(evt.error || 'Upload error');
+              } catch (e) {
+                if (e instanceof SyntaxError) console.error('Upload SSE parse error', e, dataStr);
+                else throw e;
+              }
+            }
+          }
+        }
+        if (done) break;
+      }
+
+      // Refresh document list
+      const { data } = await api.get('/documents');
+      const freshDocs = data.documents || [];
+      setDocuments(freshDocs);
+
+      // Auto-select the newly uploaded document
+      const newDoc = freshDocs.find(d => d.doc_id === newDocId || d.filename === file.name);
+      if (newDoc) {
+        if (categoryHint === 'standard' || isStandard(newDoc)) {
+          setStandardDocIds(prev => prev.includes(newDoc.doc_id) ? prev : [...prev, newDoc.doc_id]);
+        } else {
+          setSubjectDocIds(prev => prev.includes(newDoc.doc_id) ? prev : [...prev, newDoc.doc_id]);
+        }
+      }
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const subjectDocs = documents.filter(d => !isStandard(d));
@@ -204,7 +283,45 @@ export default function CompliancePage() {
                   <div style={styles.docCardMeta}>{doc.chunks} chunks • {doc.page_count} pages</div>
                 </div>
               ))}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleInlineUpload(f, 'subject');
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  ...styles.docCard,
+                  borderStyle: 'dashed',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  minHeight: 100,
+                  gridColumn: '1 / -1',
+                  ...(uploading ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+                }}
+              >
+                {uploading ? (
+                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
+                ) : (
+                  <>
+                    <Upload size={20} color="var(--primary)" />
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>Upload new document</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PDF, DOCX, DOC, TXT</span>
+                  </>
+                )}
+              </button>
             </div>
+            {uploadError && (
+              <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={14} /> {uploadError}
+              </div>
+            )}
             <div style={styles.navRow}>
               <div />
               <button onClick={handleNext} disabled={!canProceed()} style={styles.nextBtn} id="step1-next">
@@ -277,7 +394,45 @@ export default function CompliancePage() {
                     <div style={styles.docCardMeta}>{doc.chunks} chunks</div>
                   </div>
                 ))}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleInlineUpload(f, 'standard');
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  ...styles.docCard,
+                  borderStyle: 'dashed',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  minHeight: 100,
+                  gridColumn: '1 / -1',
+                  ...(uploading ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+                }}
+              >
+                {uploading ? (
+                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
+                ) : (
+                  <>
+                    <Upload size={20} color="var(--primary)" />
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>Upload new standard</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PDF, DOCX, DOC, TXT</span>
+                  </>
+                )}
+              </button>
             </div>
+            {uploadError && (
+              <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={14} /> {uploadError}
+              </div>
+            )}
             <div style={styles.navRow}>
               <button onClick={() => setStep(1)} style={styles.backBtn}>Back</button>
               <button onClick={handleNext} disabled={!canProceed()} style={styles.nextBtn} id="step2-next">

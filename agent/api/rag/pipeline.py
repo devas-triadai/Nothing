@@ -52,14 +52,45 @@ _INTENT_TECH_REVIEW = re.compile(
     r'\b(draft|generat|creat|build|make|prepar)e?.{0,40}(tech review|technical review|review comments?)\b',
     re.IGNORECASE,
 )
+_INTENT_COMPARE = re.compile(
+    r'\b(compare|comparison|vs\.?|versus|side[- ]by[- ]side|evaluate|assess)\b'
+    r'.{0,80}\b(bids?|bidders?|proposals?|tenders?|vendors?|both|two)\b'
+    r'|\b(both|two|multiple)\s+(bids?|bidders?|proposals?|vendors?)\b',
+    re.IGNORECASE,
+)
+
+
+def _extract_problem_statement(q: str) -> Optional[str]:
+    """Try to extract a tender / project / problem reference from a compare query."""
+    # Specific labeled patterns first: "tender ABC-123", "project XYZ", "SOTR 2024-05"
+    m = re.search(
+        r'\b(?:tender|project|problem\s*statement|SOTR|requirement|work\s*order)\s*[:#]?\s*["\']?([^"\'\n;]{3,50})["\']?',
+        q, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    # Prepositional phrases after compare verbs: "compare bids for/on/regarding/about ..."
+    m = re.search(
+        r'(?:compare|comparison|evaluate|assess|vs\.?|versus).{0,60}\b(?:for|on|regarding|about|of)\s+["\']?([^"\'\n;]{3,50})["\']?',
+        q, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    return None
 
 
 def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
     """
-    Detect if the user wants to generate content (PPT/quiz/summary).
+    Detect if the user wants to generate content (PPT/quiz/summary/compare).
     Returns a dict with type and extracted params, or None for normal Q&A.
     """
     q = question.strip()
+    if _INTENT_COMPARE.search(q):
+        intent = {"type": "bid_compare"}
+        ps = _extract_problem_statement(q)
+        if ps:
+            intent["problem_statement"] = ps
+        return intent
     if _INTENT_PPT.search(q):
         # Extract topic: everything after 'about/on/for/regarding'
         topic_match = re.search(
@@ -203,10 +234,18 @@ def ingest_document(
     parent_doc_id: Optional[str] = None,
     version_notes: Optional[str] = None,
     source: Optional[str] = None,
+    document_type: Optional[str] = None,
+    bidder_key: Optional[str] = None,
+    problem_statement: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
     Yields SSE-style progress events.
+
+    Hierarchical metadata (Phase C/D):
+      document_type:     'subject' | 'standard' | 'bid'
+      bidder_key:        bidder identifier for bid docs
+      problem_statement: tender/problem reference shared across competing bids
     """
     store = get_store()
 
@@ -220,7 +259,14 @@ def ingest_document(
 
     # ── Stage 2: Chunking ──
     yield {"stage": "chunking", "progress": 0, "message": "Chunking text…"}
-    chunks = chunker.chunk_pages(pages, doc_id, filename, category=category, description=description, source=source or "admin_upload")
+    chunks = chunker.chunk_pages(
+        pages, doc_id, filename,
+        category=category, description=description,
+        source=source or "admin_upload",
+        document_type=document_type,
+        bidder_key=bidder_key,
+        problem_statement=problem_statement,
+    )
     if not chunks:
         yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}
         return
@@ -284,9 +330,72 @@ async def query_pipeline(
     yield {"token": ""}
     await asyncio.sleep(0)
 
-    # ── 0. Intent detection — check for PPT/quiz/summary requests ──
+    # ── 0. Intent detection — check for PPT/quiz/summary/compare requests ──
     intent = _detect_intent(question)
     if intent:
+        # Special handling for bid_compare — surface available bidders/tenders
+        if intent.get("type") == "bid_compare":
+            store = get_store()
+            bid_catalog = await _loop.run_in_executor(None, store.list_bid_documents)
+            comparable_tenders = [
+                ps for ps in bid_catalog.get("problem_statements", [])
+                if len(ps.get("bidder_keys", [])) >= 2
+            ]
+
+            # ── Validate extracted problem_statement if user named one ──
+            extracted_ps = intent.get("problem_statement")
+            validated_ps = None
+            ps_validation_error = None
+            if extracted_ps:
+                norm_extracted = extracted_ps.lower().replace(" ", "")
+                for ps in bid_catalog.get("problem_statements", []):
+                    norm_catalog = ps.get("problem_statement", "").lower().replace(" ", "")
+                    if norm_extracted == norm_catalog or norm_extracted in norm_catalog or norm_catalog in norm_extracted:
+                        validated_ps = ps["problem_statement"]
+                        break
+                if validated_ps:
+                    matched = next((p for p in comparable_tenders if p["problem_statement"] == validated_ps), None)
+                    if not matched:
+                        ps_validation_error = f"'{validated_ps}' is indexed but has fewer than 2 bidders."
+                else:
+                    ps_validation_error = f"'{extracted_ps}' was not found in the indexed tenders."
+
+            if not comparable_tenders:
+                yield {
+                    "token": (
+                        "I detected you'd like to compare bids, but I don't yet have at "
+                        "least two bid documents sharing the same tender / problem statement. "
+                        "Please upload bids first (use the upload button) and tag each with "
+                        "the bidder name and tender reference."
+                    ),
+                }
+                yield {
+                    "intent": "bid_compare",
+                    "intent_params": {
+                        "available": False,
+                        "catalog": bid_catalog,
+                        "problem_statement": validated_ps,
+                        "problem_statement_error": ps_validation_error,
+                    },
+                    "done": True,
+                    "sources": [],
+                }
+                return
+
+            yield {
+                "intent": "bid_compare",
+                "intent_params": {
+                    "available": True,
+                    "catalog": bid_catalog,
+                    "comparable_tenders": comparable_tenders,
+                    "problem_statement": validated_ps,
+                    "problem_statement_error": ps_validation_error,
+                },
+                "done": True,
+                "sources": [],
+            }
+            return
+
         # Get available doc_ids (use filter if set, else all)
         if doc_ids_filter:
             doc_ids = doc_ids_filter
@@ -541,8 +650,9 @@ async def query_pipeline(
     # 7. Build structured sources
     sources = _format_sources(top_chunks)
 
-    # ── Citation Validation ──
+    # ── Citation Validation + Encoding/LaTeX Sanitization ──
     full_text = "".join(full_response)
+    original_text = full_text
     valid_source_indices = {str(s["index"]) for s in sources}
     hallucinated_citations = set(re.findall(r'\[(\d+)\]', full_text)) - valid_source_indices
 
@@ -550,6 +660,11 @@ async def query_pipeline(
         logger.warning("Stripping hallucinated citations: %s", hallucinated_citations)
         for bad_id in hallucinated_citations:
             full_text = full_text.replace(f"[{bad_id}]", "")
+
+    # Always run sanitize_text to repair UTF-8 mojibake and convert LaTeX to Unicode
+    full_text = llm_engine.sanitize_text(full_text)
+
+    if full_text != original_text:
         yield {"replace_all": full_text}
 
     # Add to Semantic Cache

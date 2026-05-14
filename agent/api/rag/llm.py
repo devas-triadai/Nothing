@@ -25,28 +25,155 @@ _CHAT_ENDPOINT = f"{_LLAMA_SERVER_URL}/v1/chat/completions"
 
 _MAX_TOKENS_DEFAULT = 2048
 
+
+# ─────────────────────────────────────────────────────────────────────
+#  Text sanitization — mojibake (UTF-8 misinterpreted as cp1252) and
+#  LaTeX → Unicode. Applied to all LLM output before the user sees it.
+# ─────────────────────────────────────────────────────────────────────
+
+# Common UTF-8 → cp1252 mojibake mappings observed in production
+_MOJIBAKE_MAP = {
+    "â\u0080\u0093": "\u2013",  # en-dash –
+    "â\u0080\u0094": "\u2014",  # em-dash —
+    "â\u0080\u0098": "\u2018",  # left single quote '
+    "â\u0080\u0099": "\u2019",  # right single quote '
+    "â\u0080\u009c": "\u201c",  # left double quote "
+    "â\u0080\u009d": "\u201d",  # right double quote "
+    "â\u0080\u00a2": "\u2022",  # bullet •
+    "â\u0080\u00a6": "\u2026",  # ellipsis …
+    "Î©": "\u03a9",              # ohm Ω
+    "Î¼": "\u03bc",              # mu μ
+    "Î±": "\u03b1",              # alpha α
+    "Î²": "\u03b2",              # beta β
+    "Î³": "\u03b3",              # gamma γ
+    "Î´": "\u03b4",              # delta δ
+    "Ï\u0080": "\u03c0",          # pi π
+    "Â°": "\u00b0",              # degree °
+    "Â±": "\u00b1",              # plus-minus ±
+    "Â§": "\u00a7",              # section §
+    "Ã©": "\u00e9",              # e-acute é
+    "Ã¨": "\u00e8",              # e-grave è
+    "Ã ": "\u00e0",              # a-grave à
+    "Ã¶": "\u00f6",              # o-umlaut ö
+    "Ã¼": "\u00fc",              # u-umlaut ü
+    "Ã¤": "\u00e4",              # a-umlaut ä
+    "Ã±": "\u00f1",              # n-tilde ñ
+}
+
+# LaTeX command → Unicode replacements
+_LATEX_MAP = {
+    r"\ge": "\u2265", r"\geq": "\u2265",       # ≥
+    r"\le": "\u2264", r"\leq": "\u2264",       # ≤
+    r"\ne": "\u2260", r"\neq": "\u2260",       # ≠
+    r"\pm": "\u00b1",                            # ±
+    r"\mp": "\u2213",                            # ∓
+    r"\times": "\u00d7",                         # ×
+    r"\div": "\u00f7",                           # ÷
+    r"\to": "\u2192", r"\rightarrow": "\u2192", # →
+    r"\leftarrow": "\u2190",                     # ←
+    r"\Rightarrow": "\u21d2", r"\Leftarrow": "\u21d0",
+    r"\infty": "\u221e",                         # ∞
+    r"\sum": "\u2211", r"\prod": "\u220f",      # ∑ ∏
+    r"\int": "\u222b",                           # ∫
+    r"\partial": "\u2202",                       # ∂
+    r"\nabla": "\u2207",                         # ∇
+    r"\sqrt": "\u221a",                          # √
+    r"\approx": "\u2248", r"\sim": "\u223c",    # ≈ ∼
+    r"\equiv": "\u2261",                         # ≡
+    r"\propto": "\u221d",                        # ∝
+    r"\degree": "\u00b0",                        # °
+    r"\alpha": "\u03b1", r"\beta": "\u03b2",
+    r"\gamma": "\u03b3", r"\delta": "\u03b4",
+    r"\epsilon": "\u03b5", r"\zeta": "\u03b6",
+    r"\eta": "\u03b7", r"\theta": "\u03b8",
+    r"\iota": "\u03b9", r"\kappa": "\u03ba",
+    r"\lambda": "\u03bb", r"\mu": "\u03bc",
+    r"\nu": "\u03bd", r"\xi": "\u03be",
+    r"\pi": "\u03c0", r"\rho": "\u03c1",
+    r"\sigma": "\u03c3", r"\tau": "\u03c4",
+    r"\phi": "\u03c6", r"\chi": "\u03c7",
+    r"\psi": "\u03c8", r"\omega": "\u03c9",
+    r"\Gamma": "\u0393", r"\Delta": "\u0394",
+    r"\Theta": "\u0398", r"\Lambda": "\u039b",
+    r"\Xi": "\u039e", r"\Pi": "\u03a0",
+    r"\Sigma": "\u03a3", r"\Phi": "\u03a6",
+    r"\Psi": "\u03a8", r"\Omega": "\u03a9",
+}
+
+
+def sanitize_text(text: str) -> str:
+    """
+    Repair encoding mojibake and convert inline LaTeX to Unicode.
+    Safe to call on any LLM output (chat, summary, exec_summary, etc.).
+    """
+    if not text:
+        return text
+
+    # 1. Try to repair UTF-8 misinterpreted as cp1252 (the source of "â" garbage)
+    #    If the string contains the Â or â mojibake markers, attempt round-trip.
+    if "Â" in text or "â" in text or "Ã" in text or "Î" in text:
+        try:
+            repaired = text.encode("cp1252", errors="strict").decode("utf-8", errors="strict")
+            text = repaired
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # Fallback: targeted replacements
+            for bad, good in _MOJIBAKE_MAP.items():
+                if bad in text:
+                    text = text.replace(bad, good)
+
+    # 2. Convert LaTeX inline math to Unicode
+    #    Handle `$\foo$`, `\(\foo\)`, and bare `\foo` (with word boundary).
+    def _latex_dollar(m: "re.Match[str]") -> str:
+        inner = m.group(1).strip()
+        return _LATEX_MAP.get(inner, m.group(0))
+
+    # `$\command$` and `$\command{...}$` styles
+    text = re.sub(
+        r"\$\s*(\\[a-zA-Z]+(?:\s*\{[^}]*\})?)\s*\$",
+        _latex_dollar,
+        text,
+    )
+    # `\( ... \)` style
+    text = re.sub(
+        r"\\\(\s*(\\[a-zA-Z]+(?:\s*\{[^}]*\})?)\s*\\\)",
+        _latex_dollar,
+        text,
+    )
+
+    # Bare LaTeX commands (e.g., `temp \ge 50`)
+    for cmd, uni in _LATEX_MAP.items():
+        # Use word boundary to avoid matching inside longer commands
+        text = re.sub(re.escape(cmd) + r"(?![a-zA-Z])", uni, text)
+
+    # 3. Strip stray double dollar signs around plain text
+    text = re.sub(r"\$\$([^$]+)\$\$", r"\1", text)
+
+    return text
+
+
 def clean_llm_output(text: str) -> str:
-    """Strip out common reasoning/thinking patterns from model output."""
+    """
+    Sanitize and lightly clean LLM output. Removes <thought> blocks and
+    obvious metadata leakage but preserves multi-paragraph structure.
+    """
     if not text:
         return ""
-    # Remove <thought>...</thought> tags
-    text = re.sub(r'<thought>.*?</thought>', '', text, flags=re.DOTALL | re.IGNORECASE)
-    lines = text.split('\n')
-    cleaned_lines = []
-    for line in lines:
-        l = line.strip()
-        # Skip lines that look like internal metadata or reasoning
-        if any(tag in l for tag in ('User Context:', 'User Question:', 'Goal:', 'Constraints:', 'Thinking:', 'REWRITTEN SEARCH QUERY:', 'Role:', 'Task:')) or l.startswith(('Context:', 'Question:')):
-            continue
-        if l:
-            # Strip leading bullet indicators if present
-            l_clean = re.sub(r'^[\*\-\+]\s*', '', l)
-            cleaned_lines.append(l_clean)
-    
-    result = "\n".join(cleaned_lines).strip()
-    if len(result.split('\n')) > 3:
-        return result.split('\n')[0].strip()
-    return result
+
+    # 1. Remove explicit reasoning/thinking blocks
+    text = re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+
+    # 2. Sanitize encoding and LaTeX (always)
+    text = sanitize_text(text)
+
+    # 3. Strip lines that look like leaked prompt scaffolding (very conservative)
+    leak_markers = (
+        "User Context:", "User Question:", "REWRITTEN SEARCH QUERY:",
+        "Goal:", "Constraints:", "Thinking:", "Role:", "Task:",
+    )
+    lines = text.split("\n")
+    cleaned_lines = [l for l in lines if not any(m in l for m in leak_markers)]
+    return "\n".join(cleaned_lines).strip()
 
 
 

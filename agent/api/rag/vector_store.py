@@ -205,10 +205,18 @@ class VectorStore:
         version: Optional[int] = None,
         category: Optional[str] = None,
         user_clearance: int = 4,  # Default to max clearance if not provided
+        document_type: Optional[str] = None,
+        bidder_key: Optional[str] = None,
+        problem_statement: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Hybrid search: dense cosine (weight 0.6) + BM25 keyword (weight 0.4).
         Returns top_k results sorted by combined score.
+
+        Hierarchical metadata filters (Phase C/D):
+          document_type:     'subject' | 'standard' | 'bid' — restrict to type
+          bidder_key:        Restrict to chunks tagged with this bidder
+          problem_statement: Restrict to chunks tagged with this tender
         """
         # ── Dense Search ──
         must_conditions = []
@@ -224,6 +232,16 @@ class VectorStore:
         if category:
             from qdrant_client.models import MatchValue
             must_conditions.append(FieldCondition(key="metadata.category", match=MatchValue(value=category)))
+        # ── Hierarchical metadata filters (Phase C/D) ──
+        if document_type:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.document_type", match=MatchValue(value=document_type)))
+        if bidder_key:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.bidder_key", match=MatchValue(value=bidder_key)))
+        if problem_statement:
+            from qdrant_client.models import MatchValue
+            must_conditions.append(FieldCondition(key="metadata.problem_statement", match=MatchValue(value=problem_statement)))
             
         # ── Security Clearance Filter ──
         from qdrant_client.models import Range
@@ -388,11 +406,57 @@ class VectorStore:
                     "category": meta.get("category", "General"),
                     "page_count": meta.get("page_count", 0),
                     "chunks": 0,
+                    # Hierarchical metadata (Phase C/D)
+                    "document_type": meta.get("document_type"),
+                    "bidder_key": meta.get("bidder_key"),
+                    "problem_statement": meta.get("problem_statement"),
                 }
             if doc_id:
                 unique_docs[doc_id]["chunks"] += 1
 
         return list(unique_docs.values())
+
+    def list_bid_documents(self) -> Dict[str, Any]:
+        """
+        Return aggregated bid metadata: unique bidder_keys and problem_statements
+        present in the store. Used by the comparison UI to populate dropdowns.
+        """
+        bidders: Dict[str, Dict[str, Any]] = {}
+        problems: Dict[str, Dict[str, Any]] = {}
+        for pid, meta in self._chunk_meta.items():
+            if meta.get("document_type") != "bid":
+                continue
+            bk = meta.get("bidder_key")
+            ps = meta.get("problem_statement")
+            if bk:
+                slot = bidders.setdefault(bk, {"bidder_key": bk, "chunks": 0, "documents": set(), "problem_statements": set()})
+                slot["chunks"] += 1
+                if meta.get("doc_id"):
+                    slot["documents"].add(meta["doc_id"])
+                if ps:
+                    slot["problem_statements"].add(ps)
+            if ps:
+                pslot = problems.setdefault(ps, {"problem_statement": ps, "bidder_keys": set(), "chunks": 0})
+                pslot["chunks"] += 1
+                if bk:
+                    pslot["bidder_keys"].add(bk)
+        # Serialize sets to sorted lists
+        bidders_out = []
+        for slot in bidders.values():
+            bidders_out.append({
+                "bidder_key": slot["bidder_key"],
+                "chunks": slot["chunks"],
+                "documents": sorted(slot["documents"]),
+                "problem_statements": sorted(slot["problem_statements"]),
+            })
+        problems_out = []
+        for slot in problems.values():
+            problems_out.append({
+                "problem_statement": slot["problem_statement"],
+                "bidder_keys": sorted(slot["bidder_keys"]),
+                "chunks": slot["chunks"],
+            })
+        return {"bidders": bidders_out, "problem_statements": problems_out}
 
     def collection_count(self) -> int:
         """Total number of points in the collection."""

@@ -5,6 +5,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
 import hashlib
+import logging
 import uuid
 import os
 import re
@@ -13,6 +14,8 @@ import httpx
 from app.database import get_db
 from app.models.models import User, Document, AuditLog, DocEdge
 from app.routers.auth import require_superadmin, require_admin, get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

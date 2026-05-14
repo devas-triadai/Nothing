@@ -505,6 +505,35 @@ def _build_image_slide(prs, title: str, image_path: str, caption: str = "", note
         slide.notes_slide.notes_text_frame.text = notes
 
 
+def _build_sources_slide(prs, sources: List[str], title: str = "Sources & References"):
+    """Layout: Sources slide listing referenced documents."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, _NAVY)
+    _add_title_bar(slide, title)
+
+    txBox = slide.shapes.add_textbox(
+        Inches(0.7), Inches(1.5), Inches(8.5), Inches(5.0),
+    )
+    tf = txBox.text_frame
+    tf.word_wrap = True
+
+    for i, src in enumerate(sources[:12]):  # Cap at 12 to avoid overflow
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.text = f"[{i + 1}]  {src}"
+        p.font.size = Pt(13)
+        p.font.color.rgb = _LIGHT_GRAY
+        p.space_after = Pt(10)
+
+    if len(sources) > 12:
+        p = tf.add_paragraph()
+        p.text = f"... and {len(sources) - 12} more sources."
+        p.font.size = Pt(11)
+        p.font.color.rgb = _MED_GRAY
+        p.space_after = Pt(10)
+
+    _add_footer(slide)
+
+
 def _build_thank_you_slide(prs, title: str = "Thank You", subtitle: str = ""):
     """Layout 9: Closing slide."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -625,6 +654,10 @@ def build_pptx(
                     image_index += 1
                 caption = sd.get("caption", "")
                 _build_image_slide(prs, slide_title, img_path, caption, notes)
+
+            elif layout == "sources":
+                sources = sd.get("sources", [])
+                _build_sources_slide(prs, sources, slide_title)
 
             elif layout == "thank_you":
                 subtitle = sd.get("subtitle", "")

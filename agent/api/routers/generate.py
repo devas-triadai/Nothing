@@ -35,28 +35,110 @@ _OUTPUTS_DIR = _DATA_DIR / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _extract_balanced(text: str, open_char: str, close_char: str) -> Optional[str]:
+    """
+    Depth-counting bracket matcher. Returns the first balanced substring
+    starting with `open_char`, accounting for strings (single/double quotes)
+    and escaped chars inside strings. Returns None if no balanced region found.
+    """
+    start = text.find(open_char)
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    string_char = ""
+    i = start
+    n = len(text)
+
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if ch == "\\" and i + 1 < n:
+                # Skip escaped character
+                i += 2
+                continue
+            if ch == string_char:
+                in_string = False
+        else:
+            if ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+            elif ch == open_char:
+                depth += 1
+            elif ch == close_char:
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        i += 1
+
+    return None  # unbalanced
+
+
 def _clean_json(raw: str) -> str:
     """
-    Strip markdown code fences and extract the first JSON array or object
-    from LLM output before parsing.
+    Strip markdown code fences and extract the first balanced JSON array or
+    object from LLM output. Uses depth-counting bracket matching so it does
+    not get confused by strings containing brackets or trailing prose.
     """
+    if not raw:
+        return ""
+
     # 1. Strip markdown fences aggressively (anywhere in text)
     cleaned = re.sub(r'```(?:json)?\s*', '', raw, flags=re.IGNORECASE)
     cleaned = re.sub(r'```', '', cleaned)
     cleaned = cleaned.strip()
 
-    # 2. Try to find the outermost JSON array using regex (DOTALL = multiline)
-    #    This finds the first '[' and greedily matches to the last ']' on the same depth level
-    arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
-    if arr_match:
-        return arr_match.group(0)
+    # 2. Locate first '[' or '{' and pick whichever appears first
+    arr_pos = cleaned.find('[')
+    obj_pos = cleaned.find('{')
 
-    # 3. Fallback: outermost JSON object
-    obj_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if obj_match:
-        return obj_match.group(0)
+    if arr_pos < 0 and obj_pos < 0:
+        return cleaned
+
+    # Choose the one that appears earlier in the text
+    use_array = (arr_pos >= 0) and (obj_pos < 0 or arr_pos < obj_pos)
+
+    if use_array:
+        result = _extract_balanced(cleaned, '[', ']')
+        if result:
+            return result
+
+    result = _extract_balanced(cleaned, '{', '}')
+    if result:
+        return result
 
     return cleaned
+
+
+def _repair_json_with_llm(broken: str, error_msg: str) -> Optional[dict]:
+    """
+    Last-ditch repair: ask the LLM to fix malformed JSON. Returns parsed
+    dict on success, None if repair also fails. Uses tight max_tokens to
+    keep latency reasonable.
+    """
+    try:
+        repair_prompt = (
+            "The following text was supposed to be valid JSON but failed to parse. "
+            f"Parser error: {error_msg}\n\n"
+            "Return ONLY the corrected JSON. No prose, no explanation, no markdown fences.\n\n"
+            f"BROKEN JSON:\n{broken[:6000]}"
+        )
+        repaired_raw = llm_engine.generate(
+            messages=[
+                {"role": "system", "content": "You are a JSON repair tool. Output only valid JSON."},
+                {"role": "user", "content": repair_prompt},
+            ],
+            max_tokens=2048,
+            temperature=0.0,
+            response_format={"type": "json_object"},
+            raw=True,
+        )
+        cleaned = _clean_json(repaired_raw)
+        return json.loads(cleaned)
+    except Exception as e:
+        logger.warning("JSON repair pass failed: %s", e)
+        return None
 
 
 def _build_fallback_slides(topic: str, context_text: str, num_slides: int = 10) -> list:
@@ -259,15 +341,38 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         logger.warning("PPT generation failed after all LLM retries. Using fallback slide builder.")
         slides_data = _build_fallback_slides(body.topic, context_text, body.num_slides)
 
-    # ── 5. Validate layout fields and add defaults ──
-    valid_layouts = {"title", "section_header", "bullets", "two_column", "table", "diagram", "chart", "image", "thank_you"}
+    # ── 5. Validate layout fields and enforce exact slide count ──
+    valid_layouts = {"title", "section_header", "bullets", "two_column", "table", "diagram", "chart", "image", "sources", "thank_you"}
     for sd in slides_data:
         layout = sd.get("layout", "bullets")
         if layout not in valid_layouts:
             sd["layout"] = "bullets"
-        # Ensure bullets exist as fallback
         if "bullets" not in sd:
             sd["bullets"] = []
+
+    # Enforce exact slide count
+    target = body.num_slides
+    if len(slides_data) < target:
+        while len(slides_data) < target:
+            slides_data.insert(max(1, len(slides_data) - 1), {"layout": "section_header", "title": "Additional Content", "subtitle": ""})
+    elif len(slides_data) > target:
+        # Keep first (title) and last (thank_you); trim from middle
+        first = slides_data[0]
+        last = slides_data[-1]
+        middle = slides_data[1:-1]
+        keep = middle[:max(0, target - 2)]
+        slides_data = [first] + keep + [last]
+
+    # Auto-inject sources slide if documents were used and count allows
+    source_names = []
+    if body.doc_ids:
+        source_names = [store.get_chunks_by_doc(did)[0]["metadata"].get("filename", did) for did in body.doc_ids if store.get_chunks_by_doc(did)]
+    else:
+        source_names = list({c.get("metadata", {}).get("filename", "") for c in context_chunks if c.get("metadata", {}).get("filename")})
+    source_names = [s for s in source_names if s]
+    if source_names and len(slides_data) >= 3:
+        # Replace second-to-last slide (before thank_you) with sources
+        slides_data[-2] = {"layout": "sources", "title": "Sources & References", "sources": source_names[:20]}
 
     # ── 6. Build PPTX ──
     job_id = str(uuid.uuid4())
@@ -511,23 +616,48 @@ Return ONLY valid JSON in this exact format:
         response_format={"type": "json_object"}, raw=True,
     )
 
+    quiz_data: Optional[dict] = None
+    last_error: Optional[Exception] = None
+
+    # Pass 1: clean + parse with depth-counting matcher
     try:
         cleaned = _clean_json(raw)
-        start = cleaned.find("{")
-        end = cleaned.rfind("}") + 1
-        if start == -1 or end == 0:
-            raise ValueError("No JSON object found in LLM response")
-        quiz_data = json.loads(cleaned[start:end])
-        # Validate minimal structure
-        if not isinstance(quiz_data, dict):
-            raise ValueError("Quiz response is not a JSON object")
-        if "mcq" not in quiz_data:
-            quiz_data["mcq"] = []
-        if "short_answer" not in quiz_data:
-            quiz_data["short_answer"] = []
+        if not cleaned:
+            raise ValueError("Empty response from LLM")
+        quiz_data = json.loads(cleaned)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("Failed to parse quiz JSON: %s\nRaw (first 800 chars): %s", e, raw[:800])
-        raise HTTPException(status_code=500, detail=f"Failed to generate quiz ({e}). Please try again.")
+        last_error = e
+        logger.warning("Quiz JSON parse pass 1 failed: %s", e)
+
+    # Pass 2: LLM repair if pass 1 failed
+    if quiz_data is None:
+        logger.info("Attempting LLM-based JSON repair for quiz output...")
+        repaired = await asyncio.to_thread(
+            _repair_json_with_llm, raw, str(last_error or "unknown")
+        )
+        if repaired is not None:
+            quiz_data = repaired
+            logger.info("Quiz JSON repaired successfully via LLM pass.")
+
+    # Pass 3: Final synthetic fallback to avoid 500 error
+    if quiz_data is None or not isinstance(quiz_data, dict):
+        logger.error(
+            "Quiz JSON unrecoverable. Returning minimal fallback. Raw (first 800 chars): %s",
+            raw[:800],
+        )
+        quiz_data = {
+            "title": f"Quiz: {filename}",
+            "mcq": [],
+            "short_answer": [],
+            "_fallback": True,
+            "_error": "The model failed to produce structured questions. Please try again.",
+        }
+
+    # Validate minimal structure
+    if "mcq" not in quiz_data:
+        quiz_data["mcq"] = []
+    if "short_answer" not in quiz_data:
+        quiz_data["short_answer"] = []
 
     # Build DOCX
     job_id = str(uuid.uuid4())

@@ -11,12 +11,14 @@ import {
   FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
   ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle, Edit2,
+  Upload, FolderOpen,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
 import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
+import ComparisonCard from '../components/ComparisonCard';
 
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
@@ -337,6 +339,11 @@ export default function Chat() {
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [showDocSelector, setShowDocSelector] = useState(false);
 
+  // Phase C2: Upload wizard state
+  const [uploadQueue, setUploadQueue] = useState([]); // files pending metadata
+  const [uploadJobs, setUploadJobs] = useState([]);   // active/completed jobs
+  const [showUploadWizard, setShowUploadWizard] = useState(false);
+
   // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
   const [pptHistory, setPptHistory] = useState({});
 
@@ -345,7 +352,7 @@ export default function Chat() {
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  const streamRef = useRef(null);
+  const streamRefs = useRef({}); // { [sessionId]: abortFn } — supports concurrent SSE across tabs
   const fileInputRef = useRef(null);
   const activeSessionIdRef = useRef(activeSessionId);
 
@@ -384,10 +391,11 @@ export default function Chat() {
   useEffect(() => {
     return () => {
       // activeSessionId captured here is the value from the PREVIOUS render.
-      if (activeSessionId && streamRef.current?.abort) {
-        streamRef.current.abort();
+      const prevSessId = activeSessionId;
+      if (prevSessId && streamRefs.current[prevSessId]) {
+        try { streamRefs.current[prevSessId](); } catch (_) {}
+        delete streamRefs.current[prevSessId];
       }
-      streamRef.current = null;
     };
   }, [activeSessionId]);
 
@@ -641,7 +649,7 @@ export default function Chat() {
       payload = { doc_id, target_audience: target_audience || 'shipyard' };
     }
 
-    return connectStream(
+    const abort = connectStream(
       getApiUrl(endpoint),
       payload,
       (data) => {
@@ -660,6 +668,149 @@ export default function Chat() {
         setIsStreaming(false);
       }
     );
+    return abort;
+  };
+
+  // ── Branch-isolated bid comparison via SSE ──
+  const runBranchComparison = async (intentParams, question, sessId) => {
+    const { comparable_tenders, problem_statement: validatedPs, available } = intentParams;
+
+    if (!available || !comparable_tenders?.length) {
+      setMessages(prev => {
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          ...copy[copy.length - 1],
+          content: 'I could not find at least two bid documents sharing the same tender. Please upload bids with matching **problem_statement** metadata.',
+          streaming: false,
+        };
+        persistMessages(copy, sessId);
+        return copy;
+      });
+      return;
+    }
+
+    const tender = validatedPs
+      ? comparable_tenders.find(t => t.problem_statement === validatedPs)
+      : comparable_tenders[0];
+
+    if (!tender) {
+      setMessages(prev => {
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          ...copy[copy.length - 1],
+          content: 'Could not locate a comparable tender to evaluate.',
+          streaming: false,
+        };
+        persistMessages(copy, sessId);
+        return copy;
+      });
+      return;
+    }
+
+    const bidder_keys = tender.bidder_keys;
+    const problem_statement = tender.problem_statement;
+
+    setMessages(prev => {
+      const copy = [...prev];
+      copy[copy.length - 1] = {
+        ...copy[copy.length - 1],
+        content: `Starting branch-isolated comparison for **${problem_statement}**…\n\nBidders: ${bidder_keys.join(', ')}`,
+        streaming: true,
+      };
+      return copy;
+    });
+
+    try {
+      const resp = await fetch(getApiUrl('/api/agent/compare/bids/branch'), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bidder_keys,
+          problem_statement,
+          standards: ['ICG_TECH_SOTR', 'GENERIC_REQS', 'ISO_9001'],
+          focus: question,
+        }),
+      });
+      if (!resp.ok) throw new Error(`Branch comparison failed: ${resp.status}`);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim();
+            if (!dataStr) continue;
+            try {
+              const evt = JSON.parse(dataStr);
+              if (evt.stage === 'evaluating') {
+                setMessages(prev => {
+                  const copy = [...prev];
+                  copy[copy.length - 1] = {
+                    ...copy[copy.length - 1],
+                    content: `**Branch Comparison in progress…**\n\nEvaluating ${evt.bidder_key} against ${evt.standard_id} (${evt.progress}%)`,
+                    streaming: true,
+                  };
+                  return copy;
+                });
+              }
+              if (evt.stage === 'done') {
+                finalData = evt;
+              }
+            } catch (e) {
+              console.error('Branch SSE parse error', e, dataStr);
+            }
+          }
+        }
+      }
+
+      if (finalData) {
+        setMessages(prev => {
+          const copy = [...prev];
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            content: '',
+            streaming: false,
+            comparison: finalData,
+          };
+          persistMessages(copy, sessId);
+          return copy;
+        });
+      } else {
+        setMessages(prev => {
+          const copy = [...prev];
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            content: 'Comparison completed but no structured data was returned.',
+            streaming: false,
+          };
+          persistMessages(copy, sessId);
+          return copy;
+        });
+      }
+    } catch (err) {
+      setMessages(prev => {
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          ...copy[copy.length - 1],
+          content: `Branch comparison error: ${err.message}`,
+          streaming: false,
+          isError: true,
+        };
+        persistMessages(copy, sessId);
+        return copy;
+      });
+    }
   };
 
   // Derive streaming state from current session's last message to allow multi-tasking
@@ -667,8 +818,13 @@ export default function Chat() {
 
   // ── Timeout fallback: auto-recover sessions stuck in streaming state (90s) ──
   useEffect(() => {
-    if (!isSessionStreaming) return;
+    if (!isSessionStreaming || !activeSessionId) return;
+    const sessId = activeSessionId;
     const timeout = setTimeout(() => {
+      if (streamRefs.current[sessId]) {
+        try { streamRefs.current[sessId](); } catch (_) {}
+        delete streamRefs.current[sessId];
+      }
       setMessages(prev => {
         if (!prev.length || !prev[prev.length - 1].streaming) return prev;
         const copy = [...prev];
@@ -679,7 +835,7 @@ export default function Chat() {
           streaming: false,
           isError: !last.content,
         };
-        persistMessages(copy, activeSessionId);
+        persistMessages(copy, sessId);
         return copy;
       });
       setIsStreaming(false);
@@ -728,46 +884,19 @@ export default function Chat() {
       formData.append('prompt', question);
 
       let accumulatedText = '';
-      streamRef.current = connectStream(
-        getApiUrl('/api/agent/vlm/analyze'),
-        formData, // Note: connectStream needs to handle FormData if it uses fetch, wait... connectStream might JSON stringify if not handled.
-        (data) => {
-          if (activeSessionIdRef.current !== sessId) return;
-          if (data.token) {
-            accumulatedText += data.token;
-            setMessages(prev => {
-              const copy = [...prev];
-              copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText };
-              return copy;
-            });
-          }
-        },
-        async (data) => {
-          if (activeSessionIdRef.current !== sessId) return;
-          setIsStreaming(false);
-          setMessages(prev => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false };
-            persistMessages(copy, sessId);
-            return copy;
-          });
-        },
-        (err) => {
-          if (activeSessionIdRef.current !== sessId) return;
-          setIsStreaming(false);
-          setMessages(prev => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedText || `Error: ${err.message}`, streaming: false, isError: true };
-            return copy;
-          });
-        },
-        true // pass a flag indicating it's FormData? Wait, connectStream is defined where? I need to check it first.
-      );
-      // Wait, let's look at connectStream definition first! I can't just pass FormData if it doesn't support it.
-      // I'll implement fetch stream directly here for VLM to be safe.
+
+      // Abort any existing VLM stream for this session
+      if (streamRefs.current[sessId]) {
+        try { streamRefs.current[sessId](); } catch (_) {}
+        delete streamRefs.current[sessId];
+      }
       
       try {
+        const ctrl = new AbortController();
+        streamRefs.current[sessId] = () => ctrl.abort();
+
         const res = await fetch(getApiUrl('/api/agent/vlm/analyze'), {
+          signal: ctrl.signal,
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
@@ -810,6 +939,7 @@ export default function Chat() {
                         return copy;
                       });
                     }
+                    delete streamRefs.current[sessId];
                     return;
                   }
                   if (data.error) {
@@ -832,6 +962,7 @@ export default function Chat() {
              return copy;
            });
          }
+         delete streamRefs.current[sessId];
       }
       return;
     }
@@ -848,7 +979,13 @@ export default function Chat() {
       chatPayload.doc_ids = selectedDocIds;
     }
 
-    streamRef.current = connectStream(
+    // Abort any existing stream for this session before starting a new one
+    if (streamRefs.current[sessId]) {
+      try { streamRefs.current[sessId](); } catch (_) {}
+      delete streamRefs.current[sessId];
+    }
+
+    streamRefs.current[sessId] = connectStream(
       getApiUrl('/api/agent/chat'),
       chatPayload,
       // onToken — guarded with session ID
@@ -893,7 +1030,7 @@ export default function Chat() {
               return copy;
             });
 
-            streamRef.current = streamDocument(
+            streamRefs.current[sessId] = streamDocument(
               intentType,
               intentParams,
               sessId,
@@ -917,6 +1054,12 @@ export default function Chat() {
             return;
           }
 
+          if (intentType === 'bid_compare') {
+            setIsStreaming(false);
+            await runBranchComparison(intentParams, question, sessId);
+            return;
+          }
+
           // PPT or Quiz — call generation API
           setMessages(prev => {
             const copy = [...prev];
@@ -936,6 +1079,7 @@ export default function Chat() {
             persistMessages(copy, sessId);
             return copy;
           });
+          delete streamRefs.current[sessId];
           return;
         }
 
@@ -954,6 +1098,7 @@ export default function Chat() {
           persistMessages(copy, sessId);
           return copy;
         });
+        delete streamRefs.current[sessId];
       },
       // onError — guarded (always persists to prevent frozen sessions)
       (err) => {
@@ -973,6 +1118,7 @@ export default function Chat() {
             saveSessions(updatedSessions);
             return updatedSessions;
           });
+          delete streamRefs.current[sessId];
           return;
         }
         setIsStreaming(false);
@@ -988,6 +1134,7 @@ export default function Chat() {
           persistMessages(copy, sessId);
           return copy;
         });
+        delete streamRefs.current[sessId];
       }
     );
   };
@@ -1001,12 +1148,13 @@ export default function Chat() {
     if (files.length === 0) return;
 
     const images = [];
+    const docs = [];
     const rejected = [];
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         images.push(file);
       } else if (['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'].includes(file.type)) {
-        rejected.push(file.name);
+        docs.push(file);
       } else {
         rejected.push(file.name);
       }
@@ -1015,20 +1163,111 @@ export default function Chat() {
     if (images.length > 0) {
       setSelectedFiles(prev => [...prev, ...images]);
     }
+    if (docs.length > 0) {
+      setUploadQueue(prev => [...prev, ...docs.map(f => ({ file: f, document_type: '', bidder_key: '', problem_statement: '' }))]);
+      setShowUploadWizard(true);
+    }
     if (rejected.length > 0) {
-      // Show a brief inline toast instead of silently dropping
       setMessages(prev => [...prev, {
         role: 'system',
-        content: `⚠️ Documents (${rejected.join(', ')}) must be uploaded via the Dashboard for RAG indexing. Only images can be attached here for VLM analysis.`,
+        content: `⚠️ Unsupported files (${rejected.join(', ')}) — only PDF, DOCX, DOC and TXT are accepted.`,
         timestamp: Date.now(),
         isToast: true,
       }]);
-      // Auto-remove toast after 5s
       setTimeout(() => {
         setMessages(prevMsgs => prevMsgs.filter(m => !(m.isToast && m.content.includes(rejected[0]))));
       }, 5000);
     }
     e.target.value = '';
+  };
+
+  const updateUploadField = (index, field, value) => {
+    setUploadQueue(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const removeFromQueue = (index) => {
+    setUploadQueue(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) setShowUploadWizard(false);
+      return next;
+    });
+  };
+
+  const startUploads = async () => {
+    if (uploadQueue.length === 0) return;
+    setShowUploadWizard(false);
+
+    const sessId = activeSessionIdRef.current || newSessionId();
+    if (!activeSessionId) switchSession(sessId);
+
+    for (const item of uploadQueue) {
+      const job = {
+        id: 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        filename: item.file.name,
+        stage: 'uploading',
+        progress: 0,
+        metadata: { document_type: item.document_type, bidder_key: item.bidder_key, problem_statement: item.problem_statement },
+        error: null,
+        doc_id: null,
+      };
+      setUploadJobs(prev => [...prev, job]);
+
+      const formData = new FormData();
+      formData.append('file', item.file);
+      formData.append('document_type', item.document_type || '');
+      formData.append('bidder_key', item.bidder_key || '');
+      formData.append('problem_statement', item.problem_statement || '');
+      formData.append('auto_extract', 'true');
+
+      try {
+        const res = await fetch(getApiUrl('/api/agent/upload'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6).trim();
+                if (!dataStr) continue;
+                try {
+                  const data = JSON.parse(dataStr);
+                  setUploadJobs(prev => prev.map(j => {
+                    if (j.id !== job.id) return j;
+                    if (data.stage === 'saved') return { ...j, stage: 'saved', progress: 10 };
+                    if (data.stage === 'metadata_extraction') return { ...j, stage: 'extracting', progress: 20 };
+                    if (data.stage === 'metadata_extracted') return { ...j, stage: 'extracted', progress: 35, metadata: { ...j.metadata, ...data.metadata } };
+                    if (data.stage === 'chunking') return { ...j, stage: 'chunking', progress: 50 };
+                    if (data.stage === 'embedding') return { ...j, stage: 'embedding', progress: 70 };
+                    if (data.stage === 'storing') return { ...j, stage: 'storing', progress: 90 };
+                    if (data.stage === 'done') return { ...j, stage: 'done', progress: 100, doc_id: data.doc_id };
+                    if (data.stage === 'error') return { ...j, stage: 'error', error: data.error };
+                    return j;
+                  }));
+                } catch (e) {
+                  console.error('Upload SSE parse error', e, dataStr);
+                }
+              }
+            }
+          }
+          if (done) break;
+        }
+      } catch (err) {
+        setUploadJobs(prev => prev.map(j => j.id === job.id ? { ...j, stage: 'error', error: err.message } : j));
+      }
+    }
+    setUploadQueue([]);
   };
 
   const handleCompare = async () => {
@@ -1217,7 +1456,10 @@ export default function Chat() {
     return () => document.removeEventListener('click', handler);
   }, [messages]);
 
-  useEffect(() => () => { streamRef.current?.abort?.(); }, []);
+  useEffect(() => () => {
+    Object.values(streamRefs.current).forEach(abort => { try { abort(); } catch (_) {} });
+    streamRefs.current = {};
+  }, []);
 
   return (
     <div style={styles.layout}>
@@ -1271,6 +1513,9 @@ export default function Chat() {
               >
                 <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.4 }} />
                 <span style={styles.sessionTitle}>{sess.title}</span>
+                {sess.messages?.[sess.messages.length - 1]?.streaming && (
+                  <Loader2 size={12} style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--primary)', animation: 'spin 1s linear infinite' }} />
+                )}
                 {isSuperAdmin && (
                   <button onClick={(e) => deleteSession(sess.id, e)} style={styles.sessionDeleteBtn} title="Delete">
                     <X size={12} />
@@ -1392,6 +1637,11 @@ export default function Chat() {
                         />
                       )}
 
+                      {/* Branch-isolated Comparison Card */}
+                      {msg.comparison && !msg.streaming && (
+                        <ComparisonCard data={msg.comparison} />
+                      )}
+
                       {/* Perplexity-style citation pills */}
                       {msg.sources?.length > 0 && !msg.streaming && (
                         <div style={styles.sourcePills}>
@@ -1443,6 +1693,82 @@ export default function Chat() {
         {/* ── Input Bar ── */}
         <div style={styles.inputBarWrap}>
 
+          {/* Active upload jobs strip */}
+          {uploadJobs.length > 0 && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {uploadJobs.map(job => (
+                <div key={job.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                  {job.stage === 'done' ? <CheckCircle size={14} color="#22c55e" /> : job.stage === 'error' ? <XCircle size={14} color="#ef4444" /> : <Loader2 size={14} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />}
+                  <span style={{ color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.filename}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'capitalize' }}>{job.stage.replace(/_/g, ' ')}</span>
+                  {job.stage !== 'done' && job.stage !== 'error' && (
+                    <div style={{ width: '60px', height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${job.progress}%`, height: '100%', background: 'var(--primary)', transition: 'width 0.3s' }} />
+                    </div>
+                  )}
+                  {job.stage === 'done' && (
+                    <span style={{ fontSize: '11px', color: '#22c55e' }}>Indexed</span>
+                  )}
+                  {job.stage === 'error' && (
+                    <span style={{ fontSize: '11px', color: '#ef4444' }}>{job.error}</span>
+                  )}
+                  <button onClick={() => setUploadJobs(prev => prev.filter(j => j.id !== job.id))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0' }}><X size={12} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Upload wizard */}
+          {showUploadWizard && uploadQueue.length > 0 && (
+            <div style={{ padding: '12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Upload Documents</span>
+                <button onClick={() => { setShowUploadWizard(false); setUploadQueue([]); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
+              </div>
+              {uploadQueue.map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', marginBottom: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FolderOpen size={14} color="var(--primary)" />
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</span>
+                    <button onClick={() => removeFromQueue(idx)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <select
+                      value={item.document_type}
+                      onChange={e => updateUploadField(idx, 'document_type', e.target.value)}
+                      style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
+                    >
+                      <option value="">Auto-detect type</option>
+                      <option value="bid">Bid / Proposal</option>
+                      <option value="standard">Standard / SOTR</option>
+                      <option value="subject">Subject Document</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Bidder / Company"
+                      value={item.bidder_key}
+                      onChange={e => updateUploadField(idx, 'bidder_key', e.target.value)}
+                      style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Tender / Problem reference"
+                    value={item.problem_statement}
+                    onChange={e => updateUploadField(idx, 'problem_statement', e.target.value)}
+                    style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
+                  />
+                </div>
+              ))}
+              <button
+                onClick={startUploads}
+                style={{ width: '100%', padding: '8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <Upload size={14} />
+                Upload {uploadQueue.length} document{uploadQueue.length > 1 ? 's' : ''}
+              </button>
+            </div>
+          )}
 
           {selectedFiles.length > 0 && (
             <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>

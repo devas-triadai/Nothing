@@ -82,6 +82,10 @@ async def lifespan(app: FastAPI):
     from api.utils.auto_ingest import start_auto_ingest_background
     start_auto_ingest_background()
 
+    # ── 7. Start SessionManager garbage collector ──
+    from api.session_manager import get_session_manager
+    get_session_manager().start_gc()
+    logger.info("SessionManager GC started.")
 
     yield
 
@@ -139,7 +143,7 @@ app.add_middleware(
 
 
 # ── Register Routers ──
-from api.routers import upload, chat, generate, compliance, vlm, drawing, compare
+from api.routers import upload, chat, generate, compliance, vlm, drawing, compare, sessions
 
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
@@ -148,6 +152,7 @@ app.include_router(compliance.router, prefix="/api/agent", tags=["Compliance"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
 app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
 app.include_router(compare.router,    prefix="/api/agent", tags=["Compare"])
+app.include_router(sessions.router,   prefix="/api/agent", tags=["Sessions"])
 
 
 # ── Health & Root ──

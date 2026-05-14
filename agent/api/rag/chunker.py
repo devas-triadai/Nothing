@@ -148,19 +148,25 @@ def chunk_text(
     category: Optional[str] = None,
     description: Optional[str] = None,
     source: Optional[str] = None,
+    document_type: Optional[str] = None,
+    bidder_key: Optional[str] = None,
+    problem_statement: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk a block of text into segments of ~512 tokens with 64-token overlap.
 
     Args:
-        text:        Raw text content.
-        doc_id:      Unique document identifier.
-        filename:    Original filename.
-        page_number: Source page number (1-based).
+        text:              Raw text content.
+        doc_id:            Unique document identifier.
+        filename:          Original filename.
+        page_number:       Source page number (1-based).
+        document_type:     'subject' | 'standard' | 'bid' (for hierarchical RAG).
+        bidder_key:        Bidder identifier (only meaningful for 'bid' docs).
+        problem_statement: Tender/problem reference shared across competing bids.
 
     Returns:
         List of chunk dicts:
-        [{"text": str, "metadata": {"doc_id", "filename", "page", "chunk_index"}}]
+        [{"text": str, "metadata": {"doc_id", "filename", "page", "chunk_index", ...}}]
     """
     if not text or not text.strip():
         return []
@@ -204,17 +210,25 @@ def chunk_text(
             return
         chunk_text_joined = "\n\n".join(current_parts).strip()
         if chunk_text_joined:
+            metadata: Dict[str, Any] = {
+                "doc_id": doc_id,
+                "filename": filename,
+                "page": page_number,
+                "chunk_index": chunk_index,
+                "category": category,
+                "description": description,
+                "source": source or "admin_upload",
+            }
+            # Hierarchical metadata (Phase C/D) — only set when explicit
+            if document_type:
+                metadata["document_type"] = document_type
+            if bidder_key:
+                metadata["bidder_key"] = bidder_key
+            if problem_statement:
+                metadata["problem_statement"] = problem_statement
             chunks.append({
                 "text": chunk_text_joined,
-                "metadata": {
-                    "doc_id": doc_id,
-                    "filename": filename,
-                    "page": page_number,
-                    "chunk_index": chunk_index,
-                    "category": category,
-                    "description": description,
-                    "source": source or "admin_upload",
-                },
+                "metadata": metadata,
             })
             chunk_index += 1
 
@@ -264,6 +278,9 @@ def chunk_pages(
     category: Optional[str] = None,
     description: Optional[str] = None,
     source: Optional[str] = None,
+    document_type: Optional[str] = None,
+    bidder_key: Optional[str] = None,
+    problem_statement: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk multiple pages at once with contextual headers.
@@ -304,6 +321,9 @@ def chunk_pages(
             category=category,
             description=description,
             source=source,
+            document_type=document_type,
+            bidder_key=bidder_key,
+            problem_statement=problem_statement,
         )
 
         # Prepend contextual header and store section in metadata
