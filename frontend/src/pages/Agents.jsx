@@ -507,7 +507,7 @@ const s = {
   modal: {
     background: 'var(--card-bg, var(--surface))', border: '1px solid var(--border)',
     borderRadius: '16px', width: '90%', maxWidth: '520px',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    boxShadow: 'var(--shadow-lg)',
   },
   modalHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',

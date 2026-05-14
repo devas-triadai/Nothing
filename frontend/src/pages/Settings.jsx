@@ -4,7 +4,7 @@ import { getUser } from '../utils/auth';
 import { Settings as SettingsIcon, User, Bell, Shield, Key, Save, Eye, EyeOff } from 'lucide-react';
 
 const SectionCard = ({ title, icon: Icon, children }) => (
-  <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+  <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '20px', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
     <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
       <Icon size={16} color="#1e6bff" />
       <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{title}</h2>
@@ -194,7 +194,7 @@ export default function Settings() {
               onClick={() => setNotifications(n => ({ ...n, [key]: !n[key] }))}
               style={{ width: 44, height: 24, borderRadius: '12px', border: 'none', cursor: 'pointer', background: notifications[key] ? '#1e6bff' : 'var(--border)', position: 'relative', transition: 'background 0.2s' }}
             >
-              <span style={{ position: 'absolute', top: '3px', width: 18, height: 18, borderRadius: '50%', background: 'white', left: notifications[key] ? '23px' : '3px', transition: 'left 0.2s' }} />
+              <span style={{ position: 'absolute', top: '3px', width: 18, height: 18, borderRadius: '50%', background: 'white', left: notifications[key] ? '23px' : '3px', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
             </button>
           </div>
         ))}

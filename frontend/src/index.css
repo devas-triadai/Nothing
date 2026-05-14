@@ -48,6 +48,7 @@
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.12);
 
   /* Login */
   --login-bg: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 50%, #f0f5ff 100%);
@@ -86,15 +87,16 @@
   --sidebar-text: #7a90b8;
   --sidebar-hover: rgba(36, 99, 255, 0.08);
 
-  --header-bg: rgba(10, 15, 30, 0.5);
+  --header-bg: #0d1220;
   --header-border: rgba(255, 255, 255, 0.05);
 
-  --card-bg: rgba(255, 255, 255, 0.02);
-  --card-border: rgba(255, 255, 255, 0.05);
-  --card-hover: rgba(255, 255, 255, 0.04);
+  --card-bg: #111a30;
+  --card-border: #1e2d52;
+  --card-hover: #162042;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
 
   --login-bg: linear-gradient(135deg, #0b1020 0%, #111a2e 100%);
   --login-card-bg: rgba(10, 15, 30, 0.85);

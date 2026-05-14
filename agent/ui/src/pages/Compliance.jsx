@@ -795,7 +795,7 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
     padding: '12px 16px',
-    background: 'rgba(0,0,0,0.15)',
+    background: 'var(--bg-surface)',
     borderBottom: '1px solid var(--border)',
   },
   verdictBadge: {

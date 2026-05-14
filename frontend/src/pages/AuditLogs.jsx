@@ -115,7 +115,7 @@ const AuditLogs = () => {
         </div>
       </div>
 
-      <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px' }}>
             <Spinner size={32} />

@@ -31,7 +31,7 @@ function ProtectedRoute({ children }) {
 
   if (isAuthenticated === 'error') {
     return (
-      <div style={{ padding: 40, color: 'white' }}>
+      <div style={{ padding: 40, color: 'var(--text-primary)', background: 'var(--bg-page)', minHeight: '100vh' }}>
         <h1>Authentication Error</h1>
         <p>No valid token found. Cannot load Agent UI.</p>
         <p>Current URL: {window.location.href}</p>

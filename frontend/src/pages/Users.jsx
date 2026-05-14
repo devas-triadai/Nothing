@@ -340,7 +340,7 @@ const modalOverlay = {
 const modalBox = {
   background: 'var(--surface)', border: '1px solid var(--border)',
   borderRadius: '16px', padding: '28px', width: '90%', maxWidth: '460px',
-  boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+  boxShadow: 'var(--shadow-lg)',
 }
 const inputStyle = {
   padding: '10px 14px', background: 'var(--bg-secondary)',

@@ -14,7 +14,7 @@ const StatCard = ({ icon: Icon, label, value, change, color }) => (
     gap: '8px',
     flex: '1 1 180px',
     minWidth: '180px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    boxShadow: 'var(--shadow-sm)',
   }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
       <div style={{ width: 36, height: 36, borderRadius: '8px', background: color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -33,7 +33,7 @@ const StatCard = ({ icon: Icon, label, value, change, color }) => (
 
 /* ── Table wrapper for consistent styling ── */
 const TableCard = ({ title, subtitle, children }) => (
-  <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+  <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
     <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{title}</h2>
       {subtitle && <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{subtitle}</span>}

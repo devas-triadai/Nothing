@@ -129,7 +129,7 @@ export default function Genealogy() {
       .attr('fill', d => CAT_COLORS[d.category] || CAT_COLORS['General'])
       .attr('stroke', 'var(--bg-card)')
       .attr('stroke-width', 3)
-      .attr('box-shadow', '0 4px 10px rgba(0,0,0,0.2)')
+      .style('filter', 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))')
 
     // Node labels
     node.append('text')
@@ -231,11 +231,11 @@ export default function Genealogy() {
           ref={containerRef}
           style={{ 
             flex: 1, background: 'var(--card-bg)', borderRadius: 16, border: '1px solid var(--border)', 
-            position: 'relative', overflow: 'hidden', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.02)'
+            position: 'relative', overflow: 'hidden', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.04)'
           }}
         >
           {loading && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', zIndex: 10 }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.05)', zIndex: 10 }}>
               <span style={{ color: 'var(--text-secondary)' }}>Loading genealogy map...</span>
             </div>
           )}
@@ -248,7 +248,7 @@ export default function Genealogy() {
           </div>
 
           {/* Legend */}
-          <div style={{ position: 'absolute', top: 20, left: 20, background: 'var(--card-bg)', padding: 12, borderRadius: 12, border: '1px solid var(--border)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', zIndex: 10 }}>
+          <div style={{ position: 'absolute', top: 20, left: 20, background: 'var(--card-bg)', padding: 12, borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', zIndex: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Categories</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {Object.entries(CAT_COLORS).slice(0, 5).map(([cat, color]) => (
@@ -324,5 +324,5 @@ function DetailRow({ label, value, capitalize }) {
 const zoomBtnStyle = {
   width: 36, height: 36, borderRadius: 10, background: 'var(--card-bg)', border: '1px solid var(--border)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)',
-  cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', transition: 'all 0.2s'
+  cursor: 'pointer', boxShadow: 'var(--shadow-sm)', transition: 'all 0.2s'
 }

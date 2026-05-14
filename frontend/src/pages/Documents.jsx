@@ -457,7 +457,7 @@ export default function Documents() {
           <div style={{
             background: 'var(--card-bg)', borderRadius: 16, padding: 28,
             width: 500, maxHeight: '70vh', overflowY: 'auto',
-            border: '1px solid var(--border)', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ margin: 0, fontSize: 18, color: 'var(--text-heading)' }}>

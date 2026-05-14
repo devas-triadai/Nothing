@@ -50,7 +50,7 @@ export default function Login() {
         border: '1px solid var(--login-card-border)',
         borderRadius: 18,
         padding: '36px 32px',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.45)',
+        boxShadow: 'var(--shadow-lg)',
         boxSizing: 'border-box'
       }}>
         {/* Header */}
