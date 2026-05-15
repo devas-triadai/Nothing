@@ -91,7 +91,7 @@ When answering, ground any quoted numbers, labels, or dimensions in the OCR text
 
     async def event_stream():
         try:
-            for tok in llm_engine.stream_generate(messages, max_tokens=2048, temperature=0.3):
+            for tok in llm_engine.stream_generate(messages, max_tokens=1200, temperature=0.3):
                 yield f"data: {json.dumps({'token': tok})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:

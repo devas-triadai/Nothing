@@ -265,7 +265,7 @@ Place image slides near relevant content sections."""
             data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
             prepass_raw = await asyncio.to_thread(
                 llm_engine.generate, data_ext_messages,
-                max_tokens=512, temperature=0.1, raw=True,
+                max_tokens=800, temperature=0.3, raw=True,
             )
             extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
         except Exception as e:
@@ -324,7 +324,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         try:
             raw = await asyncio.to_thread(
                 llm_engine.generate, messages,
-                max_tokens=2500, temperature=temp, raw=True,
+                max_tokens=1200, temperature=temp, raw=True,
             )
             cleaned = _clean_json(raw)
             # _clean_json now returns the outermost JSON array or object via regex
@@ -341,7 +341,17 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         logger.warning("PPT generation failed after all LLM retries. Using fallback slide builder.")
         slides_data = _build_fallback_slides(body.topic, context_text, body.num_slides)
 
-    # ── 5. Validate layout fields and enforce exact slide count ──
+    # ── 5. Flatten nested lists, validate layout fields and enforce exact slide count ──
+    def _flatten_slides(data):
+        result = []
+        for item in data:
+            if isinstance(item, list):
+                result.extend(_flatten_slides(item))
+            elif isinstance(item, dict):
+                result.append(item)
+        return result
+    slides_data = _flatten_slides(slides_data)
+
     valid_layouts = {"title", "section_header", "bullets", "two_column", "table", "diagram", "chart", "image", "sources", "thank_you"}
     for sd in slides_data:
         layout = sd.get("layout", "bullets")
@@ -453,10 +463,10 @@ async def generate_summary(
     if not chunks:
         raise HTTPException(status_code=404, detail="Documents not found in knowledge base.")
 
-    # Combine all chunk text (truncate if too long for context)
-    full_text = "\n\n".join(c["text"] for c in chunks)
-    if len(full_text) > 30000:
-        full_text = full_text[:30000] + "\n[Content truncated for summary generation]"
+    # Combine all chunk text (truncate to ~3000 chars ≈ 750 tokens for 3328 ctx model)
+    full_text = "\n\n".join(c["text"] for c in chunks[:10])
+    if len(full_text) > 3000:
+        full_text = full_text[:3000] + "\n[Content truncated for summary generation]"
 
     filename_label = ", ".join(filenames) if len(filenames) <= 3 else f"{len(filenames)} Documents"
 
@@ -490,7 +500,7 @@ Cite specific sections where relevant using [Page X] notation."""
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:
@@ -569,7 +579,10 @@ async def generate_quiz(
     if not chunks:
         raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
 
-    content = "\n\n".join(c["text"] for c in chunks[:20])
+    # Truncate to ~5000 chars to fit 3328-token context window
+    content = "\n\n".join(c["text"] for c in chunks[:8])
+    if len(content) > 5000:
+        content = content[:5000] + "\n[Content truncated for quiz generation]"
     filename = chunks[0]["metadata"].get("filename", "document")
 
     prompt = f"""Generate a knowledge assessment quiz from this document.
@@ -612,8 +625,7 @@ Return ONLY valid JSON in this exact format:
 
     raw = await asyncio.to_thread(
         llm_engine.generate, messages,
-        max_tokens=4096, temperature=0.5,
-        response_format={"type": "json_object"}, raw=True,
+        max_tokens=2048, temperature=0.3, raw=True,
     )
 
     quiz_data: Optional[dict] = None
@@ -768,7 +780,7 @@ Use formal, objective military specification language (e.g., 'The system shall..
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=3500):
+                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:
@@ -866,7 +878,7 @@ Keep the tone professional, objective, and analytical."""
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=3000):
+                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:

@@ -332,6 +332,7 @@ export default function Chat() {
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
   const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
   const [selectedFiles, setSelectedFiles] = useState([]); // VLM image attachments
+  const [attachedDocs, setAttachedDocs] = useState([]);   // Document attachments for chat
   const [isPollingDrawing, setIsPollingDrawing] = useState(false);
   
   // Phase 5: Multi-document context selection
@@ -843,9 +844,48 @@ export default function Chat() {
     return () => clearTimeout(timeout);
   }, [isSessionStreaming, activeSessionId]);
 
+  const uploadDocAndGetId = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('auto_extract', 'true');
+    const res = await fetch(getApiUrl('/api/agent/upload'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let docId = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim();
+            if (!dataStr) continue;
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.stage === 'done') docId = data.doc_id;
+              if (data.stage === 'error') throw new Error(data.error || 'Upload failed');
+            } catch (e) {
+              if (e.message !== 'Upload failed') console.error('Upload SSE parse error', e);
+            }
+          }
+        }
+      }
+      if (done) break;
+    }
+    return docId;
+  };
+
   const handleSend = async () => {
     const question = input.trim();
-    if ((!question && selectedFiles.length === 0) || isSessionStreaming) return;
+    if ((!question && selectedFiles.length === 0 && attachedDocs.length === 0) || isSessionStreaming) return;
 
     const userMsg = { role: 'user', content: question, timestamp: Date.now(), image: selectedFiles.length > 0 ? URL.createObjectURL(selectedFiles[0]) : null };
     const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
@@ -967,6 +1007,23 @@ export default function Chat() {
       return;
     }
 
+    // Upload any attached documents and collect doc_ids for context
+    let uploadedDocIds = [];
+    if (attachedDocs.length > 0) {
+      setMessages(prev => [...prev, { role: 'system', content: `Uploading ${attachedDocs.length} document(s)...`, timestamp: Date.now(), isToast: true }]);
+      for (const file of attachedDocs) {
+        try {
+          const docId = await uploadDocAndGetId(file);
+          if (docId) uploadedDocIds.push(docId);
+        } catch (err) {
+          setMessages(prev => [...prev, { role: 'system', content: `⚠️ Failed to upload ${file.name}: ${err.message}`, timestamp: Date.now(), isToast: true }]);
+        }
+      }
+      setAttachedDocs([]);
+      // Remove the uploading toast
+      setMessages(prev => prev.filter(m => !(m.isToast && m.content.includes('Uploading'))));
+    }
+
     const history = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .slice(-10)
@@ -975,8 +1032,9 @@ export default function Chat() {
     let accumulatedText = '';
 
     const chatPayload = { question, history, session_id: sessId };
-    if (selectedDocIds.length > 0) {
-      chatPayload.doc_ids = selectedDocIds;
+    const allDocIds = [...new Set([...selectedDocIds, ...uploadedDocIds])];
+    if (allDocIds.length > 0) {
+      chatPayload.doc_ids = allDocIds;
     }
 
     // Abort any existing stream for this session before starting a new one
@@ -1164,8 +1222,7 @@ export default function Chat() {
       setSelectedFiles(prev => [...prev, ...images]);
     }
     if (docs.length > 0) {
-      setUploadQueue(prev => [...prev, ...docs.map(f => ({ file: f, document_type: '', bidder_key: '', problem_statement: '' }))]);
-      setShowUploadWizard(true);
+      setAttachedDocs(prev => [...prev, ...docs]);
     }
     if (rejected.length > 0) {
       setMessages(prev => [...prev, {
@@ -1791,6 +1848,19 @@ export default function Chat() {
               )}
             </div>
           )}
+
+          {attachedDocs.length > 0 && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+              {attachedDocs.map((file, idx) => (
+                <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px' }}>
+                  <FileText size={14} color="var(--primary)" />
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{file.name}</span>
+                  <button onClick={() => setAttachedDocs(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
+                </div>
+              ))}
+              <button onClick={() => setAttachedDocs([])} style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear all</button>
+            </div>
+          )}
           <div style={styles.inputBar}>
             <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
               <Paperclip size={17} />
@@ -1808,8 +1878,8 @@ export default function Chat() {
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isSessionStreaming}
-              style={{ ...styles.sendBtn, opacity: (!input.trim() || isSessionStreaming) ? 0.4 : 1 }}
+              disabled={(!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming}
+              style={{ ...styles.sendBtn, opacity: ((!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming) ? 0.4 : 1 }}
               id="send-btn"
             >
               {isSessionStreaming

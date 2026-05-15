@@ -81,7 +81,7 @@ Return ONLY valid JSON and nothing else.
             ]}
         ]
 
-        raw_output = llm_engine.generate(messages, max_tokens=2048, temperature=0.1)
+        raw_output = llm_engine.generate(messages, max_tokens=800, temperature=0.1)
         cleaned = _clean_json(raw_output)
 
         try:
@@ -148,7 +148,7 @@ Return ONLY JSON array.
             {"role": "user", "content": prompt}
         ]
         
-        raw_output = llm_engine.generate(messages, max_tokens=2048, temperature=0.1)
+        raw_output = llm_engine.generate(messages, max_tokens=800, temperature=0.1)
         cleaned = _clean_json(raw_output)
         
         try:

@@ -128,7 +128,7 @@ Return ONLY a valid JSON array of comparisons:
         {"role": "user", "content": prompt},
     ]
 
-    raw_resp = llm_engine.generate(messages, max_tokens=4096, temperature=0.2)
+    raw_resp = llm_engine.generate(messages, max_tokens=1200, temperature=0.2)
 
     try:
         cleaned = _clean_json(raw_resp)

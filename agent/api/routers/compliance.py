@@ -87,14 +87,19 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    subject_text = "\n\n".join(f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}" for c in subject_chunks[:30])
+    # Truncate to fit 3328-token context window (~4000 chars subject + ~3000 chars standard)
+    subject_text = "\n\n".join(f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}" for c in subject_chunks[:15])
+    if len(subject_text) > 4000:
+        subject_text = subject_text[:4000] + "\n[Content truncated]"
 
     # Calculate average OCR confidence
     conf_scores = [c["metadata"].get("ocr_confidence", 1.0) for c in subject_chunks if "metadata" in c]
     avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 1.0
 
     # Extract key clauses from standards
-    standards_text = "\n\n".join(c["text"] for c in standard_chunks[:20])
+    standards_text = "\n\n".join(c["text"] for c in standard_chunks[:10])
+    if len(standards_text) > 3000:
+        standards_text = standards_text[:3000] + "\n[Content truncated]"
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
@@ -136,7 +141,7 @@ Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
     ]
 
     try:
-        findings_raw = llm_engine.generate(messages, max_tokens=2048, temperature=0.3)
+        findings_raw = llm_engine.generate(messages, max_tokens=800, temperature=0.3)
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
@@ -186,7 +191,7 @@ If there are no major missing requirements, return an empty array []."""
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=2048, temperature=0.3)
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=800, temperature=0.3)
         cleaned = _clean_json(missing_raw)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1

@@ -551,18 +551,21 @@ async def query_pipeline(
             yield {"done": True, "sources": []}
             return
 
-    # 4. Rerank → top 8
+    # 4. Rerank → top 6 (reduce prompt size for 3328 ctx model)
     logger.info("Stage: reranking %d candidates …", len(candidates))
     top_chunks = await _loop.run_in_executor(
-        None, reranker.rerank, question, candidates, 8
+        None, reranker.rerank, question, candidates, 6
     )
     logger.info("Stage: reranked to %d chunks. Fetching house rules …", len(top_chunks))
 
-    # 5. Build prompt
+    # 5. Build prompt (truncate to fit 3328-token context)
     house_rules = await _fetch_house_rules(token)
     logger.info("Stage: house rules fetched. Building prompt …")
     base_prompt = house_rules if house_rules.strip() else _SYSTEM_PROMPT_FALLBACK
-    context_str = _format_context(top_chunks)
+    # Cap house rules at ~800 chars to leave room for context + history
+    if len(base_prompt) > 800:
+        base_prompt = base_prompt[:800] + "\n[Rules truncated]"
+    context_str = _format_context(top_chunks, max_chars_per_chunk=250)
 
     # Check for superseded documents via Admin Backend
     # Skip builtin docs — they are auto-ingested at startup and never exist in
@@ -602,8 +605,8 @@ async def query_pipeline(
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
 
-    # Add conversation history (last 10 messages)
-    for msg in session_history[-10:]:
+    # Add conversation history (last 6 messages to save tokens)
+    for msg in session_history[-6:]:
         messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
     messages.append({"role": "user", "content": question})
