@@ -63,6 +63,9 @@
   --sidebar-bg:    #002244;
   --sidebar-border: #001f3f;
   --sidebar-text:  #ffffff;
+  --sidebar-text-dim:  rgba(255, 255, 255, 0.7);
+  --sidebar-text-muted: rgba(255, 255, 255, 0.4);
+  --sidebar-border-inner: rgba(255, 255, 255, 0.1);
 
   /* ── Chat Bubbles ── */
   --user-bubble-bg:    #002244;
@@ -119,6 +122,9 @@
   --sidebar-bg:    #040a12;
   --sidebar-border: #1e293b;
   --sidebar-text:  #ffffff;
+  --sidebar-text-dim:  rgba(255, 255, 255, 0.65);
+  --sidebar-text-muted: rgba(255, 255, 255, 0.35);
+  --sidebar-border-inner: rgba(255, 255, 255, 0.08);
 
   --user-bubble-bg:    #002244;
   --user-bubble-color: #f8fafc;
@@ -391,4 +397,19 @@ button:hover[style*="border-radius: 20px"] {
 /* ── Theme transition for key elements ── */
 body, aside, main, header, .md-content, input, textarea, select {
   transition: background var(--transition-slow), color var(--transition-slow), border-color var(--transition-slow);
+}
+
+/* ── Workstream A: File chip hover inside user bubbles ── */
+.file-chip:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+}
+
+/* ── Workstream A: Upload-in-progress pulse on send button ── */
+@keyframes uploadPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+button[title="Uploading files…"] {
+  animation: uploadPulse 1.5s infinite;
 }

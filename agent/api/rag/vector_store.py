@@ -171,6 +171,7 @@ class VectorStore:
         """
         Insert or update chunks into Qdrant + BM25 index.
         Returns number of points upserted.
+        Workstream H: BM25 now rebuilds once after all chunks, not per-chunk.
         """
         if not chunks or not embeddings:
             return 0
@@ -184,13 +185,23 @@ class VectorStore:
                     "metadata": chunk["metadata"],
                 }
                 points.append(PointStruct(id=point_id, vector=emb, payload=payload))
-                self._add_to_bm25(point_id, chunk["text"], chunk["metadata"])
+                # Workstream H: Add to corpus arrays WITHOUT rebuilding BM25 per chunk
+                tokens = self._tokenise(chunk["text"])
+                self._bm25_corpus.append(tokens)
+                self._bm25_ids.append(point_id)
+                self._chunk_texts[point_id] = chunk["text"]
+                self._chunk_meta[point_id] = chunk["metadata"]
 
             # Upsert in batches of 100
             for i in range(0, len(points), 100):
                 batch = points[i:i + 100]
                 self.client.upsert(collection_name=_COLLECTION, points=batch)
 
+            # Workstream H: Single BM25 rebuild after ALL chunks are inserted
+            if self._bm25_corpus:
+                self._bm25_index = BM25Okapi(self._bm25_corpus)
+                logger.info("BM25 index rebuilt: %d total docs (added %d).", len(self._bm25_corpus), len(points))
+            
             logger.info("Upserted %d chunks into '%s'.", len(points), _COLLECTION)
             return len(points)
 

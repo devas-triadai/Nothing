@@ -19,6 +19,7 @@ import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
 import ComparisonCard from '../components/ComparisonCard';
+import ComplianceCard from '../components/ComplianceCard'; // Workstream E
 
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
@@ -334,6 +335,11 @@ export default function Chat() {
   const [selectedFiles, setSelectedFiles] = useState([]); // VLM image attachments
   const [attachedDocs, setAttachedDocs] = useState([]);   // Document attachments for chat
   const [isPollingDrawing, setIsPollingDrawing] = useState(false);
+
+  // ── Workstream A: Persistent Draft State ──
+  // Unified draft model: text + all file attachments + upload-in-progress flag.
+  // This prevents race conditions when Enter is pressed mid-upload.
+  const [draft, setDraft] = useState({ text: '', files: [], isUploading: false });
   
   // Phase 5: Multi-document context selection
   const [documents, setDocuments] = useState([]);
@@ -358,6 +364,15 @@ export default function Chat() {
   const activeSessionIdRef = useRef(activeSessionId);
 
   const switchSession = (id) => {
+    // Workstream J: Save current messages to departing session before switching
+    const departingId = activeSessionIdRef.current;
+    if (departingId && departingId !== id) {
+      setSessions(prev => {
+        const u = prev.map(s => s.id === departingId ? { ...s, messages: messages, updatedAt: Date.now() } : s);
+        saveSessions(u);
+        return u;
+      });
+    }
     setActiveSessionId(id);
     activeSessionIdRef.current = id;
   };
@@ -416,8 +431,13 @@ export default function Chat() {
   }, [activeSessionId]);
 
   const persistMessages = useCallback((msgs, sessId) => {
-    const sid = sessId || activeSessionId;
-    if (!sid) return;
+    // Workstream J: sessId is REQUIRED — never fall back to activeSessionId
+    // to prevent cross-session writes during concurrent streams.
+    const sid = sessId;
+    if (!sid) {
+      console.warn('[AGRA] persistMessages called without sessId — skipping');
+      return;
+    }
     setSessions(prev => {
       const exists = prev.find(s => s.id === sid);
       let updated;
@@ -439,7 +459,7 @@ export default function Chat() {
       saveSessions(updated);
       return updated;
     });
-  }, [activeSessionId]);
+  }, []);
 
   const createNewChat = () => {
     const id = newSessionId();
@@ -887,12 +907,34 @@ export default function Chat() {
     const question = input.trim();
     if ((!question && selectedFiles.length === 0 && attachedDocs.length === 0) || isSessionStreaming) return;
 
-    const userMsg = { role: 'user', content: question, timestamp: Date.now(), image: selectedFiles.length > 0 ? URL.createObjectURL(selectedFiles[0]) : null };
+    // ── Workstream A: Atomic snapshot of draft state ──
+    // Snapshot current files before clearing so nothing is lost on re-render.
+    const snapshotImages = [...selectedFiles];
+    const snapshotDocs = [...attachedDocs];
+    const snapshotText = question;
+
+    // Build file chip metadata for persistent display in user bubble
+    const fileChips = [
+      ...snapshotImages.map(f => ({ name: f.name, type: 'image', preview: URL.createObjectURL(f) })),
+      ...snapshotDocs.map(f => ({ name: f.name, type: 'document', preview: null })),
+    ];
+
+    const userMsg = {
+      role: 'user',
+      content: snapshotText,
+      timestamp: Date.now(),
+      image: snapshotImages.length > 0 ? URL.createObjectURL(snapshotImages[0]) : null,
+      fileChips, // Workstream A: persisted file metadata for bubble rendering
+    };
     const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true };
     const updatedMsgs = [...messages, userMsg, aiMsg];
 
+    // Atomically clear all draft state
     setMessages(updatedMsgs);
     setInput('');
+    setSelectedFiles([]);
+    setAttachedDocs([]);
+    setDraft({ text: '', files: [], isUploading: false });
     setIsStreaming(true);
 
     // Ensure session exists
@@ -914,10 +956,9 @@ export default function Chat() {
       });
     }
 
-    if (selectedFiles.length > 0) {
-      // VLM Flow — use the first image file
-      const imgToUpload = selectedFiles[0];
-      setSelectedFiles([]); // Clear after grabbing
+    if (snapshotImages.length > 0) {
+      // VLM Flow — use the first image file from the atomic snapshot
+      const imgToUpload = snapshotImages[0];
 
       const formData = new FormData();
       formData.append('image', imgToUpload);
@@ -1008,10 +1049,12 @@ export default function Chat() {
     }
 
     // Upload any attached documents and collect doc_ids for context
+    // Workstream A: Use snapshotDocs from atomic draft snapshot instead of live state
     let uploadedDocIds = [];
-    if (attachedDocs.length > 0) {
-      setMessages(prev => [...prev, { role: 'system', content: `Uploading ${attachedDocs.length} document(s)...`, timestamp: Date.now(), isToast: true }]);
-      for (const file of attachedDocs) {
+    if (snapshotDocs.length > 0) {
+      setDraft(prev => ({ ...prev, isUploading: true }));
+      setMessages(prev => [...prev, { role: 'system', content: `Uploading ${snapshotDocs.length} document(s)...`, timestamp: Date.now(), isToast: true }]);
+      for (const file of snapshotDocs) {
         try {
           const docId = await uploadDocAndGetId(file);
           if (docId) uploadedDocIds.push(docId);
@@ -1019,15 +1062,27 @@ export default function Chat() {
           setMessages(prev => [...prev, { role: 'system', content: `⚠️ Failed to upload ${file.name}: ${err.message}`, timestamp: Date.now(), isToast: true }]);
         }
       }
-      setAttachedDocs([]);
+      setDraft(prev => ({ ...prev, isUploading: false }));
       // Remove the uploading toast
       setMessages(prev => prev.filter(m => !(m.isToast && m.content.includes('Uploading'))));
     }
 
+    // Workstream I: Clean history — exclude system/toast/error/streaming, truncate to 500 chars,
+    // send only the 10 most recent completed user+assistant turns for reliable context.
     const history = messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .filter(m =>
+        (m.role === 'user' || m.role === 'assistant') &&
+        !m.isToast &&
+        !m.isError &&
+        !m.streaming &&
+        m.content &&
+        m.content.trim().length > 0
+      )
       .slice(-10)
-      .map(m => ({ role: m.role, content: m.content }));
+      .map(m => ({
+        role: m.role,
+        content: m.content.length > 500 ? m.content.slice(0, 500) + '…' : m.content,
+      }));
 
     let accumulatedText = '';
 
@@ -1067,9 +1122,9 @@ export default function Chat() {
           });
         }
       },
-      // onDone — guarded with session ID
       async (data) => {
-        if (activeSessionIdRef.current !== sessId) return; // session isolation guard
+        // Workstream J: Persist to original session even if user switched away
+        const isActive = activeSessionIdRef.current === sessId;
         // Check for intent signal
         if (data.intent) {
           const intentType = data.intent;
@@ -1118,6 +1173,52 @@ export default function Chat() {
             return;
           }
 
+          // Workstream E: Compliance intent — render inline ComplianceCard
+          if (intentType === 'compliance') {
+            setIsStreaming(false);
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = {
+                ...copy[copy.length - 1],
+                content: 'Running compliance analysis…',
+                streaming: false,
+                complianceIntent: intentParams, // Signals ComplianceCard to render
+              };
+              persistMessages(copy, sessId);
+              return copy;
+            });
+            delete streamRefs.current[sessId];
+            return;
+          }
+
+          // Workstream K/M: Drawing analysis intent — auto-trigger VLM extraction from chat
+          if (intentType === 'drawing_extract') {
+            setIsStreaming(false);
+            const pdfFile = snapshotDocs.find(f => f.type === 'application/pdf');
+            if (snapshotImages.length > 0 || pdfFile) {
+              // Re-set selectedFiles for handleDrawingExtract (it reads from state)
+              if (snapshotImages.length > 0) setSelectedFiles(snapshotImages);
+              else if (pdfFile) setSelectedFiles([pdfFile]);
+              
+              // Small delay to let state settle, then trigger extraction
+              setTimeout(() => handleDrawingExtract(), 100);
+            } else {
+              // No image/PDF attached — guide the user
+              setMessages(prev => {
+                const copy = [...prev];
+                copy[copy.length - 1] = {
+                  ...copy[copy.length - 1],
+                  content: '🏗️ I detected you want to analyze a drawing, but no image or PDF blueprint is attached.\n\nPlease:\n1. Click the 📎 attachment button\n2. Select an engineering drawing (PNG, JPG) or a PDF blueprint\n3. Then type "analyze this drawing" again\n\nI\'ll run the Vision-Language Model to extract dimensions, tolerances, materials, and equipment tags.',
+                  streaming: false,
+                };
+                persistMessages(copy, sessId);
+                return copy;
+              });
+              delete streamRefs.current[sessId];
+            }
+            return;
+          }
+
           // PPT or Quiz — call generation API
           setMessages(prev => {
             const copy = [...prev];
@@ -1142,20 +1243,43 @@ export default function Chat() {
         }
 
         // Normal Q&A done
-        setIsStreaming(false);
-        setMessages(prev => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          copy[copy.length - 1] = {
-            ...last,
-            content: accumulatedText || last?.content || '',
-            sources: data?.sources || [],
-            confidence_score: data?.confidence_score, // Save confidence score
-            streaming: false,
-          };
-          persistMessages(copy, sessId);
-          return copy;
-        });
+        if (isActive) setIsStreaming(false);
+        const finalText = accumulatedText;
+        if (isActive) {
+          setMessages(prev => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            copy[copy.length - 1] = {
+              ...last,
+              content: finalText || last?.content || '',
+              sources: data?.sources || [],
+              confidence_score: data?.confidence_score,
+              streaming: false,
+            };
+            persistMessages(copy, sessId);
+            return copy;
+          });
+        } else {
+          // Workstream J: User switched away — persist to the original session directly
+          setSessions(prev => {
+            const u = prev.map(s => {
+              if (s.id !== sessId) return s;
+              const msgs = [...(s.messages || [])];
+              if (msgs.length > 0 && msgs[msgs.length - 1].streaming) {
+                msgs[msgs.length - 1] = {
+                  ...msgs[msgs.length - 1],
+                  content: finalText || msgs[msgs.length - 1].content || '',
+                  sources: data?.sources || [],
+                  confidence_score: data?.confidence_score,
+                  streaming: false,
+                };
+              }
+              return { ...s, messages: msgs, updatedAt: Date.now() };
+            });
+            saveSessions(u);
+            return u;
+          });
+        }
         delete streamRefs.current[sessId];
       },
       // onError — guarded (always persists to prevent frozen sessions)
@@ -1197,8 +1321,14 @@ export default function Chat() {
     );
   };
 
+  // ── Workstream A: Clean Enter key handling ──
+  // Block submission while draft is uploading files to prevent partial sends.
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (draft.isUploading) return; // Block send while files are uploading
+      handleSend();
+    }
   };
 
   const handleFileAttach = async (e) => {
@@ -1468,8 +1598,9 @@ export default function Chat() {
           
           setMessages(prev => [...prev, {
             role: 'assistant',
-            content: 'Here are the extracted parameters from the drawing:\n```json\n' + JSON.stringify(statusData.result_data, null, 2) + '\n```\n\n*To compare against a standard, please use the compliance endpoints or ask me to compare them.*',
-            timestamp: new Date().toISOString()
+            content: '📐 Drawing parameters extracted successfully.',
+            drawingResult: statusData.result_data, // Workstream F: structured rendering
+            timestamp: Date.now(),
           }]);
         } else if (statusData.status === 'failed') {
           clearInterval(interval);
@@ -1585,7 +1716,9 @@ export default function Chat() {
 
         <div style={styles.navSection}>
           <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>{isHindi ? 'अनुपालन' : 'Compliance'}</span>}</Link>
-          <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
+          {isSuperAdmin && (
+            <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
+          )}
         </div>
 
         <div style={styles.sidebarFooter}>
@@ -1699,6 +1832,41 @@ export default function Chat() {
                         <ComparisonCard data={msg.comparison} />
                       )}
 
+                      {/* Workstream E: Inline Compliance Analysis */}
+                      {msg.complianceIntent && !msg.streaming && (
+                        <ComplianceCard intentParams={msg.complianceIntent} token={token} />
+                      )}
+
+                      {/* Workstream F: Inline Drawing Extraction Results */}
+                      {msg.drawingResult && !msg.streaming && (
+                        <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            📐 Drawing Parameters
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: 'var(--border)' }}>
+                            {[
+                              { label: 'Dimensions', items: msg.drawingResult.dimensions, icon: '📏' },
+                              { label: 'Tolerances', items: msg.drawingResult.tolerances, icon: '🎯' },
+                              { label: 'Materials', items: msg.drawingResult.materials, icon: '🔩' },
+                              { label: 'Equipment Tags', items: msg.drawingResult.equipment_tags, icon: '🏷️' },
+                            ].map((group, gi) => (
+                              <div key={gi} style={{ padding: '10px 12px', background: 'var(--bg-card)' }}>
+                                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                                  {group.icon} {group.label}
+                                </div>
+                                {group.items?.length > 0 ? (
+                                  <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                                    {group.items.map((item, ii) => <li key={ii}>{item}</li>)}
+                                  </ul>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>None detected</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Perplexity-style citation pills */}
                       {msg.sources?.length > 0 && !msg.streaming && (
                         <div style={styles.sourcePills}>
@@ -1723,10 +1891,26 @@ export default function Chat() {
                     </>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {msg.image && (
+                      {/* Workstream A: Render persistent file chips inside user bubble */}
+                      {msg.fileChips && msg.fileChips.length > 0 && (
+                        <div style={fileChipStyles.container}>
+                          {msg.fileChips.map((chip, ci) => (
+                            <div key={ci} style={fileChipStyles.chip}>
+                              {chip.type === 'image' && chip.preview ? (
+                                <img src={chip.preview} alt={chip.name} style={fileChipStyles.preview} />
+                              ) : (
+                                <FileText size={14} color="rgba(255,255,255,0.75)" />
+                              )}
+                              <span style={fileChipStyles.name}>{chip.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Legacy: fallback for messages without fileChips */}
+                      {!msg.fileChips && msg.image && (
                         <img src={msg.image} alt="Uploaded attachment" style={{ maxWidth: '200px', borderRadius: '8px', border: '1px solid var(--border)' }} />
                       )}
-                      <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                      {msg.content && <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>}
                     </div>
                   )}
                   {/* Timestamp & Confidence */}
@@ -1878,13 +2062,16 @@ export default function Chat() {
             />
             <button
               onClick={handleSend}
-              disabled={(!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming}
-              style={{ ...styles.sendBtn, opacity: ((!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming) ? 0.4 : 1 }}
+              disabled={(!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming || draft.isUploading}
+              style={{ ...styles.sendBtn, opacity: ((!input.trim() && attachedDocs.length === 0 && selectedFiles.length === 0) || isSessionStreaming || draft.isUploading) ? 0.4 : 1 }}
               id="send-btn"
+              title={draft.isUploading ? 'Uploading files…' : 'Send message'}
             >
-              {isSessionStreaming
-                ? <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
-                : <Send size={17} />
+              {draft.isUploading
+                ? <Loader2 size={17} style={{ animation: 'spin 1s linear infinite', color: '#f59e0b' }} />
+                : isSessionStreaming
+                  ? <Loader2 size={17} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Send size={17} />
               }
             </button>
           </div>
@@ -1915,25 +2102,25 @@ const styles = {
 
   /* Sidebar */
   sidebar: { display: 'flex', flexDirection: 'column', background: 'var(--sidebar-bg)', borderRight: '1px solid var(--sidebar-border)', transition: 'width 0.2s ease, min-width 0.2s ease', overflow: 'hidden' },
-  sidebarHeader: { padding: '14px 12px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  sidebarHeader: { padding: '14px 12px 10px', borderBottom: '1px solid var(--sidebar-border-inner)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   logoGroup: { display: 'flex', alignItems: 'center', gap: '9px' },
   logoIcon: { width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: 'rgba(74,139,255,0.12)', flexShrink: 0 },
   logoText: { fontSize: '15px', fontWeight: 800, color: 'var(--sidebar-text)', letterSpacing: '1.5px' },
-  logoSub: { fontSize: '9px', color: 'rgba(255,255,255,0.55)', fontWeight: 500, letterSpacing: '0.3px' },
+  logoSub: { fontSize: '9px', color: 'var(--sidebar-text-muted)', fontWeight: 500, letterSpacing: '0.3px' },
   collapseBtn: { background: 'transparent', border: 'none', color: 'var(--sidebar-text)', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex', opacity: 0.7 },
   newChatBtn: { display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 10px 6px', padding: '9px 12px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, border: 'none', justifyContent: 'center', cursor: 'pointer' },
   sessionList: { flex: 1, overflowY: 'auto', padding: '4px 6px' },
-  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '28px 14px', color: 'var(--text-muted)', fontSize: '12px' },
-  sessionItem: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', transition: 'background 0.15s', marginBottom: '1px' },
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '28px 14px', color: 'var(--sidebar-text-muted)', fontSize: '12px' },
+  sessionItem: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px', color: 'var(--sidebar-text-dim)', transition: 'background 0.15s', marginBottom: '1px' },
   sessionTitle: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  sessionDeleteBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', opacity: 0, transition: 'opacity 0.15s', cursor: 'pointer' },
-  navSection: { padding: '6px 6px', borderTop: '1px solid var(--border)' },
-  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none', transition: 'background 0.15s' },
-  sidebarFooter: { padding: '10px', borderTop: '1px solid var(--border)' },
+  sessionDeleteBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'transparent', color: 'var(--sidebar-text-muted)', border: 'none', opacity: 0, transition: 'opacity 0.15s', cursor: 'pointer' },
+  navSection: { padding: '6px 6px', borderTop: '1px solid var(--sidebar-border-inner)' },
+  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: '12px', color: 'var(--sidebar-text-dim)', textDecoration: 'none', transition: 'background 0.15s' },
+  sidebarFooter: { padding: '10px', borderTop: '1px solid var(--sidebar-border-inner)' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '7px', padding: '5px 4px', marginBottom: '5px' },
-  userAvatar: { width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.15)', color: 'var(--primary)', flexShrink: 0 },
-  userName: { fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  logoutBtn: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%', padding: '7px 10px', background: 'transparent', color: 'var(--accent-red)', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 500, border: 'none', cursor: 'pointer' },
+  userAvatar: { width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'rgba(74,139,255,0.15)', color: 'var(--sidebar-text)', flexShrink: 0 },
+  userName: { fontSize: '11px', color: 'var(--sidebar-text-dim)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  logoutBtn: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%', padding: '7px 10px', background: 'transparent', color: '#ff6b4a', borderRadius: 'var(--radius-sm)', fontSize: '12px', fontWeight: 500, border: 'none', cursor: 'pointer' },
 
   /* Main */
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' },
@@ -2014,4 +2201,29 @@ const panelStyles = {
   excerptLabel: { padding: '10px 16px 0', flexShrink: 0 },
   excerpt: { flex: 1, padding: '10px 16px 16px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7', overflowY: 'auto', whiteSpace: 'pre-wrap' },
   downloadBtn: { display: 'flex', alignItems: 'center', gap: '7px', padding: '10px 16px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, textDecoration: 'none', justifyContent: 'center', transition: 'opacity 0.15s' },
+};
+
+/* ── Workstream A: File chip styles for user bubbles ── */
+const fileChipStyles = {
+  container: {
+    display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '4px',
+  },
+  chip: {
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    padding: '4px 10px', borderRadius: '8px',
+    background: 'rgba(255,255,255,0.12)',
+    border: '1px solid rgba(255,255,255,0.18)',
+    backdropFilter: 'blur(4px)',
+    transition: 'background 0.15s',
+  },
+  preview: {
+    height: '24px', width: '24px', objectFit: 'cover',
+    borderRadius: '4px', flexShrink: 0,
+  },
+  name: {
+    fontSize: '11px', fontWeight: 500,
+    color: 'rgba(255,255,255,0.85)',
+    maxWidth: '120px', overflow: 'hidden',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
 };

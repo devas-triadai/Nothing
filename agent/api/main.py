@@ -231,14 +231,42 @@ async def download_file(
     )
 
 
-# ── Original Document Download Proxy ──
-@app.get("/api/agent/download/doc/{doc_id}", tags=["Downloads"])
+# ── Original Document Download (local builtin + backend proxy) ──
+_KB_DIR = Path(__file__).resolve().parent.parent / "knowledge_base"
+
+@app.get("/api/agent/download/doc/{doc_id:path}", tags=["Downloads"])
 async def download_original_document(
-    doc_id: int,
+    doc_id: str,
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """Proxy download for an original uploaded document from the backend."""
+    """
+    Download an original document.
+    - builtin: prefix → serve directly from knowledge_base/
+    - otherwise     → proxy to admin backend
+    """
+    # ── Workstream C: Serve builtin documents locally ──
+    if doc_id.startswith("builtin:"):
+        filename = doc_id.split(":", 1)[1]
+        # Sanitise: strip path separators to prevent traversal
+        filename = filename.replace("/", "").replace("\\", "").replace("..", "")
+        local_path = _KB_DIR / filename
+        if not local_path.exists() or not local_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Built-in document '{filename}' not found")
+
+        suffix = local_path.suffix.lower()
+        media_types = {
+            ".txt": "text/plain",
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return FileResponse(
+            path=str(local_path),
+            media_type=media_types.get(suffix, "application/octet-stream"),
+            filename=filename,
+        )
+
+    # ── Standard proxy to admin backend ──
     token = request.query_params.get("token") or (
         request.headers.get("Authorization", "").replace("Bearer ", "")
     )

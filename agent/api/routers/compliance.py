@@ -35,10 +35,60 @@ _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _clean_json(raw: str) -> str:
-    """Strip markdown code fences (```json...```) from LLM output before JSON parsing."""
+    """
+    Workstream D: Recursive JSON extraction with multiple fallback strategies.
+    1. Strip markdown code fences
+    2. Extract outermost [...] array
+    3. If truncated, try closing partial objects/arrays
+    """
     cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+
+    # Strategy 1: Find outermost array brackets
+    start = cleaned.find("[")
+    end = cleaned.rfind("]") + 1
+    if start != -1 and end > start:
+        return cleaned[start:end]
+
+    # Strategy 2: Array started but truncated — close partial objects
+    if start != -1 and end <= start:
+        partial = cleaned[start:]
+        # Count open braces and try to close them
+        open_braces = partial.count("{") - partial.count("}")
+        open_brackets = partial.count("[") - partial.count("]")
+        # Strip trailing comma or incomplete key
+        partial = re.sub(r',\s*"[^"]*$', '', partial)
+        partial = re.sub(r',\s*$', '', partial)
+        partial += "}" * max(0, open_braces)
+        partial += "]" * max(0, open_brackets)
+        return partial
+
+    return cleaned
+
+
+def _repair_json_with_llm(broken_json: str) -> list:
+    """
+    Workstream D: Last-resort LLM-based JSON repair.
+    Send the broken JSON to the LLM with a tiny prompt asking it to fix it.
+    """
+    repair_prompt = f"""The following JSON array is malformed or truncated. Fix it and return ONLY a valid JSON array. Do not add new data, just fix the syntax:
+
+{broken_json[:2000]}"""
+    try:
+        repaired_raw = llm_engine.generate(
+            [{"role": "user", "content": repair_prompt}],
+            max_tokens=600,
+            temperature=0.0,
+        )
+        cleaned = _clean_json(repaired_raw)
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            logger.info("LLM JSON repair succeeded: %d items recovered", len(result))
+            return result
+    except Exception as e:
+        logger.warning("LLM JSON repair also failed: %s", e)
+    return []
 
 
 class ComplianceRequest(BaseModel):
@@ -87,19 +137,29 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    # Truncate to fit 3328-token context window (~4000 chars subject + ~3000 chars standard)
-    subject_text = "\n\n".join(f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}" for c in subject_chunks[:15])
-    if len(subject_text) > 4000:
-        subject_text = subject_text[:4000] + "\n[Content truncated]"
+    # Workstream D: Strictly cap context to fit 3328-token inference window
+    # ~2500 chars subject + ~2000 chars standard + ~800 chars prompt = ~5300 chars ≈ 1300 tokens
+    # Leaves ~2000 tokens for output (max_tokens=800 + safety)
+    _MAX_SUBJECT_CHARS = 2500
+    _MAX_STANDARD_CHARS = 2000
+    _MAX_SUBJECT_CHUNKS = 8
+    _MAX_STANDARD_CHUNKS = 6
+
+    subject_text = "\n\n".join(
+        f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
+        for c in subject_chunks[:_MAX_SUBJECT_CHUNKS]
+    )
+    if len(subject_text) > _MAX_SUBJECT_CHARS:
+        subject_text = subject_text[:_MAX_SUBJECT_CHARS] + "\n[Content truncated]"
 
     # Calculate average OCR confidence
     conf_scores = [c["metadata"].get("ocr_confidence", 1.0) for c in subject_chunks if "metadata" in c]
     avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 1.0
 
     # Extract key clauses from standards
-    standards_text = "\n\n".join(c["text"] for c in standard_chunks[:10])
-    if len(standards_text) > 3000:
-        standards_text = standards_text[:3000] + "\n[Content truncated]"
+    standards_text = "\n\n".join(c["text"] for c in standard_chunks[:_MAX_STANDARD_CHUNKS])
+    if len(standards_text) > _MAX_STANDARD_CHARS:
+        standards_text = standards_text[:_MAX_STANDARD_CHARS] + "\n[Content truncated]"
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
@@ -108,10 +168,10 @@ async def compliance_check(
 TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT(S) against the STANDARD(S).
 
 SUBJECT DOCUMENTS ({subject_filenames_str}):
-{subject_text[:8000]}
+{subject_text}
 
 APPLICABLE STANDARDS:
-{standards_text[:6000]}
+{standards_text}
 {scope_note}
 
 For each relevant clause/requirement in the standard, evaluate the subject documents' compliance.
@@ -146,18 +206,32 @@ Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
 
+    # Workstream D: Multi-strategy JSON parsing with graceful degradation
+    findings = None
     try:
         cleaned = _clean_json(findings_raw)
-        start = cleaned.find("[")
-        end = cleaned.rfind("]") + 1
-        if start == -1 or end == 0:
-            raise ValueError("No JSON array found in compliance response")
-        findings = json.loads(cleaned[start:end])
+        findings = json.loads(cleaned)
         if not isinstance(findings, list):
             raise ValueError("Expected a JSON array of findings")
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("Failed to parse compliance JSON: %s\nRaw (first 800): %s", e, findings_raw[:800])
-        raise HTTPException(status_code=500, detail="Failed to parse compliance analysis. Please try again.")
+        logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
+        # Fallback: LLM-based repair
+        findings = _repair_json_with_llm(findings_raw)
+
+    if not findings:
+        logger.error("All JSON recovery strategies failed. Raw (first 500): %s", findings_raw[:500])
+        # Return a single degraded finding instead of 500
+        findings = [{
+            "topic": "Analysis Error",
+            "clause_id": "N/A",
+            "requirement": "Automated compliance parsing",
+            "acceptance_criterion": "Valid JSON output",
+            "verdict": "Unverifiable",
+            "severity": "Major",
+            "finding": "The compliance engine could not produce a structured analysis. This may be due to document complexity or context size. Please try with a narrower scope or fewer documents.",
+            "recommendation": "Re-run with check_scope targeting specific sections, or reduce document count.",
+            "citation": "N/A",
+        }]
 
     # Second pass: Missing Requirements
     covered_clauses = [f.get("clause_id", "") for f in findings]
@@ -166,7 +240,7 @@ Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
     missing_prompt = f"""You are a compliance analyst.
     
 STANDARD:
-{standards_text[:6000]}
+{standards_text}
 
 The following clauses were already checked:
 {covered_str}
@@ -219,9 +293,9 @@ If there are no major missing requirements, return an empty array []."""
         
         if historical_chunks:
             hist_text = "\n\n".join(c["text"] for c in historical_chunks)
-            hist_prompt = f"""You are a compliance analyst. 
+            hist_prompt = f"""You are a compliance analyst.
 Review these past historical records and lessons learned:
-{hist_text[:6000]}
+{hist_text[:2000]}
 
 Based on the above, are there any common historical defects or past non-compliances that the auditor should specifically double-check in the current subject document?
 Summarize the top 2-3 historical warnings. Return a simple string paragraph. If nothing is relevant, return 'None'."""

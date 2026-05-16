@@ -29,6 +29,27 @@ def seed_superadmin():
         else:
             print("[AGRA] Super Admin already exists.")
 
+        # Seed default Officer
+        officer_user = db.query(User).filter(User.username == "icg_officer").first()
+        if not officer_user:
+            officer = User(
+                username="icg_officer",
+                email="officer@agra.icg.gov.in",
+                full_name="ICG Executive Officer",
+                hashed_password=get_password_hash("Officer@ICG#2026"),
+                role="officer",
+                status="active",
+                department="Operations",
+                rank="Commander",
+                service_number="ICG-OFF-001",
+                created_at=datetime.utcnow()
+            )
+            db.add(officer)
+            db.commit()
+            print("[AGRA] Default Officer seeded successfully.")
+        else:
+            print("[AGRA] Officer account already exists.")
+
         # Seed default agent configs
         default_configs = [
             {"name": "house_rules", "value": "You are AGRA, an AI assistant for the Indian Coast Guard. Always respond professionally and accurately. Do not share classified information.", "description": "System prompt / house rules for the AI agent"},

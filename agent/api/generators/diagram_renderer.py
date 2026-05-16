@@ -307,14 +307,21 @@ def render_diagram_on_slide(slide, diagram_data: Dict[str, Any]) -> None:
             fx, fy = positions[from_id]
             tx, ty = positions[to_id]
 
-            # Connect from bottom-center of source to top-center of target
-            x1 = fx + node_w / 2
-            y1 = fy + node_h
-            x2 = tx + node_w / 2
-            y2 = ty
-
-            # For left-to-right layouts, connect right→left
-            if abs(fx - tx) > abs(fy - ty):
+            if diagram_type in ("cycle", "radial"):
+                # Plan Workstream G: For circular layouts, connect from center of
+                # source toward center of target (edge-to-edge along the perimeter)
+                fcx, fcy = fx + node_w / 2, fy + node_h / 2
+                tcx, tcy = tx + node_w / 2, ty + node_h / 2
+                dx, dy = tcx - fcx, tcy - fcy
+                dist = max(math.sqrt(dx * dx + dy * dy), 0.01)
+                # Start from edge of source node
+                x1 = fcx + (dx / dist) * (node_w / 2)
+                y1 = fcy + (dy / dist) * (node_h / 2)
+                # End at edge of target node
+                x2 = tcx - (dx / dist) * (node_w / 2)
+                y2 = tcy - (dy / dist) * (node_h / 2)
+            elif abs(fx - tx) > abs(fy - ty):
+                # Horizontal dominant: connect right→left
                 if fx < tx:
                     x1 = fx + node_w
                     y1 = fy + node_h / 2
@@ -325,6 +332,12 @@ def render_diagram_on_slide(slide, diagram_data: Dict[str, Any]) -> None:
                     y1 = fy + node_h / 2
                     x2 = tx + node_w
                     y2 = ty + node_h / 2
+            else:
+                # Vertical dominant: connect bottom→top
+                x1 = fx + node_w / 2
+                y1 = fy + node_h
+                x2 = tx + node_w / 2
+                y2 = ty
 
             _add_connector(slide, x1, y1, x2, y2, edge.get("label", ""))
 

@@ -396,20 +396,46 @@ def _build_table_slide(prs, title: str, table_data: dict, notes: str = ""):
 
 
 def _build_diagram_slide(prs, title: str, diagram_data: dict, notes: str = ""):
-    """Layout 6: Diagram slide rendered with AutoShapes."""
+    """Layout 6: Diagram slide rendered with AutoShapes.
+    Plan Workstream G: Graceful fallback — converts nodes to bullets if render fails.
+    """
     from api.generators.diagram_renderer import render_diagram_on_slide
 
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_slide_bg(slide, _NAVY)
     _add_title_bar(slide, title)
 
-    try:
-        render_diagram_on_slide(slide, diagram_data)
-    except Exception as e:
-        logger.error("Diagram render failed: %s", e, exc_info=True)
-        _add_text_box(slide, 1.0, 3.0, 8.0, 1.0,
-                       f"[Diagram rendering error: {e}]",
-                       font_size=14, color=_MED_GRAY, alignment=PP_ALIGN.CENTER)
+    nodes = diagram_data.get("nodes", [])
+    rendered = False
+
+    if nodes:
+        try:
+            render_diagram_on_slide(slide, diagram_data)
+            rendered = True
+        except Exception as e:
+            logger.error("Diagram render failed: %s", e, exc_info=True)
+
+    if not rendered:
+        # Plan Workstream G: Auto-convert nodes to a numbered process list
+        if nodes:
+            fallback_bullets = [
+                f"{i+1}. {n.get('label', n.get('id', f'Step {i+1}'))}"
+                for i, n in enumerate(nodes)
+            ]
+        else:
+            fallback_bullets = ["[Diagram data was empty — no nodes provided by LLM]"]
+
+        txBox = slide.shapes.add_textbox(
+            Inches(0.7), Inches(1.5), Inches(8.5), Inches(5.0),
+        )
+        tf = txBox.text_frame
+        tf.word_wrap = True
+        for i, bullet in enumerate(fallback_bullets):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            p.text = f"→  {bullet}"
+            p.font.size = Pt(14)
+            p.font.color.rgb = _LIGHT_GRAY
+            p.space_after = Pt(10)
 
     _add_footer(slide)
     if notes:

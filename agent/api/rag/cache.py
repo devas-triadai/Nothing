@@ -83,7 +83,47 @@ class SemanticCache:
             return None
 
     def add_to_cache(self, query: str, query_embedding: List[float], response: str, sources: List[Dict[str, Any]]):
-        """Add a new query and response to the semantic cache."""
+        """
+        Add a new query and response to the semantic cache.
+        Workstream I: Poisoning guards — reject refusals, short responses, duplicates.
+        """
+        # ── Guard 1: Reject refusal / low-quality responses ──
+        _REFUSAL_PATTERNS = [
+            "i could not find",
+            "not found in standard",
+            "no relevant information",
+            "i don't have enough",
+            "unable to find",
+            "cannot answer",
+            "no documents",
+            "please upload",
+            "try rephrasing",
+        ]
+        response_lower = response.lower()
+        for pattern in _REFUSAL_PATTERNS:
+            if pattern in response_lower:
+                logger.info("Cache REJECTED (refusal pattern '%s'): %s", pattern, query[:50])
+                return
+
+        # ── Guard 2: Minimum response quality ──
+        if len(response.strip()) < 50:
+            logger.info("Cache REJECTED (too short: %d chars): %s", len(response.strip()), query[:50])
+            return
+
+        # ── Guard 3: Duplicate detection (skip if near-identical already cached) ──
+        try:
+            with sqlite3.connect(_DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT embedding FROM cache ORDER BY created_at DESC LIMIT 50")
+                for (emb_blob,) in cursor.fetchall():
+                    cached_emb = np.frombuffer(emb_blob, dtype=np.float32).tolist()
+                    if self._cosine_similarity(query_embedding, cached_emb) > 0.97:
+                        logger.debug("Cache SKIPPED (duplicate, sim>0.97): %s", query[:50])
+                        return
+        except Exception:
+            pass  # If dedup check fails, proceed with insert
+
+        # ── Insert ──
         try:
             emb_blob = np.array(query_embedding, dtype=np.float32).tobytes()
             with sqlite3.connect(_DB_PATH) as conn:
@@ -91,6 +131,14 @@ class SemanticCache:
                     "INSERT INTO cache (query, embedding, response, sources) VALUES (?, ?, ?, ?)",
                     (query, emb_blob, response, json.dumps(sources))
                 )
+                # ── Guard 4: TTL prune — remove entries older than 24 hours ──
+                conn.execute("DELETE FROM cache WHERE created_at < datetime('now', '-24 hours')")
+                # ── Guard 5: Size cap — keep only 200 most recent ──
+                conn.execute("""
+                    DELETE FROM cache WHERE id NOT IN (
+                        SELECT id FROM cache ORDER BY created_at DESC LIMIT 200
+                    )
+                """)
                 conn.commit()
                 logger.debug("Added to semantic cache: %s", query[:50])
         except Exception as e:

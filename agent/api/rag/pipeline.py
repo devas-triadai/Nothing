@@ -58,6 +58,20 @@ _INTENT_COMPARE = re.compile(
     r'|\b(both|two|multiple)\s+(bids?|bidders?|proposals?|vendors?)\b',
     re.IGNORECASE,
 )
+# Workstream E: Compliance intent — triggers inline compliance check from chat
+_INTENT_COMPLIANCE = re.compile(
+    r'\b(check|run|perform|do|start|execute)\b.{0,40}\b(compliance|conformity|audit|verification)\b'
+    r'|\b(compliance|conformity)\s+(check|analysis|report|audit|review)\b'
+    r'|\b(is\s+.{3,40}\s+compliant|compliant\s+with)\b',
+    re.IGNORECASE,
+)
+# Workstream K: Drawing analysis intent — auto-detect drawings/schematics even without "analyze"
+_INTENT_DRAWING = re.compile(
+    r'\b(analy[zs]e|extract|parse|read|interpret|inspect|check|look\s+at|view|verify|identify)\b.{0,60}\b(drawing|schematic|blueprint|diagram|plan|sketch|image|map|layout|photo|figure|chart|specification|schemes?)\b'
+    r'|\b(drawing|schematic|blueprint|layout|schemes?)\b.{0,60}\b(analysis|extraction|parameters?|details?|specs?)\b'
+    r'|\b(what\s+is\s+in\s+this|what\s+does\s+this|can\s+you\s+see\s+the|tell\s+me\s+about\s+this)\s+(drawing|schematic|image|blueprint)\b',
+    re.IGNORECASE,
+)
 
 
 def _extract_problem_statement(q: str) -> Optional[str]:
@@ -127,6 +141,17 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
         return {"type": "draft_sotr"}
     if _INTENT_TECH_REVIEW.search(q):
         return {"type": "tech_review", "target_audience": "shipyard"}
+    # Workstream E: Compliance intent detection
+    if _INTENT_COMPLIANCE.search(q):
+        scope_match = re.search(
+            r'(?:for|on|regarding|about|of|against|with)\s+["\']?(.+?)["\']?\s*$',
+            q, re.IGNORECASE,
+        )
+        scope = scope_match.group(1).strip() if scope_match else None
+        return {"type": "compliance", "check_scope": scope}
+    # Workstream F: Drawing analysis intent detection
+    if _INTENT_DRAWING.search(q):
+        return {"type": "drawing_extract"}
     return None
 
 
@@ -396,6 +421,36 @@ async def query_pipeline(
             }
             return
 
+        # Workstream E: Compliance intent — route to inline compliance from chat
+        if intent.get("type") == "compliance":
+            if doc_ids_filter:
+                doc_ids = doc_ids_filter
+            else:
+                doc_ids = await _loop.run_in_executor(None, _get_all_doc_ids)
+            if not doc_ids:
+                yield {"token": "No documents are indexed yet. Please upload documents first."}
+                yield {"done": True, "sources": []}
+                return
+            # Split docs: user-uploaded = subjects, builtin = standards
+            subject_ids = [d for d in doc_ids if not d.startswith("builtin:")]
+            standard_ids = [d for d in doc_ids if d.startswith("builtin:")]
+            if not subject_ids:
+                subject_ids = doc_ids[:1]
+            if not standard_ids:
+                standard_ids = [d for d in doc_ids if d != subject_ids[0]][:2]
+            yield {
+                "intent": "compliance",
+                "intent_params": {
+                    **intent,
+                    "subject_doc_ids": subject_ids,
+                    "standard_doc_ids": standard_ids,
+                    "doc_ids": doc_ids,
+                },
+                "done": True,
+                "sources": [],
+            }
+            return
+
         # Get available doc_ids (use filter if set, else all)
         if doc_ids_filter:
             doc_ids = doc_ids_filter
@@ -440,7 +495,7 @@ async def query_pipeline(
         logger.info("Fast Path triggered: Skipping LLM expansion for speed.")
 
     # ── 2. Multi-Query Retrieval ──
-    # Search using Original + Rewritten + HyDE to maximize recall
+    # Search using Original + Rewritten + HyDE in parallel to minimize latency
     search_queries = list(dict.fromkeys([q for q in [question, rewritten] if q]))
     if hyde_doc:
         search_queries.append(hyde_doc)
@@ -449,44 +504,11 @@ async def query_pipeline(
     query_emb = await _loop.run_in_executor(
         None, embedder.embed_query, hyde_doc if hyde_doc else rewritten
     )
-    logger.info("Stage: hybrid search over %d query variants …", len(search_queries))
-
-    candidates = []
-    for i, q in enumerate(search_queries):
-        logger.info("  → hybrid_search variant %d/%d (qlen=%d) …", i + 1, len(search_queries), len(q))
-        res = await _loop.run_in_executor(
-            None,
-            store.hybrid_search,
-            q,
-            query_emb,
-            20,
-            doc_ids_filter,
-            date_range,
-            doc_type,
-            version,
-            category,
-        )
-        logger.info("  → hybrid_search returned %d hits", len(res))
-        candidates.extend(res)
-    logger.info("Stage: total %d candidates collected. Deduplicating …", len(candidates))
-
-    # Deduplicate candidates by point ID (vector_store uses 'pid' key)
-    seen_ids = set()
-    unique_candidates = []
-    for c in candidates:
-        cid = c.get("pid") or c.get("id")
-        if cid is None or cid not in seen_ids:
-            unique_candidates.append(c)
-            if cid is not None:
-                seen_ids.add(cid)
-    candidates = unique_candidates
-    logger.info("Stage: dedup → %d unique candidates. Checking semantic cache …", len(candidates))
-
-    # ── Semantic Cache Check ──
+    
+    # ── Semantic Cache Check (Immediate exit if hit) ──
     cache_hit = await _loop.run_in_executor(
         None, semantic_cache.check_cache, rewritten, query_emb
     )
-    logger.info("Stage: semantic cache check complete (hit=%s)", bool(cache_hit))
     if cache_hit:
         logger.info("Serving response from semantic cache.")
         words = cache_hit["response"].split(" ")
@@ -502,6 +524,43 @@ async def query_pipeline(
             "cached": True
         }
         return
+
+    logger.info("Stage: parallel hybrid search over %d variants …", len(search_queries))
+    
+    search_tasks = [
+        _loop.run_in_executor(
+            None,
+            store.hybrid_search,
+            q,
+            query_emb,
+            20,
+            doc_ids_filter,
+            date_range,
+            doc_type,
+            version,
+            category,
+        )
+        for q in search_queries
+    ]
+    
+    results = await asyncio.gather(*search_tasks)
+    candidates = []
+    for res in results:
+        candidates.extend(res)
+    
+    logger.info("Stage: total %d candidates collected from parallel search.", len(candidates))
+
+    # Deduplicate candidates by point ID (vector_store uses 'pid' key)
+    seen_ids = set()
+    unique_candidates = []
+    for c in candidates:
+        cid = c.get("pid") or c.get("id")
+        if cid is None or cid not in seen_ids:
+            unique_candidates.append(c)
+            if cid is not None:
+                seen_ids.add(cid)
+    candidates = unique_candidates
+    logger.info("Stage: dedup → %d unique candidates.", len(candidates))
 
     # ── 3. CRAG-Style Retry Loop ──
     # Thresholds calibrated for RRF scores. RRF max ≈ 2/(60+1) = 0.0328.
@@ -605,16 +664,51 @@ async def query_pipeline(
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
 
-    # Add conversation history (last 6 messages to save tokens)
-    for msg in session_history[-6:]:
-        messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+    # ── Workstream I: Token-budget-aware conversation history ──
+    # Approximate 1 token ≈ 4 chars.  Reserve space for system + question + generation.
+    _CTX_LIMIT = 3328
+    _PROMPT_RESERVE = 1800
+    _CHAR_LIMIT = _CTX_LIMIT * 4  # ~13312 chars for 3328 tokens
+    _QUESTION_RESERVE = 600       # chars reserved for the user question
+    _GENERATION_RESERVE = _PROMPT_RESERVE * 4  # chars reserved for output tokens
+
+    used_chars = len(system_msg) + _QUESTION_RESERVE + _GENERATION_RESERVE
+    history_budget = max(0, _CHAR_LIMIT - used_chars)
+    logger.info("Workstream I: history budget=%d chars (system=%d, question=%d, gen=%d)",
+                history_budget, len(system_msg), _QUESTION_RESERVE, _GENERATION_RESERVE)
+
+    # Filter: only user/assistant, non-empty, strip garbage
+    clean_history = [
+        msg for msg in session_history
+        if msg.get("role") in ("user", "assistant")
+        and msg.get("content", "").strip()
+        and len(msg.get("content", "").strip()) > 2
+    ]
+
+    # Fill from most recent backward, respecting budget
+    history_to_add = []
+    remaining = history_budget
+    for msg in reversed(clean_history[-10:]):  # Consider last 10 max
+        content = msg.get("content", "")
+        # Truncate each message to 300 chars to prevent a single long response from consuming the entire budget
+        if len(content) > 300:
+            content = content[:300] + "…"
+        msg_chars = len(content) + 20  # +20 for role/formatting overhead
+        if msg_chars > remaining:
+            break
+        history_to_add.insert(0, {"role": msg.get("role", "user"), "content": content})
+        remaining -= msg_chars
+
+    logger.info("Workstream I: adding %d/%d history messages (%d chars used)",
+                len(history_to_add), len(clean_history), history_budget - remaining)
+
+    for msg in history_to_add:
+        messages.append(msg)
 
     messages.append({"role": "user", "content": question})
 
     # 6. Stream LLM response (run in thread to avoid blocking async event loop)
-    # Reserve ~1500 tokens for generation so we don't blow the 3328 context window.
-    _CTX_LIMIT = 3328
-    _PROMPT_RESERVE = 1800
+    # _CTX_LIMIT and _PROMPT_RESERVE defined above in Workstream I history block
     llm_max_tokens = max(256, _CTX_LIMIT - _PROMPT_RESERVE)
     full_response = []
     token_queue: asyncio.Queue = asyncio.Queue()

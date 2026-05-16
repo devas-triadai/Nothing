@@ -235,6 +235,9 @@ async def generate_ppt(
         )
 
     context_text = "\n\n".join(c["text"][:500] for c in context_chunks[:15])
+    # Plan F: Cap context to prevent overflow on 3328-token model
+    if len(context_text) > 4000:
+        context_text = context_text[:4000] + "\n[Content truncated]"
 
     # ── 2. Extract images from uploaded documents ──
     extracted_images = []
@@ -288,10 +291,16 @@ Additional context:
 
 Return ONLY an updated JSON array with all layout fields preserved and changes applied."""
     else:
+        # Plan F: Explicitly prioritize doc_ids context over general knowledge
+        doc_priority_note = ""
+        if body.doc_ids:
+            doc_priority_note = """\nCRITICAL: The content below comes from SPECIFIC DOCUMENTS selected by the user.
+You MUST use ONLY this document content for slide material. Do NOT add information from
+general knowledge. Every bullet point and data item must be traceable to the context below.\n"""
         prompt = f"""You are an elite PowerPoint architect for Indian Coast Guard presentations.
 
 Create a professional PowerPoint with exactly {body.num_slides} slides about: {body.topic}
-
+{doc_priority_note}
 DOCUMENT CONTEXT:
 {context_text}
 {extracted_data_hint}
@@ -305,10 +314,29 @@ Requirements:
 - Slide 1 MUST be "layout": "title"
 - Last slide MUST be "layout": "thank_you"
 - Use at least 2 different non-bullet layouts (diagrams, charts, tables, two_column)
-- Include a diagram if the content describes any process, system, or hierarchy
+- You MUST include AT LEAST ONE "layout": "diagram" slide. Pick the most prominent process, system architecture, or hierarchy from the content and render it as a diagram.
 - Include a chart if there is any numerical/statistical data
 - Include section_header slides between major topic shifts
 - Every slide must have "layout", "title", and layout-specific fields
+
+DIAGRAM EXAMPLE (you MUST follow this exact structure for diagram slides):
+{{
+  "layout": "diagram",
+  "title": "System Architecture",
+  "diagram_data": {{
+    "type": "flowchart",
+    "nodes": [
+      {{"id": "A", "label": "Data Ingestion", "shape": "rounded_rect"}},
+      {{"id": "B", "label": "Processing Engine", "shape": "rect"}},
+      {{"id": "C", "label": "Output Module", "shape": "rounded_rect"}}
+    ],
+    "edges": [
+      {{"from": "A", "to": "B", "label": "feeds"}},
+      {{"from": "B", "to": "C", "label": "produces"}}
+    ]
+  }},
+  "notes": "Rendered as native PowerPoint shapes"
+}}
 
 Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text, no markdown, no explanations:"""
 
@@ -324,7 +352,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         try:
             raw = await asyncio.to_thread(
                 llm_engine.generate, messages,
-                max_tokens=1200, temperature=temp, raw=True,
+                max_tokens=2048, temperature=temp, raw=True,  # Plan F: increased from 1200 to prevent truncated JSON
             )
             cleaned = _clean_json(raw)
             # _clean_json now returns the outermost JSON array or object via regex
@@ -387,7 +415,13 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
     # ── 6. Build PPTX ──
     job_id = str(uuid.uuid4())
     version_label = f"_v{body.version}" if body.version > 1 else ""
-    safe_topic = body.topic[:30].replace(' ', '_')
+    # Plan F: Use document metadata filename when doc_ids provided, not raw query text
+    if body.doc_ids and context_chunks:
+        first_filename = context_chunks[0].get("metadata", {}).get("filename", "")
+        safe_topic = re.sub(r'[^\w\s-]', '', first_filename or body.topic)[:30].replace(' ', '_')
+    else:
+        safe_topic = re.sub(r'[^\w\s-]', '', body.topic)[:30].replace(' ', '_')
+    safe_topic = safe_topic or "Presentation"
     output_filename = f"{job_id}.pptx"
     output_path = _OUTPUTS_DIR / output_filename
     
@@ -579,10 +613,10 @@ async def generate_quiz(
     if not chunks:
         raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
 
-    # Truncate to ~5000 chars to fit 3328-token context window
+    # Plan F: Tighten quiz context to fit 3328-token window (~3000 chars ≈ 750 tokens)
     content = "\n\n".join(c["text"] for c in chunks[:8])
-    if len(content) > 5000:
-        content = content[:5000] + "\n[Content truncated for quiz generation]"
+    if len(content) > 3000:
+        content = content[:3000] + "\n[Content truncated for quiz generation]"
     filename = chunks[0]["metadata"].get("filename", "document")
 
     prompt = f"""Generate a knowledge assessment quiz from this document.
@@ -744,8 +778,9 @@ async def generate_draft_sotr(
         raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
 
     full_text = "\n\n".join(c["text"] for c in chunks)
-    if len(full_text) > 25000:
-        full_text = full_text[:25000] + "\n[Document truncated]"
+    # Plan F: Cap SOTR context for 3328-token model
+    if len(full_text) > 4000:
+        full_text = full_text[:4000] + "\n[Document truncated]"
 
     filename = chunks[0]["metadata"].get("filename", "document")
     focus_note = f"\\nFocus specifically on: {body.focus_area}" if body.focus_area else ""
@@ -847,7 +882,10 @@ async def generate_tech_review(
     if not chunks:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    full_text = "\n\n".join(c["text"] for c in chunks[:30]) # Use first 30 chunks
+    full_text = "\n\n".join(c["text"] for c in chunks[:30])
+    # Plan F: Cap tech review context for 3328-token model
+    if len(full_text) > 4000:
+        full_text = full_text[:4000] + "\n[Document truncated]"
     filename = chunks[0]["metadata"].get("filename", "document")
 
     prompt = f"""Generate Technical Review Comments for the following submission document.

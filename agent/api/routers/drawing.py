@@ -103,6 +103,37 @@ Return ONLY valid JSON and nothing else.
         job.progress = 100
         job.result_data = result_json
         db_session.commit()
+
+        # ── Step 4: Workstream L — Cross-Modal Indexing ──
+        # Index the extracted parameters so they are searchable via RAG
+        try:
+            from api.rag import embedder
+            from api.rag.vector_store import get_store
+            
+            # Build a summary text for indexing
+            summary = f"Engineering Drawing Analysis: {job.input_data.get('filename', 'Unknown')}\n\n"
+            summary += f"Dimensions: {', '.join(result_json.get('dimensions', []))}\n"
+            summary += f"Materials: {', '.join(result_json.get('materials', []))}\n"
+            summary += f"Equipment Tags: {', '.join(result_json.get('equipment_tags', []))}\n"
+            summary += f"Compliance: {', '.join(result_json.get('compliance_notes', []))}\n"
+            
+            chunk = {
+                "text": summary,
+                "metadata": {
+                    "doc_id": f"drawing_{job_id}",
+                    "filename": job.input_data.get("filename", "Drawing"),
+                    "category": "Engineering Drawing",
+                    "source": "drawing_extraction",
+                    "job_id": job_id,
+                }
+            }
+            
+            emb = embedder.embed_texts([summary])[0]
+            store = get_store()
+            store.upsert_chunks([chunk], [emb])
+            logger.info("Workstream L: Drawing extraction indexed for search.")
+        except Exception as e:
+            logger.error("Workstream L: Failed to index drawing results: %s", e)
     except Exception as e:
         logger.error("Drawing extraction failed for job %s: %s", job_id, e)
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
@@ -181,15 +212,32 @@ async def extract_parameters(
     db: Session = Depends(get_agent_db),
     user: dict = Depends(get_current_user),
 ):
-    if not image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
+    # Workstream K: Support PDF blueprints
+    is_pdf = image.content_type == "application/pdf"
+    if not image.content_type.startswith("image/") and not is_pdf:
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image or PDF.")
 
     image_bytes = await image.read()
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image size exceeds 10MB limit.")
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size exceeds 20MB limit.")
 
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
-    data_uri = f"data:{image.content_type};base64,{base64_image}"
+    data_uri = ""
+    if is_pdf:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=image_bytes, filetype="pdf")
+        if doc.page_count == 0:
+            raise HTTPException(status_code=400, detail="PDF has no pages.")
+        
+        # Render first page at high DPI (300) for drawing precision
+        page = doc[0]
+        pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))
+        img_data = pix.tobytes("png")
+        base64_image = base64.b64encode(img_data).decode("utf-8")
+        data_uri = f"data:image/png;base64,{base64_image}"
+        doc.close()
+    else:
+        base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        data_uri = f"data:{image.content_type};base64,{base64_image}"
 
     job = AsyncJob(job_type="drawing_extraction", input_data={"filename": image.filename})
     db.add(job)
