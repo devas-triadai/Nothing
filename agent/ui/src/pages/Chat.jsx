@@ -383,6 +383,25 @@ export default function Chat() {
   const apiUrl = getApiUrl('');
   const { theme, toggleTheme } = useTheme();
 
+  const [notification, setNotification] = useState(null); // { message: string, type: 'success'|'error' }
+  const notificationTimeoutRef = useRef(null);
+
+  // Workstream: Floating Notification Sound
+  const playNotificationSound = useCallback(() => {
+    try {
+      const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+      audio.volume = 0.5;
+      audio.play();
+    } catch (e) { console.error("Sound play failed", e); }
+  }, []);
+
+  const showNotification = useCallback((message, type = 'success') => {
+    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
+    setNotification({ message, type });
+    playNotificationSound();
+    notificationTimeoutRef.current = setTimeout(() => setNotification(null), 5000);
+  }, [playNotificationSound]);
+
   useEffect(() => {
     // Fetch available documents for the context selector
     api.get('/documents')
@@ -569,6 +588,7 @@ export default function Chat() {
                   timestamp: Date.now(),
                 });
               }
+              showNotification(`Presentation on "${topic}" is ready!`, 'success');
               return copy;
             });
           } catch (err) {
@@ -637,7 +657,7 @@ export default function Chat() {
           timestamp: Date.now(),
         };
       }
-
+      showNotification('Quiz is ready!', 'success');
       if (type === 'summary' || type === 'draft_sotr' || type === 'tech_review') {
         // Stream the document
         return null; // handled via stream separately
@@ -683,6 +703,7 @@ export default function Chat() {
         docDownloadUrl = data.download_url || null;
         updateMsgs(accumulated, docDownloadUrl);
         setIsStreaming(false);
+        showNotification('Document generation complete.', 'success');
       },
       (err) => {
         updateMsgs(accumulated || `Error: ${err.message}`, null);
@@ -1602,6 +1623,7 @@ export default function Chat() {
             drawingResult: statusData.result_data, // Workstream F: structured rendering
             timestamp: Date.now(),
           }]);
+          showNotification('Drawing analysis complete.', 'success');
         } else if (statusData.status === 'failed') {
           clearInterval(interval);
           setIsPollingDrawing(false);
@@ -1734,6 +1756,25 @@ export default function Chat() {
           </button>
         </div>
       </aside>
+
+      {/* ── Floating Notification ── */}
+      {notification && (
+        <div style={{
+          position: 'fixed', top: '24px', right: '24px', zIndex: 10000,
+          background: notification.type === 'success' ? 'rgba(34,197,94,0.9)' : 'rgba(239,68,68,0.9)',
+          backdropFilter: 'blur(12px)', color: '#fff', padding: '12px 20px',
+          borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+          display: 'flex', alignItems: 'center', gap: '12px',
+          animation: 'slideIn 0.3s ease-out forwards',
+          border: '1px solid rgba(255,255,255,0.1)',
+        }}>
+          {notification.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+          <span style={{ fontWeight: 600, fontSize: '14px' }}>{notification.message}</span>
+          <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '4px', marginLeft: '8px', opacity: 0.8 }}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* ── Main Area ── */}
       <main style={styles.main}>
@@ -2227,3 +2268,15 @@ const fileChipStyles = {
     textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
 };
+
+// Global styles for animations
+const styleSheet = document.createElement("style");
+styleSheet.type = "text/css";
+styleSheet.innerText = `
+  @keyframes slideIn {
+    from { transform: translateX(120%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+`;
+document.head.appendChild(styleSheet);
+
