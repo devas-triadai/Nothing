@@ -22,6 +22,9 @@ echo "║  Target directory: ${MODELS_DIR}                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
+# ── Suppress common dependency warnings ──
+export PYTHONWARNINGS="ignore:urllib3"
+
 # ── Detect the correct HuggingFace CLI command ──
 # huggingface_hub >= 1.x uses "hf", older versions use "huggingface-cli"
 HF_CMD=""
@@ -34,7 +37,7 @@ elif command -v huggingface-cli &> /dev/null; then
     echo "✔  Found HuggingFace CLI: huggingface-cli"
 else
     echo "⚠  HuggingFace CLI not found. Installing..."
-    pip install -U "huggingface_hub[cli]"
+    pip install -U "huggingface_hub[cli]" hf_transfer
     # After install, check which command is available
     if command -v hf &> /dev/null; then
         HF_CMD="hf"
@@ -46,6 +49,14 @@ else
         exit 1
     fi
     echo "✔  Installed HuggingFace CLI: ${HF_CMD}"
+fi
+
+# ── Ensure hf_transfer is installed if enabled ──
+if [[ "${HF_HUB_ENABLE_HF_TRANSFER:-0}" == "1" ]]; then
+    if ! python3 -c "import hf_transfer" &> /dev/null; then
+        echo "⚠  hf_transfer enabled but not found. Installing..."
+        pip install hf_transfer
+    fi
 fi
 
 echo "   Using command: ${HF_CMD}"
