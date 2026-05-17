@@ -1,0 +1,156 @@
+INDIAN COAST GUARD (ICG)
+GENERAL ARRANGEMENT DRAWING — OFFSHORE PATROL VESSEL (OPV)
+DRAWING NO: ICG/DRAW/OPV/GA/001/2024
+CLASSIFICATION: RESTRICTED
+
+1. DRAWING OVERVIEW
+
+1.1 Purpose
+This General Arrangement (GA) drawing defines the spatial layout, compartmentation, and principal dimensions of the Indian Coast Guard Offshore Patrol Vessel (OPV). The GA drawing serves as the master reference for all hull, structural, outfitting, and systems design.
+
+1.2 Applicable Documents
+- ICG/TECH/OPV/SPEC/2024 — Technical Specification OPV
+- IRS Rules for Classification of Ships (2023 edition)
+- IMO SOLAS Consolidated Edition 2020
+- IS 2062: Structural Steel Standard
+
+2. PRINCIPAL DIMENSIONS
+
+2.1 Overall Dimensions
+- Length Overall (LOA): 105.0 m
+- Length Between Perpendiculars (LBP): 98.0 m
+- Breadth Moulded (B): 14.0 m
+- Depth Moulded (D): 7.5 m
+- Design Draught (T): 4.2 m
+- Full Load Displacement: 2,140 tonnes
+- Light Ship Displacement: 1,680 tonnes
+- Block Coefficient (Cb): 0.54 at design waterline
+
+2.2 Freeboard and Stability
+- Freeboard (loaded): 3.3 m amidships
+- GM (metacentric height) at full load: ≥ 1.0 m
+- GZ curve area 0°–30°: ≥ 0.055 m·rad
+- Angle of vanishing stability: ≥ 70°
+
+3. DECK ARRANGEMENT (TOP VIEW)
+
+3.1 Weather Deck (Main Deck)
+- Frame 1–8 (Stern): Flight deck for helicopter operations (10.0 m × 14.0 m clear area)
+  - Non-skid aluminium deck plating
+  - Recessed tie-down points: 12 × 5-tonne SWL
+  - Deck drainage: flush scuppers to sea chest
+- Frame 8–15: Hangar structure (12.5 m × 7.0 m × 4.5 m internal height)
+  - Sliding hangar doors: hydraulic, port and starboard
+  - Aviation fuel storage: 5,000 litres (separate segregated tank)
+- Frame 15–30: Quarterdeck / aft working deck
+  - RHIB davit positions: port and starboard (10-tonne SWL each)
+  - Tow rope storage and warping capstan
+- Frame 30–80: Main deck amidships
+  - Port side walkway (1.2 m clear width)
+  - Starboard side walkway (1.2 m clear width)
+  - 25 mm autocannon mounting pad: Frame 35 centreline
+  - Forward 76 mm gun deck: Frame 78–82, raised platform (+1.2 m above main deck)
+- Frame 80–100: Fo'c'sle
+  - Anchor windlass (2 × 15-tonne capacity)
+  - Chain locker access hatches
+  - Mooring bits and fairleads
+
+3.2 Bridge Deck (Level 2)
+- Frame 55–75: Navigation bridge
+  - Chart table: port side forward
+  - Helm console: centreline
+  - Radar displays (×2): port and starboard of helm
+  - ECDIS workstation: starboard side
+  - Bridge wings: extending 1.5 m beyond ship's side each side
+- Frame 45–55: Captain's cabin and day room
+- Frame 35–45: Officers' cabins (×4, 2-berth each)
+
+3.3 Upper Deck (Level 1)
+- Frame 30–80: Accommodation deck
+  - Sailors' mess: Frame 40–55 (capacity 40 persons)
+  - Junior ratings' cabins: Frame 55–70 (×8 cabins, 4-berth each)
+  - Medical bay: Frame 70–75 (1 × examination room, 1 × 4-berth ward)
+
+4. PROFILE VIEW (SIDE ELEVATION)
+
+4.1 Hull Profile
+- Bow form: Bulbous bow with raked stem (15° from vertical)
+- Stern form: Transom stern with 8° aftward rake
+- Superstructure: Two-level aluminium deckhouse, Frame 30–78
+- Mast: Single lattice mast at Frame 65 (height: 28 m above keel)
+- Funnel: Twin uptakes enclosed in composite casing, Frame 20–28
+
+4.2 Waterplane Profile
+- Keel line: Straight from Frame 5 to Frame 90; 1.2° rise of floor
+- Bilge keel: Both sides, Frame 10–60 (length 50 m, projection 0.4 m)
+- Sonar dome: Below keel at Frame 82 (protrudes 0.9 m below baseline)
+
+5. MIDSHIP SECTION (CROSS-SECTION AT FRAME 50)
+
+5.1 Tank Top and Double Bottom
+- Double bottom height: 1.1 m
+- Tanks at double bottom: fuel oil (port/starboard), fresh water (centreline), ballast (wing)
+- Bottom plating thickness: 12 mm (mild steel, Grade A)
+- Inner bottom plating thickness: 8 mm
+
+5.2 Shell Plating
+- Side shell thickness amidships: 10 mm (Grade A steel)
+- Side shell thickness bilge: 12 mm (Grade DH36 at stress concentration zones)
+- Sheer strake: 14 mm (Grade DH36)
+- Deck plating main deck: 8 mm
+- Deck plating upper decks: 6 mm (aluminium alloy 5083)
+
+5.3 Frame Spacing
+- Frames 0–10 (stern): 600 mm spacing
+- Frames 10–90 (parallel body): 600 mm spacing
+- Frames 90–100 (bow): 450 mm spacing (closer spacing for sea-keeping loads)
+
+5.4 Transverse Bulkheads (Watertight)
+- Frame 8: Aft peak bulkhead
+- Frame 18: Engine room aft bulkhead
+- Frame 32: Engine room forward bulkhead
+- Frame 55: Machinery space forward bulkhead
+- Frame 78: Forward magazine bulkhead
+- Frame 92: Fore peak bulkhead
+
+6. MACHINERY SPACES (PROFILE AND PLAN)
+
+6.1 Engine Room (Frame 18–32)
+- Main Engines: 2 × MTU 20V 4000 M93 (each 7,400 kW @ 2,100 rpm)
+- Reduction Gearboxes: 2 × ZF 9055, ratio 6.63:1
+- Propeller Shafts: 2 × solid stainless steel, diameter 280 mm, length 9.2 m
+- Fixed-pitch propellers: 2 × 5-blade, diameter 3.6 m
+- Controllable pitch hub: Not fitted (fixed pitch)
+- Stern tubes: Water-lubricated TENMAT bearings
+
+6.2 Auxiliary Machinery Room (Frame 32–40)
+- Diesel generators: 2 × 500 kW (440V, 60 Hz)
+- Emergency generator: 1 × 50 kW (located above waterline at Frame 40)
+- Evaporator unit: 1 × 20 T/day distillation unit
+- Air compressors: 2 × 250-bar high-pressure (for torpedo air vessels / diving)
+
+7. DRAWING NOTES
+
+7.1 General Notes
+- All dimensions in metres unless otherwise stated
+- All steelwork to IRS Grade A or higher as specified
+- Watertight doors to SOLAS Reg. II-1/13 standard
+- Non-watertight weathertight closures to IRS Pt 3 Ch 8
+
+7.2 Drawing Symbol Legend
+- WT: Watertight boundary (thick solid line)
+- WT DOOR: Watertight door (symbol: rectangle with diagonal cross)
+- FR: Frame number (dimension line reference)
+- CL: Centreline
+- FWD: Forward direction
+- AFT: Aftward direction
+- PS: Port side (left when facing forward)
+- SB: Starboard side (right when facing forward)
+- BL: Baseline (keel reference plane)
+- WL: Waterline (design waterline = WL 1)
+
+8. REVISION HISTORY
+
+Rev A — Initial issue for preliminary design review (Jan 2024)
+Rev B — Updated engine room layout after machinery vendor confirmation (Mar 2024)
+Rev C — Helicopter deck enlarged from 9.0 m to 10.0 m to accommodate AW139 (Apr 2024)

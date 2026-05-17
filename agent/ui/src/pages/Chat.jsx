@@ -1099,10 +1099,10 @@ export default function Chat() {
         m.content &&
         m.content.trim().length > 0
       )
-      .slice(-10)
+      .slice(-20)
       .map(m => ({
         role: m.role,
-        content: m.content.length > 500 ? m.content.slice(0, 500) + '…' : m.content,
+        content: m.content.length > 1000 ? m.content.slice(0, 1000) + '…' : m.content,
       }));
 
     let accumulatedText = '';
@@ -1153,16 +1153,25 @@ export default function Chat() {
 
           if (intentType === 'summary' || intentType === 'draft_sotr' || intentType === 'tech_review') {
             // Replace placeholder with header, then stream
-            setMessages(prev => {
-              const copy = [...prev];
-              copy[copy.length - 1] = {
-                ...copy[copy.length - 1],
-                content: '',
-                streaming: true,
-                summaryHeader: true, // We reuse this flag for UI layout
-              };
-              return copy;
-            });
+            if (isActive) {
+              setMessages(prev => {
+                const copy = [...prev];
+                copy[copy.length - 1] = {
+                  ...copy[copy.length - 1],
+                  content: '',
+                  streaming: true,
+                  summaryHeader: true, // We reuse this flag for UI layout
+                };
+                return copy;
+              });
+            } else {
+              setSessions(prevSessions => prevSessions.map(s => {
+                if (s.id !== sessId) return s;
+                const msgs = [...(s.messages || [])];
+                if (msgs.length > 0) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: '', streaming: true, summaryHeader: true };
+                return { ...s, messages: msgs, updatedAt: Date.now() };
+              }));
+            }
 
             streamRefs.current[sessId] = streamDocument(
               intentType,

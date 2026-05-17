@@ -1,0 +1,153 @@
+INDIAN COAST GUARD (ICG)
+PROPULSION SYSTEM SCHEMATIC — FAST INTERCEPTOR CRAFT (FIC)
+DRAWING NO: ICG/DRAW/FIC/PROP/002/2024
+CLASSIFICATION: RESTRICTED
+
+1. SCHEMATIC OVERVIEW
+
+1.1 Purpose
+This document describes the propulsion system schematic for the Indian Coast Guard Fast Interceptor Craft (FIC). The schematic covers the complete propulsion train from fuel storage through engine, coupling, and water-jet discharge.
+
+1.2 System Configuration
+- Drive type: Triple shaft, triple water-jet
+- Engine arrangement: Three main engines in a single engine room compartment
+- Control: Centralised from bridge via Electronic Propulsion Control System (EPCS)
+
+2. PROPULSION SCHEMATIC — FUNCTIONAL BLOCK DIAGRAM
+
+2.1 Fuel System Flow Path
+
+FUEL STORAGE TANKS (Port / Centreline / Starboard)
+        ↓
+FUEL TRANSFER PUMPS (×2, 800 l/hr each, electric)
+        ↓
+DAY TANKS (×3, one per engine, 200 litres each, gravity feed)
+        ↓
+FUEL FILTERS (dual-stage: 30-micron pre-filter → 2-micron final filter with water separator)
+        ↓
+MAIN ENGINES (×3)
+
+2.2 Engine-to-Jet Drive Train (per shaft, ×3)
+
+MAIN ENGINE OUTPUT SHAFT (2,300 rpm rated)
+        ↓
+FLEXIBLE COUPLING (Vulkan RATO-S type, torsional vibration rated)
+        ↓
+REDUCTION GEARBOX (ZF Marine W7200, ratio 1.5:1 → jet shaft speed 1,533 rpm)
+        ↓
+PROPULSION SHAFT (solid 316 stainless steel, ∅ 140 mm, length 2.8 m)
+        ↓
+INTERMEDIATE SHAFT BEARING (self-aligning, water-lubricated)
+        ↓
+WATERJET UNIT (KaMeWa 80SII)
+  ├── Intake: Flush-mounted below hull, 600 mm × 800 mm opening, stainless grid
+  ├── Impeller: 5-blade stainless steel, ∅ 800 mm, mixed-flow type
+  ├── Stator (nozzle): Fixed vanes, discharge diameter 720 mm
+  ├── Bucket (reverse deflector): Hydraulic actuator, 90° travel, 12-second full stroke
+  └── Steering nozzle: ±30° deflection, hydraulic, 4-second full stroke
+
+3. COOLING SYSTEM SCHEMATIC
+
+3.1 Main Engine Cooling (Seawater Side)
+SEAWATER INLET (keel cooler, Frame 10–15, port and starboard)
+        ↓
+SEAWATER STRAINER (duplex basket, 1.5 mm mesh)
+        ↓
+SEAWATER PUMP (centrifugal, electric, 80 m³/hr @ 2.5 bar, ×3)
+        ↓
+HEAT EXCHANGER (plate type, coolant/seawater, ×3)
+        ↓
+OVERBOARD DISCHARGE (Frame 8, above waterline when running)
+
+3.2 Main Engine Cooling (Freshwater Side — Closed Loop)
+ENGINE WATER JACKET → FRESHWATER PUMP (gear type, engine-driven) → EXPANSION TANK (30 l) → HEAT EXCHANGER → ENGINE WATER JACKET (loop)
+
+Thermostat set point: 85°C (operating); alarm at 92°C; shutdown at 96°C
+
+4. LUBE OIL SYSTEM SCHEMATIC (per engine)
+
+SUMP (engine-mounted, 80-litre capacity)
+        ↓
+LUBE OIL PUMP (gear type, engine-driven, 150 l/min @ 4 bar)
+        ↓
+LUBE OIL COOLER (plate heat exchanger, coolant-cooled)
+        ↓
+LUBE OIL FILTER (full-flow, 10-micron bypass valve at 3.5 bar differential)
+        ↓
+MAIN OIL GALLERY (crankshaft, camshaft, turbocharger)
+        ↓
+SUMP (drain return by gravity)
+
+Lube oil pressure: 3.5–4.5 bar (normal); alarm at 2.5 bar; shutdown at 2.0 bar
+
+5. EXHAUST SYSTEM SCHEMATIC
+
+ENGINE EXHAUST MANIFOLD (water-jacketed, 316 SS)
+        ↓
+TURBOCHARGER (KKK type, gas-gas interface)
+        ↓
+WATER INJECTION POINT (seawater injected post-turbine for cooling and noise reduction)
+        ↓
+WET EXHAUST MIXING ELBOW (FRP, 150 mm bore)
+        ↓
+EXHAUST MUFFLER (waterlock/silencer, 40 dB attenuation)
+        ↓
+OVERBOARD EXHAUST (transom outlet, above waterline, twin ports)
+
+Back-pressure limit: 60 mbar (alarm at 80 mbar)
+
+6. WATER-JET HYDRAULIC CONTROL SCHEMATIC
+
+HYDRAULIC POWER UNIT (HPU)
+  ├── Electric motor: 2 × 5.5 kW, 440V
+  ├── Hydraulic pump: 2 × gear pumps, 30 l/min @ 250 bar
+  ├── Accumulator: 2 × 10-litre nitrogen-charged (backup for power failure)
+  └── Reservoir: 60-litre tank with level/temp alarm
+
+HPU → HYDRAULIC MANIFOLD (centrally mounted, Frame 12)
+        ↓
+Per jet unit (×3):
+  ├── STEERING ACTUATOR (double-acting hydraulic cylinder, 100 mm bore × 200 mm stroke)
+  └── BUCKET ACTUATOR (double-acting hydraulic cylinder, 80 mm bore × 180 mm stroke)
+
+Control signal path: BRIDGE HELM → EPCS CONTROLLER → PROPORTIONAL VALVE → ACTUATOR
+
+7. CONTROL AND INSTRUMENTATION SCHEMATIC
+
+7.1 Bridge Console (per engine, ×3)
+- Engine throttle lever: 0%–100% (forward), 0%–60% (reverse via bucket)
+- Jet steering joystick: Integrated with rudder feedback indicator
+- Engine start/stop push-button (guarded)
+- Alarm panel: Lube oil pressure (LOP), cooling temperature (CT), exhaust back-pressure (EBP), fuel level (FL)
+
+7.2 Engine Room Panel (local control)
+- Local start/stop (emergency mode)
+- Speed (rpm) gauge per engine
+- Lube oil pressure gauge per engine
+- Coolant temperature gauge per engine
+- Fuel consumption flow meter (totalising)
+
+7.3 Data Logging
+- EPCS logs engine parameters at 1-second intervals to solid-state memory
+- Downloadable via USB for maintenance analysis
+- Retains last 500 hours of data
+
+8. SCHEMATIC DRAWING SYMBOLS
+
+- PUMP: Circle with triangle arrow indicating flow direction
+- FILTER: Rectangle with parallel diagonal lines
+- HEAT EXCHANGER: Two parallel rectangles with opposing flow arrows
+- VALVE (motorised): Circle with M label; (manual) circle with H label
+- FLOW DIRECTION: Arrow on pipe line
+- PRESSURE RELIEF VALVE: Triangle pointing to line with set pressure notation
+- STRAINER: Zigzag line across pipe
+- FLEXIBLE HOSE: Dashed pipe line segment
+- ELECTRICAL SIGNAL LINE: Dashed line (separate from fluid lines)
+
+9. MAINTENANCE INTERVALS
+
+- Waterjet impeller inspection: Every 500 running hours
+- Reduction gearbox oil change: Every 1,000 running hours
+- Flexible coupling inspection: Every 2,000 running hours or annually
+- Engine full overhaul: Every 8,000 running hours or 5 years (whichever earlier)
+- Seawater pump impeller replacement: Every 1,500 running hours

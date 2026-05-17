@@ -1,0 +1,137 @@
+INDIAN COAST GUARD (ICG)
+STRUCTURAL DRAWING — HULL FRAME SECTIONS AND SCANTLINGS
+DRAWING NO: ICG/DRAW/OPV/STRUCT/003/2024
+CLASSIFICATION: RESTRICTED
+
+1. DRAWING OVERVIEW
+
+1.1 Purpose
+This structural drawing document defines the transverse frame sections, longitudinal members, plating scantlings, and weld specifications for the ICG Offshore Patrol Vessel (OPV) hull structure. It must be read in conjunction with the General Arrangement Drawing ICG/DRAW/OPV/GA/001/2024.
+
+1.2 Classification Authority
+All scantlings comply with Indian Register of Shipping (IRS) Rules for Construction and Classification of Steel Ships, 2023.
+
+2. TYPICAL MIDSHIP SECTION — FRAME 50 (DETAILED)
+
+2.1 Bottom Structure
+- Keel plate: 16 mm Grade AH36 steel, 500 mm wide flat bar
+- Bottom longitudinals: FB 200 × 12 on 700 mm spacing, Grade A steel
+- Floor plates (solid): 10 mm Grade A, at every frame (600 mm spacing)
+- Floor plates (bracket): At alternate frames between solid floors
+- Bottom girder (centreline): 350 × 150 × 10/12 T-bar (web × flange × thicknesses), Grade AH36
+- Side girders (×2 each side): 300 × 120 × 8/10 T-bar, spaced 2,100 mm from centreline
+- Inner bottom plating: 8 mm Grade A
+- Bottom shell plating: 12 mm Grade AH36 (bilge region: 14 mm Grade DH36)
+
+2.2 Side Structure
+- Side shell plating (waterline zone): 10 mm Grade A
+- Side shell plating (impact zone, 0.5 m above/below WL): 12 mm Grade DH36
+- Sheer strake: 14 mm Grade DH36, 900 mm wide
+- Side longitudinals: FB 160 × 10, 700 mm vertical spacing
+- Web frames (primary): 400 × 150 × 10/12 T-bar, every 4th frame (2,400 mm spacing)
+- Side stringer (main deck level): 350 × 140 × 10/12 T-bar, continuous
+
+2.3 Deck Structure (Main Deck at Frame 50)
+- Deck plating: 8 mm Grade A
+- Deck longitudinals: FB 140 × 10, 700 mm transverse spacing
+- Deck transverse beams: 250 × 100 × 8/10 T-bar, every frame (600 mm)
+- Deck girder (centreline): 350 × 130 × 10/12 T-bar, continuous
+- Hatch coamings (if any): 12 mm Grade A, height 600 mm minimum
+
+3. FRAME SECTIONS AT KEY LOCATIONS
+
+3.1 Fore Peak Section (Frame 95)
+- Stem bar: 200 × 75 × 30 mm angle, Grade DH36
+- Bow shell plating: 14 mm Grade EH36 (higher grade for sea impact)
+- Breast hooks (horizontal diaphragms): 12 mm plate, at WL and above
+- Stem to keel transition: Scarph weld, full penetration, length 300 mm
+- Frame spacing: 450 mm (reduced for bow impact loading)
+- Collision bulkhead support: 12 mm brackets at Frame 92
+
+3.2 Aft Peak Section (Frame 6)
+- Stern tube frame: 16 mm Grade AH36 boxing around shaft exit
+- Rudder trunk: 16 mm Grade AH36, internal bracing at 300 mm intervals
+- Transom plating: 12 mm Grade AH36, stiffened by 150 × 10 FB at 400 mm spacing
+- Aft peak tank top: 10 mm Grade A
+- Propeller shaft boss: Cast steel, Grade A, radius 280 mm, wall 40 mm
+
+3.3 Engine Room Floor Section (Frame 25)
+- Engine seating (bedplate): 25 mm Grade AH36, boxed girder construction
+  - Bottom plate: 25 mm
+  - Top plate (bearing surface): 25 mm, machined to 0.05 mm flatness
+  - Side plates: 16 mm
+  - Internal diaphragms: 12 mm at 400 mm intervals
+- Engine room floor plating: 10 mm Grade A with 12 mm wear plates at traffic areas
+- Engine room tank top: 10 mm Grade A (same as general DB)
+- Anti-vibration mounts: Between engine bedplate and ship structure (Trelleborg type)
+
+4. LONGITUDINAL STRUCTURAL ELEMENTS
+
+4.1 Keel Assembly
+- Bar keel: 600 × 50 mm flat bar, Grade AH36, full ship length
+- Garboard strake: 14 mm Grade AH36, 1,200 mm wide, tapering to 12 mm amidships
+- Keel block openings: 25 mm clearance for dry-docking support
+
+4.2 Longitudinal Bulkheads
+- Engine room watertight longitudinal bulkheads (at 3,500 mm from CL each side):
+  - Plating: 10 mm Grade A
+  - Horizontal stringers: 250 × 100 × 8/10 T-bar at 1,200 mm spacing
+  - Vertical stiffeners: FB 160 × 10 at 600 mm spacing
+
+4.3 Continuous Longitudinal Members
+- Stringer at upper deck: 350 × 140 × 10/12 T-bar, continuous Frame 10 to 90
+- Stringer at lower deck: 300 × 120 × 8/10 T-bar, continuous Frame 10 to 80
+- Bilge keel attachment: 12 mm Grade A doubling plate 600 mm wide, full keel length
+
+5. WATERTIGHT BULKHEAD DETAILS
+
+5.1 Typical Transverse Watertight Bulkhead (e.g. Frame 32)
+- Plating thickness: 8 mm Grade A (below 2.0 m), 6 mm above
+- Vertical stiffeners: FB 160 × 10 at 600 mm spacing
+- Horizontal girders: 300 × 120 × 8/10 T-bar at 1,800 mm spacing
+- Footings: Welded to tank top with 100 × 10 bracket
+- Watertight penetrations: 6 mm minimum pad around all pipe/cable penetrations
+- Test head: Calculated per IRS — all WT bulkheads tested to freeboard deck head
+
+5.2 Collision Bulkhead (Frame 92)
+- Plating thickness: 12 mm Grade A entire height
+- Additional stiffening: 200 × 100 × 8/10 T-bar at 400 mm spacing
+- No penetrations below freeboard deck permitted
+
+6. WELD SPECIFICATIONS
+
+6.1 Structural Weld Classes
+- Class A (main structural): Full penetration butt welds with back-gouging; UT examination 100%
+- Class B (secondary structural): Partial penetration or fillet welds; MPI 20% random
+- Class C (non-structural outfitting): Fillet welds; visual inspection only
+
+6.2 Weld Sizes (minimum fillet leg)
+- 12 mm plate to 12 mm plate: 6 mm fillet
+- 16 mm plate or greater: 8 mm fillet
+- Stiffener to plating (FB 160): 5 mm continuous fillet both sides
+- Stiffener to plating (FB 200+): 6 mm continuous fillet both sides
+- Butt weld reinforcement: Ground flush after inspection at weather deck
+
+6.3 Preheat Requirements
+- Grade DH36 and EH36 ≥ 20 mm: Preheat to 100°C minimum
+- All Grade AH36 ≥ 25 mm: Preheat to 75°C minimum
+- Grade A steel: No preheat required below 20 mm, 50°C for 20 mm+
+
+7. MATERIAL SPECIFICATIONS SUMMARY
+
+| Location | Grade | Thickness (mm) | Standard |
+|---|---|---|---|
+| Keel plate | AH36 | 16 | IRS Grade AH36 |
+| Bottom shell | A / AH36 | 12 / 14 (bilge) | IRS Grade A/AH36 |
+| Side shell | A | 10–12 | IRS Grade A |
+| Sheer strake | DH36 | 14 | IRS Grade DH36 |
+| Deck plating | A | 8 | IRS Grade A |
+| Engine seating | AH36 | 25 | IRS Grade AH36 |
+| Bow plating | EH36 | 14 | IRS Grade EH36 |
+| Superstructure | 5083 aluminium | 6–8 | IS 737 / BS 1474 |
+
+8. DRAWING REVISION RECORD
+
+Rev 0 — Preliminary design, for comment (Feb 2024)
+Rev 1 — Engine seating updated to 25 mm after vibration analysis (Mar 2024)
+Rev 2 — Bow plating upgraded to EH36 per fatigue analysis recommendations (May 2024)

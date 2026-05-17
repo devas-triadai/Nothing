@@ -1,0 +1,175 @@
+INDIAN COAST GUARD (ICG)
+NAVIGATION BRIDGE LAYOUT DRAWING — OFFSHORE PATROL VESSEL (OPV)
+DRAWING NO: ICG/DRAW/OPV/BRIDGE/004/2024
+CLASSIFICATION: RESTRICTED
+
+1. DRAWING OVERVIEW
+
+1.1 Purpose
+This document defines the layout, equipment arrangement, console dimensions, and sight-line requirements for the Navigation Bridge of the Indian Coast Guard Offshore Patrol Vessel (OPV). It governs the placement of all navigation, communication, and ship-control equipment on the bridge deck.
+
+1.2 Applicable Standards
+- SOLAS Chapter V — Safety of Navigation
+- IMO Resolution MSC.191(79) — Performance Standards for Integrated Bridge Systems
+- IMO Resolution A.1047(27) — Principles of Minimum Safe Manning
+- IRS Rules Part 4 Chapter 5 — Navigation Equipment
+- IEC 60945 — Maritime navigation equipment (environmental protection)
+
+2. BRIDGE DECK PLAN (TOP VIEW)
+
+2.1 Overall Bridge Dimensions
+- Bridge total length (fore-aft): 12.0 m (Frame 55 to Frame 75)
+- Bridge total breadth: 16.2 m (including both wings)
+- Bridge interior clear width: 13.0 m (excluding wing enclosures)
+- Bridge wing length (each side): 2.8 m (overhanging ship's side by 1.5 m)
+- Deckhead height (inside): 2.7 m
+- Window sill height from bridge deck: 1.0 m
+- Window top height from bridge deck: 2.3 m (1.3 m glass panel height)
+
+2.2 Equipment Zone Layout (Plan View, from aft to forward)
+
+AFT ZONE (aft bulkhead area):
+- Chart table (1.2 m × 0.9 m, sloped top, illuminated): Port-aft corner
+- ECDIS workstation 1 (primary): Port side, 0.8 m from chart table
+- ECDIS workstation 2 (backup): Starboard side, adjacent to ECDIS 1 mirror position
+- Radio operator's console (0.9 m × 0.6 m): Starboard-aft corner
+  - Contains: GMDSS panel, HF-DSC, Inmarsat-C, NAVTEX receiver
+- Central walkway (1.2 m clear): Centreline fore-aft passage
+
+MID ZONE (main operating area):
+- Conning console (centreline, 3.0 m wide × 0.8 m deep, U-shape): Frame 68 position
+  - Centre section: Autopilot control, helm (emergency manual wheel), rudder angle indicator
+  - Port section: Engine order telegraph (×2 shafts), shaft RPM displays, bow thruster control
+  - Starboard section: Navigation lighting panel, bridge lighting dimmer, anchor alarm display
+- Radar console 1 (X-band, 25 kW): 1.2 m port of centreline, 1.0 m forward of conning console
+- Radar console 2 (S-band, 30 kW): 1.2 m starboard of centreline, mirror position
+- AIS display terminal: Between radar consoles on common pedestal
+- VHF radio panels (×4 channels): Overhead rack above radar consoles
+
+FORWARD ZONE (windows area):
+- Magnetic compass binnacle: Centreline, 1.5 m aft of forward windows, clear of magnetic interference
+- Speed log display: Integrated into conning console (centreline section)
+- Echo sounder display: Integrated into conning console (port section)
+- Gyrocompass repeater: Overhead, centreline
+- Wind speed/direction display: Overhead, centreline
+
+3. BRIDGE WING LAYOUT
+
+3.1 Port Bridge Wing
+- Wing conning position: Forward of wing, 0.5 m from ship's side extremity
+  - Wing helm (emergency tiller input): Push-button or follow-up lever
+  - Engine order telegraph (local wing repeater): 1 × lever unit
+  - Rudder angle indicator: Circular dial, 0.3 m diameter
+  - Magnetic compass (pelorus): Mounted on wing forward edge
+- Navigation light status panel: Wing after bulkhead
+- Searchlight control (1 × 2 kW Jabsco): Wing forward position, 360° traverse
+
+3.2 Starboard Bridge Wing
+- Mirror arrangement of port wing
+- Additional: Man-overboard (MOB) alarm button (guarded, red)
+- GMDSS EPIRB test activation panel (remote)
+
+4. SIGHT-LINE REQUIREMENTS (per SOLAS V/22)
+
+4.1 Forward Visibility
+- Unobstructed view from bridge: ±10° on each side of the bow
+- Blind sector forward of beam: Each blind sector ≤ 5°; total ≤ 10° in any 10° arc
+- Distance of clear view from bridge to bow: ≤ 2 ship lengths (OPV: ≤ 210 m)
+- Minimum view below horizontal from conning position: 2° above horizontal at 500 m ahead
+- Conning eye height above bridge deck: 1.65 m (for 1.75 m person at station)
+- Conning position height above waterline (full load): 9.8 m
+
+4.2 Side and Aft Visibility
+- Bridge wings must allow clear view along ship's side for mooring operations
+- View aft: Via two radar screens showing AIS returns; no direct optical aft view required by regulation
+- CCTV cameras (×4): Bow, stern, port amidships, starboard amidships — displays at chart table
+
+5. CONSOLE DIMENSIONS AND ERGONOMICS
+
+5.1 Conning Console Detail
+- Total width: 3,000 mm
+- Depth (reach): 750 mm (all controls within 600 mm reach)
+- Console face angle: 15° sloped toward operator
+- Control surface height from deck: 1,050 mm (working surface)
+- Display screen height: 1,350–1,700 mm from deck (eye level range)
+- Knee clearance: 650 mm height × 600 mm depth
+- Seat provision: 2 × adjustable captain's chairs, 750 mm rail spacing
+
+5.2 Radar Console Detail
+- Console type: Standalone pedestal, 600 mm diameter circular base
+- Display: 19-inch LCD, anti-reflection coating, night-vision compatible
+- Range scales: 0.125 NM to 96 NM
+- ARPA tracking: ≥ 40 targets simultaneously
+- AIS overlay: Integrated, displaying Class A and B targets
+
+5.3 Chart Table Detail
+- Table top dimensions: 1,200 mm × 900 mm
+- Illumination: Adjustable LED strips, red/white switchable (SOLAS compliance)
+- Storage drawers: 3 × A0 chart drawers below tabletop
+- ECDIS interface: USB/LAN connection for paper chart backup
+
+6. COMMUNICATION EQUIPMENT LAYOUT
+
+6.1 Fixed VHF Stations
+- VHF Station 1 (CH 16 watch): Port radar console integrated handset
+- VHF Station 2 (working channel): Starboard radar console integrated handset
+- VHF Station 3 (GMDSS DSC): Radio console, dedicated DSC controller
+- VHF Station 4 (internal comms/PA): Conning console centreline
+
+6.2 HF Radio
+- HF-DSC transceiver (150W): Radio console, starboard aft
+- Antenna coupler: Mast top, remote-tuned, cable length 42 m
+- HF frequencies programmed: 4, 8, 12, 16, 22 MHz (maritime distress and working)
+
+6.3 Satellite Communications
+- Mini-M SATCOM terminal: Radio console
+  - Antenna: Above bridge deck at Frame 65 mast position (gimballed dome, 0.6 m diameter)
+- Inmarsat-C terminal: Integrated in GMDSS panel
+  - Data rate: 600 bps (distress messages and SafetyNET reception)
+
+6.4 Internal Communications
+- Engine room telegraph (primary): Conning console
+- Engine room voice tube: Conning console (backup, gravity-type)
+- Ship's PA (general alarm): Handset at conning console; power amplifier in radio room
+- Combat Information Centre (CIC) intercom: Dedicated handset, conning console starboard
+
+7. LIGHTING SPECIFICATION
+
+7.1 Bridge Lighting Zones
+- Navigational working area: Red lighting (≤ 1 lux) for night adaptation
+- Chart table: White/red switchable, 500 lux white / 50 lux red
+- Display screens: Individual brightness/contrast controls (0–100%)
+- Emergency: Battery-backed fluorescent strip, 10 lux minimum
+
+7.2 External Bridge Lights
+- Steaming light (masthead): LED, 225° arc, 6 NM range
+- Port navigation light: LED, red, 112.5° arc, 3 NM range
+- Starboard navigation light: LED, green, 112.5° arc, 3 NM range
+- Stern light: LED, white, 135° arc, 3 NM range
+- Anchor light: LED, white, 360° arc, 3 NM range
+- All navigation lights: Dual-element (automatic changeover on failure)
+
+8. FIRE AND SAFETY EQUIPMENT ON BRIDGE
+
+- Fire alarm panel (bridge repeater): Port aft bulkhead — displays all zone alarms
+- Watertight door control panel: Starboard aft — open/close/indicate status all WT doors
+- Fixed fire detection: 2 × smoke detectors, 1 × heat detector
+- Fire extinguisher: 2 × 5 kg CO2 (bridge), 1 × 2 kg CO2 (radio room)
+- Immersion suits storage: 4 suits in marked locker, port aft corner
+- Emergency stop for funnel fans: Guarded button, bridge aft bulkhead
+
+9. DRAWING NOTES
+
+- Minimum aisle width between consoles: 900 mm (SOLAS requirement)
+- All consoles finished in matte dark grey (Munsell N5 or equivalent) to minimise glare
+- All cable runs behind console panels; minimum 25 mm conduit for data cables
+- Console earth bonding: 10 mm² green/yellow cable to ship's earth bus
+- Gyro compass master unit location: Gyro room below bridge at Frame 65
+- All instruments to IEC 60945 electromagnetic compatibility standard
+
+10. REVISION RECORD
+
+Rev 0 — Issued for design review (Jan 2024)
+Rev 1 — Conning console width increased from 2.4 m to 3.0 m after ergonomic review (Feb 2024)
+Rev 2 — SATCOM antenna position moved from bridge roof to mast top (Mar 2024)
+Rev 3 — Added CIC intercom handset at conning console following operational feedback (Apr 2024)

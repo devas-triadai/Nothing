@@ -190,10 +190,10 @@ RULES:
 """
 
 
-def _format_context(chunks: List[Dict[str, Any]], max_chars_per_chunk: int = 400) -> str:
+def _format_context(chunks: List[Dict[str, Any]], max_chars_per_chunk: int = 800) -> str:
     """Format retrieved chunks into NUMBERED context blocks for the prompt.
     The number [N] is what the LLM should use for inline citations.
-    Truncates each chunk to avoid exceeding the LLM context window (3328 tokens).
+    Truncates each chunk to avoid exceeding the LLM context window.
     """
     lines = []
     for i, c in enumerate(chunks, 1):
@@ -610,21 +610,21 @@ async def query_pipeline(
             yield {"done": True, "sources": []}
             return
 
-    # 4. Rerank → top 6 (reduce prompt size for 3328 ctx model)
+    # 4. Rerank → top 6
     logger.info("Stage: reranking %d candidates …", len(candidates))
     top_chunks = await _loop.run_in_executor(
         None, reranker.rerank, question, candidates, 6
     )
     logger.info("Stage: reranked to %d chunks. Fetching house rules …", len(top_chunks))
 
-    # 5. Build prompt (truncate to fit 3328-token context)
+    # 5. Build prompt
     house_rules = await _fetch_house_rules(token)
     logger.info("Stage: house rules fetched. Building prompt …")
     base_prompt = house_rules if house_rules.strip() else _SYSTEM_PROMPT_FALLBACK
     # Cap house rules at ~800 chars to leave room for context + history
     if len(base_prompt) > 800:
         base_prompt = base_prompt[:800] + "\n[Rules truncated]"
-    context_str = _format_context(top_chunks, max_chars_per_chunk=250)
+    context_str = _format_context(top_chunks, max_chars_per_chunk=800)
 
     # Check for superseded documents via Admin Backend
     # Skip builtin docs — they are auto-ingested at startup and never exist in
@@ -666,9 +666,10 @@ async def query_pipeline(
 
     # ── Workstream I: Token-budget-aware conversation history ──
     # Approximate 1 token ≈ 4 chars.  Reserve space for system + question + generation.
-    _CTX_LIMIT = 3328
-    _PROMPT_RESERVE = 1800
-    _CHAR_LIMIT = _CTX_LIMIT * 4  # ~13312 chars for 3328 tokens
+    # llama-server runs with -c 16384; use 8192 as a safe working budget.
+    _CTX_LIMIT = 8192
+    _PROMPT_RESERVE = 2048
+    _CHAR_LIMIT = _CTX_LIMIT * 4  # ~32768 chars for 8192 tokens
     _QUESTION_RESERVE = 600       # chars reserved for the user question
     _GENERATION_RESERVE = _PROMPT_RESERVE * 4  # chars reserved for output tokens
 
@@ -688,14 +689,14 @@ async def query_pipeline(
     # Fill from most recent backward, respecting budget
     history_to_add = []
     remaining = history_budget
-    for msg in reversed(clean_history[-10:]):  # Consider last 10 max
+    for msg in reversed(clean_history[-20:]):  # Consider last 20 messages = 10 full turns
         content = msg.get("content", "")
         # Truncate each message to 300 chars to prevent a single long response from consuming the entire budget
         if len(content) > 300:
             content = content[:300] + "…"
         msg_chars = len(content) + 20  # +20 for role/formatting overhead
         if msg_chars > remaining:
-            break
+            continue
         history_to_add.insert(0, {"role": msg.get("role", "user"), "content": content})
         remaining -= msg_chars
 
@@ -795,8 +796,9 @@ async def query_pipeline(
             logger.warning("Failed to log usage: %s", e)
 
     # Normalize RRF to a human-friendly 0-1 confidence scale.
-    # Theoretical RRF max with k=60: 2/(60+1) ≈ 0.0328.
-    _rrf_max = 2.0 / (60.0 + 1.0)
+    # Use single-component max 1/(60+1) ≈ 0.0164 — a realistic ceiling for a
+    # result that ranks #1 on dense search but not necessarily on BM25.
+    _rrf_max = 1.0 / (60.0 + 1.0)
     confidence = min(max_score / _rrf_max, 1.0) if _rrf_max else 0.0
 
     yield {

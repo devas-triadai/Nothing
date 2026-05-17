@@ -1,0 +1,194 @@
+INDIAN COAST GUARD (ICG)
+ELECTRICAL SINGLE LINE DIAGRAM — OFFSHORE PATROL VESSEL (OPV)
+DRAWING NO: ICG/DRAW/OPV/ELEC/005/2024
+CLASSIFICATION: RESTRICTED
+
+1. DIAGRAM OVERVIEW
+
+1.1 Purpose
+This Single Line Diagram (SLD) defines the electrical power generation, distribution, protection, and load arrangement for the Indian Coast Guard Offshore Patrol Vessel (OPV). It is the governing reference for all electrical installation, maintenance, and fault-finding activities.
+
+1.2 Applicable Standards
+- IRS Rules for Electrical Installations in Ships, 2023
+- IMO SOLAS Chapter II-1, Part D — Electrical Installations
+- IEC 60092 — Electrical installations in ships (all applicable parts)
+- IEC 61439 — Low-voltage switchgear and controlgear assemblies
+- IEEE 45 — Recommended Practice for Electrical Installations on Shipboard
+
+2. POWER GENERATION
+
+2.1 Main Generators
+- Generator 1 (DG1): 500 kW, 440V, 60 Hz, 3-phase, 4-wire
+  - Prime mover: Cummins KTA19-M diesel
+  - Location: Engine room, port side, Frame 22
+  - AVR: Basler BE1-11f automatic voltage regulator
+  - Protection relay: SEL-300G (overcurrent, differential, under/over voltage, frequency)
+  - Circuit breaker: 3-pole MCCB 1,000A, 440V, Icu = 65 kA
+
+- Generator 2 (DG2): 500 kW, 440V, 60 Hz, 3-phase, 4-wire
+  - Prime mover: Cummins KTA19-M diesel
+  - Location: Engine room, starboard side, Frame 22
+  - AVR: Basler BE1-11f (identical to DG1)
+  - Protection relay: SEL-300G
+  - Circuit breaker: 3-pole MCCB 1,000A, 440V, Icu = 65 kA
+
+2.2 Emergency Generator (ESB)
+- Rating: 50 kW, 440V, 60 Hz, 3-phase
+- Prime mover: Perkins 1104D diesel, air-cooled
+- Location: Emergency generator room, Frame 40, above waterline
+- Automatic start on main bus failure: Start within 45 seconds (SOLAS requirement)
+- Emergency switchboard (ESB) fed: 440V essential services only
+- Circuit breaker: 3-pole MCCB 125A, 440V
+
+2.3 Shore Power Connection
+- Shore supply rating: 440V, 60 Hz, 3-phase, 200 kVA maximum
+- Shore connection box: Frame 55, port side weather deck
+- Automatic changeover: Shore power inhibits generator start (manual override available)
+- Isolation transformer: 200 kVA, 440V/440V, for galvanic isolation from shore earth
+- Shore breaker: 3-pole MCCB 300A
+
+3. MAIN SWITCHBOARD (MSB)
+
+3.1 Configuration
+- Type: Dead-front, free-standing steel enclosure
+- Location: Switchboard room, Frame 30, centreline
+- Rated voltage: 440V AC, 60 Hz
+- Rated current (bus): 2,000A continuous
+- Short-circuit rating: 65 kA (1 second)
+- Degree of protection: IP54 (SOLAS requirement for machinery spaces)
+- Number of sections: 4 (DG1 section, DG2 section, bus tie section, distribution section)
+
+3.2 Bus Configuration
+- Single bus with bus-tie circuit breaker (BTB)
+- Bus tie breaker: 3-pole 2,000A MCCB, motor-operated, auto-synchronisation interlocked
+- Synchronising panel: Integrated in MSB bus tie section
+  - Synchroscope: Analogue, 0–360°
+  - Frequency meters: One per generator (digital, ±0.01 Hz)
+  - Voltage meters: One per generator (digital, ±0.5V)
+  - Auto-sync relay: Preferred Load Sharing Controller (PLSC)
+
+3.3 MSB Outgoing Feeders (440V distribution)
+- Feeder 1: Main propulsion motor control centre (if applicable) — 1,200A
+- Feeder 2: Deck machinery (anchor windlass, mooring winches, crane) — 400A
+- Feeder 3: Accommodation HVAC (main chiller plant) — 300A
+- Feeder 4: Galley and laundry — 150A
+- Feeder 5: Workshop machinery — 100A
+- Feeder 6: Fire pump motor — 80A
+- Feeder 7: Ballast pump — 80A
+- Feeder 8: Distribution transformer T1 (440V/230V, 100 kVA) — 200A
+- Feeder 9: Distribution transformer T2 (440V/230V, 100 kVA, bridge and navigation) — 200A
+- Feeder 10: Emergency switchboard bus-tie (normally open) — 125A
+
+4. EMERGENCY SWITCHBOARD (ESB)
+
+4.1 Configuration
+- Type: Dead-front, bulkhead-mounted
+- Location: Emergency generator room, Frame 40
+- Rated voltage: 440V AC, 60 Hz
+- Rated current (bus): 125A
+- Short-circuit rating: 10 kA
+
+4.2 ESB Outgoing Feeders (essential services only)
+- Fire detection and alarm system: 5A
+- Navigation lights: 10A
+- Emergency lighting (all spaces): 20A
+- Radio and GMDSS equipment: 15A
+- Engine room essential alarms: 10A
+- Bilge pump (emergency): 30A
+- Steering gear (emergency): 40A
+
+5. 230V DISTRIBUTION
+
+5.1 Distribution Transformers
+- T1 (440V/230V, 100 kVA): Feeds accommodation, crew cabins, general lighting
+  - Secondary protection: 3-pole 400A MCCB at secondary bus
+  - Single-phase distribution boards (DBs) fed from T1: DB-ACC-01 to DB-ACC-04
+
+- T2 (440V/230V, 100 kVA): Feeds navigation bridge, radio room, CIC, ops equipment
+  - Secondary protection: 3-pole 400A MCCB at secondary bus
+  - Distribution boards: DB-BRIDGE-01, DB-RADIO-01, DB-CIC-01
+
+5.2 Distribution Board DB-BRIDGE-01 (Navigation Bridge, 230V)
+- Supply: From T2, 63A 3-pole MCB
+- Outgoing single-phase circuits:
+  - ECDIS 1: 10A MCB
+  - ECDIS 2: 10A MCB
+  - Radar 1 (X-band): 16A MCB
+  - Radar 2 (S-band): 16A MCB
+  - AIS terminal: 6A MCB
+  - GMDSS / radio: 16A MCB (fed from T2 for UPS continuity)
+  - Bridge lighting: 16A MCB
+  - Navigation lights controller: 10A MCB
+  - GPS / chart plotter: 6A MCB
+  - Gyrocompass power supply: 10A MCB
+  - Conning console instrumentation: 16A MCB
+  - Spare: 4 × 10A MCB positions
+
+6. BATTERY SYSTEMS
+
+6.1 Starting Batteries (Main Engines)
+- 3 × battery banks (one per engine): 24V DC, 200 Ah, lead-acid
+- Charger: 24V / 20A float charger, connected to 230V AC supply
+- Protection: 100A fuse on positive lead
+
+6.2 Starting Battery (Emergency Generator)
+- 1 × battery bank: 24V DC, 100 Ah, lead-acid
+- Charger: 24V / 10A, connected to ESB 230V supply
+
+6.3 Emergency Lighting Batteries
+- Central battery system: 24V DC, 500 Ah, VRLA sealed lead-acid
+- Autonomy: ≥ 3 hours (SOLAS II-1/42 requirement)
+- Charger: 24V / 50A float charger from ESB
+- Self-test: Automatic weekly discharge test with alarm on failure
+
+6.4 UPS System (Navigation and Radio Equipment)
+- Rating: 3 kVA, 230V AC, online double-conversion
+- Battery: Internal 48V VRLA, 30-minute autonomy at full load
+- Input: From DB-BRIDGE-01 (T2 supply)
+- Output: Clean 230V to ECDIS, radar displays, AIS, GPS
+
+7. EARTHING AND BONDING
+
+7.1 Hull Earth
+- Ship's hull used as common earth reference (insulated return system per IEC 60092-101)
+- Main earth bus: 95 mm² copper bar, MSB earth section
+- All equipment frames and enclosures connected to earth bus via 10 mm² min conductors
+
+7.2 Cathodic Protection Interface
+- Hull mounted zinc anodes do NOT connect to electrical earth
+- Impressed current cathodic protection (ICCP) system: Isolated transformer for anode supply
+- ICCP transformer: 24V DC / 30A, isolated from ship's electrical earth
+
+8. CABLE SPECIFICATION
+
+8.1 Cable Types
+- Power cables (440V): IEC 60092-353, LSHF (low-smoke halogen-free), armoured
+- Control cables: IEC 60092-376, LSHF, screened
+- Navigation/data cables: IEC 60092-370, twisted pair, LSHF, screened
+- Fire alarm cables: IEC 60702-1, mineral-insulated (MI) copper sheath
+
+8.2 Cable Sizing Basis
+- All power cables sized to ≤ 60°C conductor temperature at rated load
+- Voltage drop: ≤ 3% for main feeders; ≤ 5% for final circuits
+- Short-circuit rating: Cables withstand fault current for relay operating time
+
+9. PROTECTION COORDINATION SUMMARY
+
+| Level | Device | Rating | Setting |
+|---|---|---|---|
+| Generator | SEL-300G relay + MCCB | 1,000A | 50/51 overcurrent |
+| Main bus feeder | MCCB | 125A–1,200A | Thermal-magnetic |
+| DB incomer | MCB | 63A | Thermal-magnetic |
+| DB final circuit | MCB | 6A–32A | Type C characteristic |
+
+10. DRAWING NOTES AND REVISION RECORD
+
+- All circuit breakers to be type-tested to IEC 61439 and IEC 60947-2
+- Insulation resistance test: ≥ 1 MΩ for each circuit before commissioning
+- Earth fault monitoring: High resistance earth fault relay on each bus section (alarm at 5 kΩ)
+- All cable routes to avoid penetration of watertight boundaries without approved stuffing glands
+
+Rev 0 — Initial issue for design review (Feb 2024)
+Rev 1 — Emergency generator rating revised 40 kW → 50 kW to meet GMDSS power budget (Mar 2024)
+Rev 2 — UPS added for navigation equipment (Apr 2024)
+Rev 3 — ICCP isolation confirmed with cathodic protection vendor (May 2024)

@@ -21,7 +21,8 @@ logger = logging.getLogger("agra.classifier")
 # ═══════════════════════════════════════════════════════════════
 
 _FILENAME_PATTERNS = [
-    (r"(?i)(SOTR|SOR|specification|standard|requirement|norm|ISO|BIS|MIL.STD|ABS|LR|DNV|IRS|IACS)", "Standard", "specification,requirements"),
+    (r"(?i)\b(SOTR|statement.of.technical.requirements)\b", "SOTR", "specification,requirements,sotr"),
+    (r"(?i)(SOR|specification|standard|requirement|norm|ISO|BIS|MIL.STD|ABS|LR|DNV|IRS|IACS)", "Standard", "specification,requirements"),
     (r"(?i)(blueprint|drawing|GA|general.arrangement|piping|schematic|diagram|layout|assembly|cross.section|structural)", "Blueprint", "engineering,drawing"),
     (r"(?i)(SOP|operational|procedure|manual|guideline|protocol|instruction|checklist)", "SOP", "operational,procedure"),
     (r"(?i)(report|analysis|assessment|survey|inspection|audit|finding|observation|review)", "Report", "report,assessment"),

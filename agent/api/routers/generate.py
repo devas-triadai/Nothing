@@ -234,10 +234,9 @@ async def generate_ppt(
             None, rerank, body.topic, candidates, 10
         )
 
-    context_text = "\n\n".join(c["text"][:500] for c in context_chunks[:15])
-    # Plan F: Cap context to prevent overflow on 3328-token model
-    if len(context_text) > 4000:
-        context_text = context_text[:4000] + "\n[Content truncated]"
+    context_text = "\n\n".join(c["text"][:1500] for c in context_chunks[:15])
+    if len(context_text) > 12000:
+        context_text = context_text[:12000] + "\n[Content truncated]"
 
     # ── 2. Extract images from uploaded documents ──
     extracted_images = []
@@ -497,10 +496,9 @@ async def generate_summary(
     if not chunks:
         raise HTTPException(status_code=404, detail="Documents not found in knowledge base.")
 
-    # Combine all chunk text (truncate to ~3000 chars ≈ 750 tokens for 3328 ctx model)
     full_text = "\n\n".join(c["text"] for c in chunks[:10])
-    if len(full_text) > 3000:
-        full_text = full_text[:3000] + "\n[Content truncated for summary generation]"
+    if len(full_text) > 8000:
+        full_text = full_text[:8000] + "\n[Content truncated for summary generation]"
 
     filename_label = ", ".join(filenames) if len(filenames) <= 3 else f"{len(filenames)} Documents"
 
@@ -534,7 +532,7 @@ Cite specific sections where relevant using [Page X] notation."""
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
+                for tok in llm_engine.stream_generate(messages, max_tokens=2048):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:
@@ -815,7 +813,7 @@ Use formal, objective military specification language (e.g., 'The system shall..
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
+                for tok in llm_engine.stream_generate(messages, max_tokens=2048):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:
@@ -916,7 +914,7 @@ Keep the tone professional, objective, and analytical."""
 
         def _run_llm():
             try:
-                for tok in llm_engine.stream_generate(messages, max_tokens=1200):
+                for tok in llm_engine.stream_generate(messages, max_tokens=2048):
                     token_queue.put_nowait(tok)
                 token_queue.put_nowait(None)
             except Exception as e:
