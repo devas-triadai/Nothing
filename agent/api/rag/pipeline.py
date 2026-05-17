@@ -112,11 +112,22 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
             q, re.IGNORECASE
         )
         topic = topic_match.group(1).strip() if topic_match else q
-        # Clean up topic — remove trigger words
+        # Clean up topic — remove PPT trigger verb phrases
         topic = re.sub(
             r'^(creat|generat|build|make|prepar)e?\s+(a\s+)?(ppt|powerpoint|presentation|slides?)\s*',
             '', topic, flags=re.IGNORECASE
-        ).strip() or q
+        ).strip()
+        # Strip common non-topic filler phrases (e.g. "with the file attached", "from the document")
+        topic = re.sub(
+            r'\b(with\s+the\s+file\s+attached|from\s+the\s+(attached\s+)?(file|document|docs?)|using\s+the\s+(attached\s+)?(file|document|docs?)|based\s+on\s+(the\s+)?(attached\s+)?(file|document|docs?))\b',
+            '', topic, flags=re.IGNORECASE
+        ).strip()
+        # If topic is now empty or still looks like a raw command, use a clean default
+        if not topic or re.match(
+            r'^(creat|generat|build|make|a|ppt|powerpoint|presentation|slides?|the|this)[\s.,!]*$',
+            topic, re.IGNORECASE
+        ):
+            topic = "Document Overview"
 
         # Extract number of slides if mentioned (e.g., "5 slides")
         num_slides = 10
@@ -130,7 +141,7 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
         # Remove "of 5 slides" or "for 5 slides" from the topic so it doesn't end up in the PPT title
         topic = re.sub(r'\b(?:of|for|with)?\s*\d+\s*slides?\b', '', topic, flags=re.IGNORECASE).strip()
         # Clean up any trailing prepositions or spaces
-        topic = re.sub(r'\s+(?:of|for|with|regarding|on|about)\s*$', '', topic, flags=re.IGNORECASE).strip()
+        topic = re.sub(r'\s+(?:of|for|with|regarding|on|about)\s*$', '', topic, flags=re.IGNORECASE).strip() or "Document Overview"
 
         return {"type": "ppt", "topic": topic, "num_slides": max(3, min(num_slides, 25))}
     if _INTENT_QUIZ.search(q):
@@ -451,16 +462,31 @@ async def query_pipeline(
             }
             return
 
-        # Get available doc_ids (use filter if set, else all)
+        # Require user to have selected/uploaded a document for summary/quiz.
+        # Using _get_all_doc_ids() here picks a non-deterministic builtin standard
+        # which is wrong — the user must explicitly attach or select the target doc.
         if doc_ids_filter:
             doc_ids = doc_ids_filter
         else:
-            doc_ids = await _loop.run_in_executor(None, _get_all_doc_ids)
+            intent_type = intent.get("type", "content")
+            yield {
+                "token": (
+                    f"To generate a {intent_type.replace('_', ' ')}, please select or upload the target document first. "
+                    "Click the 📎 attachment button or choose a document from the document list, then ask again."
+                )
+            }
+            yield {"done": True, "sources": []}
+            return
 
         if not doc_ids:
             yield {"token": "No documents are indexed yet. Please upload documents first."}
             yield {"done": True, "sources": [], "intent": intent["type"]}
             return
+
+        # Prefer user-uploaded docs (non-builtin) as the primary doc_id for summary/quiz.
+        # Builtin knowledge-base docs are standards/reference material, not presentation targets.
+        non_builtin = [d for d in doc_ids if not d.startswith("builtin:")]
+        primary_doc_id = non_builtin[0] if non_builtin else doc_ids[0]
 
         # Signal intent to the frontend with doc context
         yield {
@@ -468,7 +494,7 @@ async def query_pipeline(
             "intent_params": {
                 **intent,
                 "doc_ids": doc_ids,
-                "doc_id": doc_ids[0],  # Primary doc for summary/quiz
+                "doc_id": primary_doc_id,  # Primary doc for summary/quiz — prefer user-uploaded
             },
             "done": True,
             "sources": [],

@@ -675,19 +675,23 @@ export default function Chat() {
 
   // ── Stream Document via SSE ──
   const streamDocument = (intentType, intentParams, sessId, updateMsgs) => {
-    const { doc_id, summary_type, target_audience } = intentParams;
+    const { doc_id, doc_ids, summary_type, target_audience } = intentParams;
     let accumulated = '';
     let docDownloadUrl = null;
 
+    // Pass full doc_ids list so the summary endpoint uses the user-selected docs,
+    // not an arbitrary single primary doc that may resolve to a builtin standard.
+    const docIdsPayload = doc_ids && doc_ids.length > 0 ? doc_ids : (doc_id ? [doc_id] : []);
+
     let endpoint = '/api/agent/generate/summary';
-    let payload = { doc_id, summary_type: summary_type || 'executive' };
+    let payload = { doc_ids: docIdsPayload, summary_type: summary_type || 'executive' };
 
     if (intentType === 'draft_sotr') {
       endpoint = '/api/agent/generate/sotr';
-      payload = { doc_id };
+      payload = { doc_id: doc_id || docIdsPayload[0] };
     } else if (intentType === 'tech_review') {
       endpoint = '/api/agent/generate/tech-review';
-      payload = { doc_id, target_audience: target_audience || 'shipyard' };
+      payload = { doc_id: doc_id || docIdsPayload[0], target_audience: target_audience || 'shipyard' };
     }
 
     const abort = connectStream(
@@ -1250,24 +1254,47 @@ export default function Chat() {
           }
 
           // PPT or Quiz — call generation API
-          setMessages(prev => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { ...copy[copy.length - 1], content: 'Generating…', streaming: true };
-            return copy;
-          });
+          // Update placeholder in the correct session (user may have switched away)
+          if (isActive) {
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], content: 'Generating…', streaming: true };
+              return copy;
+            });
+          } else {
+            setSessions(prevSessions => prevSessions.map(s => {
+              if (s.id !== sessId) return s;
+              const msgs = [...(s.messages || [])];
+              if (msgs.length > 0) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: 'Generating…', streaming: true };
+              return { ...s, messages: msgs, updatedAt: Date.now() };
+            }));
+          }
 
           const result = await handleIntent(intentType, intentParams, question);
-          setIsStreaming(false);
+          if (isActive) setIsStreaming(false);
 
-          setMessages(prev => {
-            const copy = [...prev];
-            copy[copy.length - 1] = {
-              ...(result || { role: 'assistant', content: 'Done.', sources: [] }),
-              streaming: false,
-            };
-            persistMessages(copy, sessId);
-            return copy;
-          });
+          // Persist result to the originating session, not the currently active one
+          const finalResult = result || { role: 'assistant', content: 'Done.', sources: [] };
+          if (isActive) {
+            setMessages(prev => {
+              const copy = [...prev];
+              copy[copy.length - 1] = { ...finalResult, streaming: false };
+              persistMessages(copy, sessId);
+              return copy;
+            });
+          } else {
+            setSessions(prevSessions => {
+              const updated = prevSessions.map(s => {
+                if (s.id !== sessId) return s;
+                const msgs = [...(s.messages || [])];
+                if (msgs.length > 0) msgs[msgs.length - 1] = { ...finalResult, streaming: false };
+                persistMessages(msgs, sessId);
+                return { ...s, messages: msgs, updatedAt: Date.now() };
+              });
+              saveSessions(updated);
+              return updated;
+            });
+          }
           delete streamRefs.current[sessId];
           return;
         }

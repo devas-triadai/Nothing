@@ -137,13 +137,13 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    # Workstream D: Strictly cap context to fit 3328-token inference window
-    # ~2500 chars subject + ~2000 chars standard + ~800 chars prompt = ~5300 chars ≈ 1300 tokens
-    # Leaves ~2000 tokens for output (max_tokens=800 + safety)
-    _MAX_SUBJECT_CHARS = 2500
-    _MAX_STANDARD_CHARS = 2000
-    _MAX_SUBJECT_CHUNKS = 8
-    _MAX_STANDARD_CHUNKS = 6
+    # Context caps calibrated for 16384-token llama-server (8192 working budget).
+    # ~8000 chars subject + ~6000 chars standard + ~1200 chars prompt ≈ 3800 tokens.
+    # Leaves ~2500 tokens for JSON output (max_tokens=2500).
+    _MAX_SUBJECT_CHARS = 8000
+    _MAX_STANDARD_CHARS = 6000
+    _MAX_SUBJECT_CHUNKS = 15
+    _MAX_STANDARD_CHUNKS = 10
 
     subject_text = "\n\n".join(
         f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
@@ -163,7 +163,7 @@ async def compliance_check(
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
-    prompt = f"""You are a compliance analyst for the Indian Coast Guard.
+    prompt = f"""ROLE: You are an expert compliance auditor for the Indian Coast Guard. Return ONLY valid JSON arrays — no explanations, no prose, no markdown fences.
 
 TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT(S) against the STANDARD(S).
 
@@ -186,22 +186,24 @@ Return ONLY a valid JSON array of findings. Each finding must strictly follow th
   "clause_id": "Exact clause/section reference from the standard",
   "requirement": "What the standard requires",
   "acceptance_criterion": "The specific technical metric or condition required to pass",
-  "verdict": "Compliant" | "Non-Compliant" | "Partial" | "Missing" | "Contradiction" | "Unverifiable",
-  "severity": "Critical" | "Major" | "Minor" | "None" (Use Critical for life-safety or core mission failure; None if Compliant),
+  "verdict": "Compliant",
+  "severity": "Critical",
   "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing, contradictory, or selectively compliant.",
   "recommendation": "Specific action needed (if not fully compliant)",
   "citation": "Relevant excerpt from the subject document, if any"
 }}
 
-Analyse at least 5-10 key clauses in depth. Return valid JSON array only:"""
+VERDICT must be one of: Compliant, Non-Compliant, Partial, Missing, Contradiction, Unverifiable
+SEVERITY must be one of: Critical, Major, Minor, None (Critical for life-safety failures; None if Compliant)
+
+Analyse at least 5-10 key clauses in depth. OUTPUT: a valid JSON array only, starting with [ and ending with ]:"""
 
     messages = [
-        {"role": "system", "content": "You are an expert compliance auditor. Return only valid JSON arrays."},
         {"role": "user", "content": prompt},
     ]
 
     try:
-        findings_raw = llm_engine.generate(messages, max_tokens=800, temperature=0.3)
+        findings_raw = llm_engine.generate(messages, max_tokens=2500, temperature=0.2)
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
@@ -261,11 +263,10 @@ Return ONLY a valid JSON array of these missing findings, using the exact same f
 If there are no major missing requirements, return an empty array []."""
 
     messages_missing = [
-        {"role": "system", "content": "You are an expert compliance auditor. Return only valid JSON arrays."},
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=800, temperature=0.3)
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=1200, temperature=0.2)
         cleaned = _clean_json(missing_raw)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1

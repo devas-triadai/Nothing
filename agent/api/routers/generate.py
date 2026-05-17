@@ -143,26 +143,50 @@ def _repair_json_with_llm(broken: str, error_msg: str) -> Optional[dict]:
 
 def _build_fallback_slides(topic: str, context_text: str, num_slides: int = 10) -> list:
     """
-    Generate a basic bullet-slide deck when the LLM fails to return valid JSON.
-    Splits context into chunks and creates one slide per chunk.
+    Generate a structured fallback deck when the LLM fails to return valid JSON.
+    Strips metadata artifacts, extracts section headings for slide titles, and
+    adds light visual variety (section headers, two_column) where possible.
     """
     slides = [
-        {"layout": "title", "title": topic, "subtitle": "AGRA Generated Presentation"},
+        {"layout": "title", "title": topic, "subtitle": "Indian Coast Guard | AGRA Knowledge Management"},
     ]
-    # Split context into roughly equal chunks for bullet slides
-    sentences = [s.strip() for s in re.split(r'[.\n]+', context_text) if len(s.strip()) > 20]
-    chunk_size = max(1, len(sentences) // max(1, num_slides - 2))
+
+    # Strip raw metadata artifacts emitted by _format_context before splitting
+    _ARTIFACT_RE = re.compile(
+        r'\[Document:[^\]]*\]|\[Page\s*\d+[^\]]*\]|\|\s*Page\s*\d+|\[Content truncated[^\]]*\]',
+        re.IGNORECASE,
+    )
+    clean_context = _ARTIFACT_RE.sub('', context_text).strip()
+
+    # Extract section headings (ALL-CAPS lines or Markdown headings) for slide titles
+    heading_re = re.compile(r'^(?:#{1,3}\s+|[A-Z][A-Z0-9\s,.-]{4,60}$)', re.MULTILINE)
+    headings = [h.strip().lstrip('#').strip() for h in heading_re.findall(clean_context) if len(h.strip()) > 4]
+
+    # Split remaining content into sentences (filter very short/empty ones)
+    sentences = [
+        s.strip() for s in re.split(r'[\n]+|(?<=\.)\s+', clean_context)
+        if len(s.strip()) > 25 and not _ARTIFACT_RE.search(s)
+    ]
+
+    content_slides = num_slides - 2  # exclude title + thank_you
+    chunk_size = max(1, len(sentences) // max(1, content_slides))
+
     idx = 0
-    for i in range(num_slides - 2):
+    for i in range(content_slides):
         chunk = sentences[idx:idx + chunk_size]
         idx += chunk_size
+        # Use an extracted heading if available, otherwise derive from topic
+        slide_title = headings[i] if i < len(headings) else f"{topic} — Section {i + 1}"
+        slide_title = slide_title[:80]  # cap title length
         if not chunk:
-            chunk = [f"Section {i + 1} content placeholder"]
-        slides.append({
-            "layout": "bullets",
-            "title": f"{topic} — Key Point {i + 1}",
-            "bullets": [s[:200] for s in chunk[:6]],
-        })
+            chunk = [f"Refer to source document for Section {i + 1} details."]
+        bullets = [s[:200] for s in chunk[:6]]
+        # Every 3rd content slide: use section_header layout for visual rhythm
+        if i > 0 and i % 3 == 0 and content_slides > 4:
+            slides.append({"layout": "section_header", "title": slide_title, "subtitle": ""})
+        else:
+            slides.append({"layout": "bullets", "title": slide_title, "bullets": bullets})
+
     slides.append({"layout": "thank_you", "title": "Thank You", "subtitle": "AGRA — AI-Powered Knowledge Management"})
     return slides
 
@@ -340,24 +364,27 @@ DIAGRAM EXAMPLE (you MUST follow this exact structure for diagram slides):
 Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text, no markdown, no explanations:"""
 
     # ── 4. Generate slides with retry ──
-    # Attempt 1: full intelligent prompt
-    # Attempt 2 (fallback): simplified bullet-only prompt
+    # Attempt 1: full intelligent prompt at num_slides
+    # Attempt 2: simplified bullet-only prompt at num_slides
+    # Attempt 3: simplified bullet-only prompt at 5 slides (reduced scope)
+    _reduced_slides = min(5, body.num_slides)
     slides_data = None
-    for attempt, (temp, prompt_text) in enumerate([
-        (0.1, prompt),
-        (0.0, f"Create exactly {body.num_slides} slides about: {body.topic}\n\nContext:\n{context_text}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets."),
+    for attempt, (temp, prompt_text, n_slides) in enumerate([
+        (0.1, prompt, body.num_slides),
+        (0.0, f"Create exactly {body.num_slides} slides about: {body.topic}\n\nContext:\n{context_text[:6000]}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets.", body.num_slides),
+        (0.0, f"Create exactly {_reduced_slides} slides about: {body.topic}\n\nContext:\n{context_text[:4000]}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets.", _reduced_slides),
     ], 1):
         messages = [{"role": "user", "content": prompt_text}]
+        raw = ""
         try:
             raw = await asyncio.to_thread(
                 llm_engine.generate, messages,
-                max_tokens=2048, temperature=temp, raw=True,  # Plan F: increased from 1200 to prevent truncated JSON
+                max_tokens=3500, temperature=temp, raw=True,
             )
             cleaned = _clean_json(raw)
-            # _clean_json now returns the outermost JSON array or object via regex
             slides_data = json.loads(cleaned)
             if isinstance(slides_data, list) and len(slides_data) > 0:
-                logger.info("PPT JSON parsed successfully on attempt %d", attempt)
+                logger.info("PPT JSON parsed successfully on attempt %d (%d slides)", attempt, len(slides_data))
                 break
             raise ValueError("Empty or non-array slides")
         except (json.JSONDecodeError, ValueError) as e:
@@ -414,16 +441,26 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
     # ── 6. Build PPTX ──
     job_id = str(uuid.uuid4())
     version_label = f"_v{body.version}" if body.version > 1 else ""
-    # Plan F: Use document metadata filename when doc_ids provided, not raw query text
+    # When doc_ids are provided and topic is a generic fallback, derive a meaningful
+    # presentation title from the first document's filename (strip extension).
+    presentation_title = body.topic
     if body.doc_ids and context_chunks:
         first_filename = context_chunks[0].get("metadata", {}).get("filename", "")
+        if first_filename and (not body.topic or body.topic.lower() in ("document overview", "")):
+            stem = Path(first_filename).stem.replace('_', ' ').replace('-', ' ')
+            presentation_title = stem[:80] or body.topic
         safe_topic = re.sub(r'[^\w\s-]', '', first_filename or body.topic)[:30].replace(' ', '_')
     else:
         safe_topic = re.sub(r'[^\w\s-]', '', body.topic)[:30].replace(' ', '_')
     safe_topic = safe_topic or "Presentation"
     output_filename = f"{job_id}.pptx"
     output_path = _OUTPUTS_DIR / output_filename
-    
+
+    # Patch the title slide with the resolved presentation_title
+    if slides_data and slides_data[0].get("layout") == "title":
+        if not slides_data[0].get("title") or slides_data[0]["title"] in (body.topic, "Document Overview"):
+            slides_data[0]["title"] = presentation_title
+
     # ── 6.5 ICG Master Template Integration ──
     assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
     template_path = str(assets_dir / "icg_master.pptx") if (assets_dir / "icg_master.pptx").exists() else None
@@ -431,7 +468,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
     build_pptx(
         slides_data,
         str(output_path),
-        title=body.topic,
+        title=presentation_title,
         template_path=template_path,
         extracted_images=extracted_images,
     )
