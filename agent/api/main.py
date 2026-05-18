@@ -116,30 +116,74 @@ _UI_PORT = os.getenv("AGENT_UI_PORT", "7860")
 _ADMIN_PORT = os.getenv("ADMIN_PORT", "3000")
 _BACKEND_PORT = os.getenv("BACKEND_PORT", "8000")
 
-ALLOWED_ORIGINS = [
+# Static known-safe origins (localhost variants)
+_STATIC_ORIGINS = [
     f"http://localhost:{_ADMIN_PORT}",
     f"http://0.0.0.0:{_ADMIN_PORT}",
     f"http://localhost:{_UI_PORT}",
     f"http://0.0.0.0:{_UI_PORT}",
     f"http://localhost:{_BACKEND_PORT}",
+    "http://localhost:5173",  # Vite dev server
+    "http://localhost:3000",
 ]
 
 RUNPOD_POD_ID = os.getenv("RUNPOD_POD_ID", "")
 if RUNPOD_POD_ID:
-    ALLOWED_ORIGINS.extend([
+    _STATIC_ORIGINS.extend([
         f"https://{RUNPOD_POD_ID}-{_ADMIN_PORT}.proxy.runpod.net",
         f"https://{RUNPOD_POD_ID}-{_UI_PORT}.proxy.runpod.net",
         f"https://{RUNPOD_POD_ID}-{_BACKEND_PORT}.proxy.runpod.net",
     ])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS + ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition", "X-Slides-JSON"],
-)
+import re as _re
+_RUNPOD_ORIGIN_RE = _re.compile(r'^https://[a-z0-9]+-\d+\.proxy\.runpod\.net$', _re.IGNORECASE)
+
+
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware that correctly handles credentials + dynamic origins.
+    The standard CORSMiddleware cannot use allow_credentials=True with allow_origins=["*"];
+    this middleware echoes back the specific requesting origin when it is trusted.
+    Trusted: static list OR any *.proxy.runpod.net origin (for RunPod deployments).
+    """
+    origin = request.headers.get("origin", "")
+
+    def _is_trusted(o: str) -> bool:
+        if not o:
+            return False
+        if o in _STATIC_ORIGINS:
+            return True
+        if _RUNPOD_ORIGIN_RE.match(o):
+            return True
+        return False
+
+    trusted = _is_trusted(origin)
+
+    # Pre-flight OPTIONS — respond immediately
+    if request.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": origin if trusted else "",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Slides-JSON",
+            "Access-Control-Max-Age": "600",
+        }
+        from starlette.responses import Response as _Resp
+        return _Resp(status_code=200, headers={k: v for k, v in headers.items() if v})
+
+    response = await call_next(request)
+
+    if trusted:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, X-Slides-JSON"
+    else:
+        # Non-browser or internal call — allow without credentials
+        response.headers["Access-Control-Allow-Origin"] = "*"
+
+    return response
 
 
 # ── Register Routers ──
@@ -231,8 +275,15 @@ async def download_file(
     )
 
 
-# ── Original Document Download (local builtin + backend proxy) ──
+# ── Original Document Download (local builtin + local chat uploads + backend proxy) ──
 _KB_DIR = Path(__file__).resolve().parent.parent / "knowledge_base"
+_CHAT_UPLOADS_DIR = _DATA_DIR / "uploads" / "chat"
+
+_UUID_RE = __import__('re').compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    __import__('re').IGNORECASE
+)
+
 
 @app.get("/api/agent/download/doc/{doc_id:path}", tags=["Downloads"])
 async def download_original_document(
@@ -243,17 +294,16 @@ async def download_original_document(
     """
     Download an original document.
     - builtin: prefix → serve directly from knowledge_base/
-    - otherwise     → proxy to admin backend
+    - UUID doc_id   → serve from local agra_data/uploads/chat/ (chat-uploaded files)
+    - integer id    → proxy to admin backend
     """
-    # ── Workstream C: Serve builtin documents locally ──
+    # ── 1. Builtin knowledge-base documents ──
     if doc_id.startswith("builtin:"):
         filename = doc_id.split(":", 1)[1]
-        # Sanitise: strip path separators to prevent traversal
         filename = filename.replace("/", "").replace("\\", "").replace("..", "")
         local_path = _KB_DIR / filename
         if not local_path.exists() or not local_path.is_file():
             raise HTTPException(status_code=404, detail=f"Built-in document '{filename}' not found")
-
         suffix = local_path.suffix.lower()
         media_types = {
             ".txt": "text/plain",
@@ -266,7 +316,38 @@ async def download_original_document(
             filename=filename,
         )
 
-    # ── Standard proxy to admin backend ──
+    # ── 2. Chat-uploaded documents (UUID doc_id) ──
+    # Files saved by upload.py as: agra_data/uploads/chat/{doc_id}_{original_filename}
+    if _UUID_RE.match(doc_id):
+        if _CHAT_UPLOADS_DIR.exists():
+            # Find any file whose name starts with this doc_id
+            matches = list(_CHAT_UPLOADS_DIR.glob(f"{doc_id}_*"))
+            if matches:
+                local_path = matches[0]  # There will be exactly one per doc_id
+                suffix = local_path.suffix.lower()
+                media_types = {
+                    ".pdf": "application/pdf",
+                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ".doc": "application/msword",
+                    ".txt": "text/plain",
+                    ".md": "text/markdown",
+                    ".csv": "text/csv",
+                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                }
+                # Reconstruct the original filename (strip UUID prefix)
+                original_name = local_path.name[len(doc_id) + 1:]  # +1 for underscore
+                return FileResponse(
+                    path=str(local_path),
+                    media_type=media_types.get(suffix, "application/octet-stream"),
+                    filename=original_name or local_path.name,
+                )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document '{doc_id}' not found in local storage. It may have been deleted or not yet indexed.",
+        )
+
+    # ── 3. Admin-backend documents (integer id) ──
     token = request.query_params.get("token") or (
         request.headers.get("Authorization", "").replace("Bearer ", "")
     )

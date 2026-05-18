@@ -62,7 +62,7 @@ function renderWithCitations(html, sources, onCiteClick) {
 }
 
 // ── Inline Quiz Component ──
-function InlineQuiz({ quiz }) {
+function InlineQuiz({ quiz, downloadUrl }) {
   const [answers, setAnswers] = useState({});
   const [revealed, setRevealed] = useState({});
 
@@ -145,6 +145,19 @@ function InlineQuiz({ quiz }) {
           </details>
         </div>
       ))}
+
+      {downloadUrl && (
+        <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+          <a
+            href={downloadUrl}
+            download
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}
+          >
+            <Download size={13} />
+            Download Quiz (.docx)
+          </a>
+        </div>
+      )}
     </div>
   );
 }
@@ -207,8 +220,8 @@ function SummaryCard({ filename, downloadUrl }) {
         <BookOpen size={24} color="#34d399" />
       </div>
       <div style={pptStyles.info}>
-        <div style={pptStyles.title}>Executive Summary</div>
-        <div style={pptStyles.meta}>{filename} · Word Document</div>
+        <div style={pptStyles.title}>{filename || 'Executive Summary'}</div>
+        <div style={pptStyles.meta}>Word Document (.docx)</div>
       </div>
       {downloadUrl && (
         <a href={downloadUrl} download={filename || "Summary.docx"} style={{ ...pptStyles.dlBtn, background: '#34d399' }}>
@@ -649,15 +662,19 @@ export default function Chat() {
         });
         if (!res.ok) throw new Error(`Quiz generation failed: ${res.status}`);
         const data = await res.json();
+        const quizDlUrl = data.download_url
+          ? `${getApiUrl(data.download_url)}?token=${encodeURIComponent(token || '')}`
+          : null;
+        showNotification('Quiz is ready!', 'success');
         return {
           role: 'assistant',
           content: 'Here is your knowledge quiz:',
           quiz: data.quiz,
+          quizDownloadUrl: quizDlUrl,
           sources: [],
           timestamp: Date.now(),
         };
       }
-      showNotification('Quiz is ready!', 'success');
       if (type === 'summary' || type === 'draft_sotr' || type === 'tech_review') {
         // Stream the document
         return null; // handled via stream separately
@@ -1177,6 +1194,7 @@ export default function Chat() {
               }));
             }
 
+            const _summaryLabel = intentType === 'draft_sotr' ? 'Draft SOTR' : intentType === 'tech_review' ? 'Technical Review' : (intentParams.summary_type === 'technical' ? 'Technical Summary' : 'Executive Summary');
             streamRefs.current[sessId] = streamDocument(
               intentType,
               intentParams,
@@ -1189,10 +1207,10 @@ export default function Chat() {
                     ...last,
                     content: text,
                     streaming: !downloadUrl,
-                    summary: downloadUrl ? { downloadUrl } : last.summary, // reuse summary obj for download card
+                    summaryLabel: _summaryLabel,
+                    summary: downloadUrl ? { downloadUrl } : last.summary,
                   };
                   if (!downloadUrl) return copy;
-                  // persist final
                   persistMessages(copy, sessId);
                   return copy;
                 });
@@ -1894,12 +1912,12 @@ export default function Chat() {
                       )}
 
                       {/* Quiz */}
-                      {msg.quiz && !msg.streaming && <InlineQuiz quiz={msg.quiz} />}
+                      {msg.quiz && !msg.streaming && <InlineQuiz quiz={msg.quiz} downloadUrl={msg.quizDownloadUrl} />}
 
                       {/* Summary download card */}
                       {msg.summary?.downloadUrl && !msg.streaming && (
                         <SummaryCard
-                          filename="Summary Document"
+                          filename={msg.summaryLabel || 'Executive Summary'}
                           downloadUrl={`${getApiUrl(msg.summary.downloadUrl)}?token=${encodeURIComponent(token || '')}`}
                         />
                       )}

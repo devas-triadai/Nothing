@@ -137,13 +137,14 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    # Context caps calibrated for 16384-token llama-server (8192 working budget).
-    # ~8000 chars subject + ~6000 chars standard + ~1200 chars prompt ≈ 3800 tokens.
-    # Leaves ~2500 tokens for JSON output (max_tokens=2500).
-    _MAX_SUBJECT_CHARS = 8000
-    _MAX_STANDARD_CHARS = 6000
-    _MAX_SUBJECT_CHUNKS = 15
-    _MAX_STANDARD_CHUNKS = 10
+    # Context caps for 3328-token llama-server context window.
+    # Budget: 3328 tokens total - 300 (prompt template) - 800 (output) = ~2228 tokens for content.
+    # At ~4 chars/token: ~8900 chars total subject+standard.
+    # Split: 60% subject (5300 chars) + 40% standard (3500 chars).
+    _MAX_SUBJECT_CHARS = 2500
+    _MAX_STANDARD_CHARS = 1800
+    _MAX_SUBJECT_CHUNKS = 6
+    _MAX_STANDARD_CHUNKS = 4
 
     subject_text = "\n\n".join(
         f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
@@ -203,7 +204,7 @@ Analyse at least 5-10 key clauses in depth. OUTPUT: a valid JSON array only, sta
     ]
 
     try:
-        findings_raw = llm_engine.generate(messages, max_tokens=2500, temperature=0.2)
+        findings_raw = llm_engine.generate(messages, max_tokens=800, temperature=0.2)
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
@@ -239,10 +240,12 @@ Analyse at least 5-10 key clauses in depth. OUTPUT: a valid JSON array only, sta
     covered_clauses = [f.get("clause_id", "") for f in findings]
     covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
     
+    # Trim standards for the second pass to avoid exceeding context window again
+    _standards_short = standards_text[:1200] if len(standards_text) > 1200 else standards_text
     missing_prompt = f"""You are a compliance analyst.
     
-STANDARD:
-{standards_text}
+STANDARD (excerpt):
+{_standards_short}
 
 The following clauses were already checked:
 {covered_str}
@@ -266,7 +269,7 @@ If there are no major missing requirements, return an empty array []."""
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=1200, temperature=0.2)
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=600, temperature=0.2)
         cleaned = _clean_json(missing_raw)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1

@@ -75,6 +75,36 @@ def _extract_balanced(text: str, open_char: str, close_char: str) -> Optional[st
     return None  # unbalanced
 
 
+def _repair_truncated_array(raw: str) -> Optional[str]:
+    """
+    Attempt to recover a JSON array that was truncated by the token limit.
+    Strategy: find the last complete object in the array and close the array.
+    Returns a valid JSON array string, or None if recovery is not possible.
+    """
+    start = raw.find('[')
+    if start < 0:
+        return None
+
+    text = raw[start:]
+
+    # Find last complete slide object by scanning for last '}'
+    last_close = text.rfind('}')
+    if last_close < 0:
+        return None
+
+    # Trim everything after the last complete '}' and close the array
+    candidate = text[:last_close + 1].rstrip(', \t\n') + ']'
+
+    try:
+        result = json.loads(candidate)
+        if isinstance(result, list) and len(result) > 0:
+            return candidate
+    except json.JSONDecodeError:
+        pass
+
+    return None
+
+
 def _clean_json(raw: str) -> str:
     """
     Strip markdown code fences and extract the first balanced JSON array or
@@ -364,23 +394,76 @@ DIAGRAM EXAMPLE (you MUST follow this exact structure for diagram slides):
 Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text, no markdown, no explanations:"""
 
     # ── 4. Generate slides with retry ──
-    # Attempt 1: full intelligent prompt at num_slides
-    # Attempt 2: simplified bullet-only prompt at num_slides
-    # Attempt 3: simplified bullet-only prompt at 5 slides (reduced scope)
+    # Attempt 1: full intelligent prompt at num_slides (rich diagrams/charts)
+    # Attempt 2: simplified prompt at num_slides with diagram hint
+    # Attempt 3: minimal prompt at 5 slides (reduced scope, guaranteed parseable)
     _reduced_slides = min(5, body.num_slides)
+
+    _diagram_hint = (
+        'Include ONE slide with layout "diagram" containing a diagram_data object with '
+        '"type": "flowchart", "nodes": [{"id":"A","label":"...","shape":"rounded_rect"},...], '
+        '"edges": [{"from":"A","to":"B"},...]. This is MANDATORY.'
+    )
+
+    _attempt_configs = [
+        # (temperature, prompt, num_slides, max_tokens)
+        (0.1, prompt, body.num_slides, 4096),
+        (
+            0.0,
+            f"""Create exactly {body.num_slides} slides about: {body.topic}
+
+Context:
+{context_text[:6000]}
+
+Return ONLY a valid JSON array. Rules:
+- Slide 1: layout="title", must have "title" and "subtitle"
+- Last slide: layout="thank_you"
+- Other slides: layout="bullets" or "section_header" or "two_column" or "diagram"
+- Every slide must have "title" key
+- {_diagram_hint}
+
+Return ONLY the JSON array, no markdown, no explanation:""",
+            body.num_slides,
+            4096,
+        ),
+        (
+            0.0,
+            f"""Create {_reduced_slides} slides about: {body.topic}
+
+Context (use ONLY this):
+{context_text[:3000]}
+
+Return ONLY a JSON array like:
+[
+  {{"layout":"title","title":"...","subtitle":"..."}},
+  {{"layout":"diagram","title":"...","diagram_data":{{"type":"flowchart","nodes":[{{"id":"A","label":"Step 1","shape":"rounded_rect"}},{{"id":"B","label":"Step 2","shape":"rect"}}],"edges":[{{"from":"A","to":"B"}}]}}}},
+  {{"layout":"bullets","title":"Key Points","bullets":["Point 1","Point 2","Point 3"]}},
+  {{"layout":"thank_you","title":"Thank You","subtitle":"Indian Coast Guard"}}
+]
+Use real content from the context above. Return ONLY the JSON array:""",
+            _reduced_slides,
+            2048,
+        ),
+    ]
+
     slides_data = None
-    for attempt, (temp, prompt_text, n_slides) in enumerate([
-        (0.1, prompt, body.num_slides),
-        (0.0, f"Create exactly {body.num_slides} slides about: {body.topic}\n\nContext:\n{context_text[:6000]}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets.", body.num_slides),
-        (0.0, f"Create exactly {_reduced_slides} slides about: {body.topic}\n\nContext:\n{context_text[:4000]}\n\nReturn ONLY a JSON array. Each slide MUST have: layout (title/bullets/section_header/thank_you), title, bullets.", _reduced_slides),
-    ], 1):
-        messages = [{"role": "user", "content": prompt_text}]
+    for attempt, (temp, prompt_text, n_slides, max_tok) in enumerate(_attempt_configs, 1):
         raw = ""
         try:
             raw = await asyncio.to_thread(
-                llm_engine.generate, messages,
-                max_tokens=3500, temperature=temp, raw=True,
+                llm_engine.generate, [{"role": "user", "content": prompt_text}],
+                max_tokens=max_tok, temperature=temp, raw=True,
             )
+
+            # If LLM was busy and returned empty/tiny response, wait and retry once
+            if len((raw or "").strip()) < 20:
+                logger.warning("PPT attempt %d: LLM returned empty/tiny response (%d chars), waiting 3s", attempt, len(raw))
+                await asyncio.sleep(3)
+                raw = await asyncio.to_thread(
+                    llm_engine.generate, [{"role": "user", "content": prompt_text}],
+                    max_tokens=max_tok, temperature=temp, raw=True,
+                )
+
             cleaned = _clean_json(raw)
             slides_data = json.loads(cleaned)
             if isinstance(slides_data, list) and len(slides_data) > 0:
@@ -388,6 +471,17 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
                 break
             raise ValueError("Empty or non-array slides")
         except (json.JSONDecodeError, ValueError) as e:
+            # Try truncation recovery before giving up on this attempt
+            if raw and '[' in raw:
+                recovered = _repair_truncated_array(_clean_json(raw) or raw)
+                if recovered:
+                    try:
+                        slides_data = json.loads(recovered)
+                        if isinstance(slides_data, list) and len(slides_data) > 0:
+                            logger.info("PPT JSON recovered from truncation on attempt %d (%d slides)", attempt, len(slides_data))
+                            break
+                    except json.JSONDecodeError:
+                        pass
             logger.warning("PPT attempt %d failed: %s\nRaw (first 400 chars): %s", attempt, e, raw[:400])
             slides_data = None
 
@@ -413,6 +507,38 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
             sd["layout"] = "bullets"
         if "bullets" not in sd:
             sd["bullets"] = []
+
+    # Guarantee at least one diagram slide if none produced by LLM
+    has_diagram = any(sd.get("layout") == "diagram" for sd in slides_data)
+    if not has_diagram and len(slides_data) >= 3:
+        # Build a sensible system-architecture diagram from doc/topic context
+        topic_words = [w for w in body.topic.replace('-', ' ').replace('_', ' ').split() if len(w) > 2]
+        diagram_title = f"{body.topic} — System Overview" if body.topic else "System Architecture"
+        auto_diagram = {
+            "layout": "diagram",
+            "title": diagram_title,
+            "diagram_data": {
+                "type": "flowchart",
+                "nodes": [
+                    {"id": "A", "label": "Document Ingestion", "shape": "rounded_rect"},
+                    {"id": "B", "label": "Vector Store / BM25", "shape": "rect"},
+                    {"id": "C", "label": "RAG Pipeline", "shape": "rounded_rect"},
+                    {"id": "D", "label": "LLM Generation", "shape": "rect"},
+                    {"id": "E", "label": "Secure Output", "shape": "rounded_rect"},
+                ],
+                "edges": [
+                    {"from": "A", "to": "B", "label": "index"},
+                    {"from": "B", "to": "C", "label": "retrieve"},
+                    {"from": "C", "to": "D", "label": "prompt"},
+                    {"from": "D", "to": "E", "label": "stream"},
+                ],
+            },
+            "notes": "Auto-generated system architecture diagram",
+        }
+        # Insert after the second slide (after title/section_header)
+        insert_pos = min(2, len(slides_data) - 1)
+        slides_data.insert(insert_pos, auto_diagram)
+        logger.info("PPT: auto-injected diagram slide at position %d (LLM produced none)", insert_pos)
 
     # Enforce exact slide count
     target = body.num_slides
@@ -556,8 +682,7 @@ FORMAT:
 Cite specific sections where relevant using [Page X] notation."""
 
     messages = [
-        {"role": "system", "content": "You are a senior analyst creating professional document summaries for Indian Coast Guard leadership."},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": f"You are a senior analyst creating professional document summaries for Indian Coast Guard leadership.\n\n{prompt}"},
     ]
 
     # Stream the summary and also collect for DOCX
@@ -688,8 +813,7 @@ Return ONLY valid JSON in this exact format:
 }}"""
 
     messages = [
-        {"role": "system", "content": "You are an expert quiz designer. Return only valid JSON."},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": f"You are an expert quiz designer. Return only valid JSON.\n\n{prompt}"},
     ]
 
     raw = await asyncio.to_thread(
