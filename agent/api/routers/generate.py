@@ -156,8 +156,7 @@ def _repair_json_with_llm(broken: str, error_msg: str) -> Optional[dict]:
         )
         repaired_raw = llm_engine.generate(
             messages=[
-                {"role": "system", "content": "You are a JSON repair tool. Output only valid JSON."},
-                {"role": "user", "content": repair_prompt},
+                {"role": "user", "content": f"Fix the broken JSON below. Return ONLY valid JSON, nothing else.\n\n{repair_prompt}"},
             ],
             max_tokens=2048,
             temperature=0.0,
@@ -225,21 +224,12 @@ def _build_fallback_slides(topic: str, context_text: str, num_slides: int = 10) 
 # NOTE: Gemma 4 IT does NOT reliably honour system-prompt JSON constraints,
 # so ALL instructions live in the user message.
 _PPT_SLIDE_LAYOUTS = """
-AVAILABLE LAYOUTS (use a MIX — aim for 40%+ non-bullet):
-1. "title"          — First slide only. Fields: title, subtitle
-2. "section_header" — Section transition. Fields: title, subtitle
-3. "bullets"        — Standard content. Fields: title, bullets (list of 3-6 strings), notes
-4. "two_column"     — Comparison. Fields: title, left_column {header, items[]}, right_column {header, items[]}, notes
-5. "table"          — Data tables. Fields: title, table_data {headers[], rows[[]]}, notes
-6. "diagram"        — Process/hierarchy. Fields: title, diagram_data {type, nodes[], edges[]}, notes
-   Diagram types: "flowchart", "hierarchy", "block_diagram", "cycle", "radial", "matrix", "pyramid", "swimlane"
-   Each node: {"id": "A", "label": "text", "shape": "rounded_rect"}
-   Each edge: {"from": "A", "to": "B", "label": "optional text"}
-7. "chart"          — Data viz. Fields: title, chart_data {type, title, data {labels[], values[]}}, notes
-   Chart types: "bar_chart", "pie_chart", "line_chart", "comparison_bar", "timeline"
-   For comparison_bar: data {labels[], groups[{name, values[]}]}
-8. "image"          — Image from docs. Fields: title, caption, notes
-9. "thank_you"      — Last slide. Fields: title, subtitle
+LAYOUTS: title|section_header|bullets|two_column|table|diagram|chart|thank_you
+bullets: {title, bullets[3-6]}
+two_column: {title, left_column{header,items[]}, right_column{header,items[]}}
+diagram: {title, diagram_data{type:"flowchart", nodes[{id,label,shape}], edges[{from,to}]}}
+chart: {title, chart_data{type:"bar_chart", data{labels[],values[]}}}
+table: {title, table_data{headers[], rows[[]]}}
 """
 
 
@@ -339,56 +329,32 @@ Return ONLY an updated JSON array with all layout fields preserved and changes a
         # Plan F: Explicitly prioritize doc_ids context over general knowledge
         doc_priority_note = ""
         if body.doc_ids:
-            doc_priority_note = """\nCRITICAL: The content below comes from SPECIFIC DOCUMENTS selected by the user.
-You MUST use ONLY this document content for slide material. Do NOT add information from
-general knowledge. Every bullet point and data item must be traceable to the context below.\n"""
-        prompt = f"""You are an elite PowerPoint architect for Indian Coast Guard presentations.
-
-Create a professional PowerPoint with exactly {body.num_slides} slides about: {body.topic}
+            doc_priority_note = "\nUse ONLY the document content below. No general knowledge.\n"
+        prompt = f"""TOPIC: {body.topic}
 {doc_priority_note}
-DOCUMENT CONTEXT:
+DOCUMENT CONTENT:
 {context_text}
-{extracted_data_hint}
-
-{f'Style notes: {body.style_notes}' if body.style_notes else ''}
 {has_images_hint}
 
 {_PPT_SLIDE_LAYOUTS}
 
-Requirements:
-- Slide 1 MUST be "layout": "title"
-- Last slide MUST be "layout": "thank_you"
-- Use at least 2 different non-bullet layouts (diagrams, charts, tables, two_column)
-- You MUST include AT LEAST ONE "layout": "diagram" slide. Pick the most prominent process, system architecture, or hierarchy from the content and render it as a diagram.
-- Include a chart if there is any numerical/statistical data
-- Include section_header slides between major topic shifts
-- Every slide must have "layout", "title", and layout-specific fields
+Rules:
+- Exactly {body.num_slides} slides total
+- First slide: layout=title (title+subtitle)
+- Last slide: layout=thank_you
+- Include ONE diagram slide (layout=diagram) with diagram_data
+- Include section_header between major sections
+- Every slide must have "layout" and "title"
+{f'- Style: {body.style_notes}' if body.style_notes else ''}
 
-DIAGRAM EXAMPLE (you MUST follow this exact structure for diagram slides):
-{{
-  "layout": "diagram",
-  "title": "System Architecture",
-  "diagram_data": {{
-    "type": "flowchart",
-    "nodes": [
-      {{"id": "A", "label": "Data Ingestion", "shape": "rounded_rect"}},
-      {{"id": "B", "label": "Processing Engine", "shape": "rect"}},
-      {{"id": "C", "label": "Output Module", "shape": "rounded_rect"}}
-    ],
-    "edges": [
-      {{"from": "A", "to": "B", "label": "feeds"}},
-      {{"from": "B", "to": "C", "label": "produces"}}
-    ]
-  }},
-  "notes": "Rendered as native PowerPoint shapes"
-}}
-
-Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text, no markdown, no explanations:"""
+Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     # ── 4. Generate slides with retry ──
-    # Attempt 1: full intelligent prompt at num_slides (rich diagrams/charts)
-    # Attempt 2: simplified prompt at num_slides with diagram hint
-    # Attempt 3: minimal prompt at 5 slides (reduced scope, guaranteed parseable)
+    # Token budget: 3328 context. Input (prompt+context) ~800-1000 tokens.
+    # Remaining for output ~2200 tokens. Each slide JSON ~200-250 tokens.
+    # Safe cap: 7 slides (1400-1750 tokens) leaves buffer for complex slides.
+    # Attempt 3 falls back to 5 slides for absolute safety.
+    _safe_slides = min(7, body.num_slides)
     _reduced_slides = min(5, body.num_slides)
 
     _diagram_hint = (
@@ -397,14 +363,23 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
         '"edges": [{"from":"A","to":"B"},...]. This is MANDATORY.'
     )
 
+    # Rewrite main prompt to use safe slide count instead of body.num_slides
+    # so the JSON output fits within token budget.
+    _prompt_safe = prompt.replace(
+        f"Exactly {body.num_slides} slides total", f"Exactly {_safe_slides} slides total"
+    ).replace(
+        f"Return ONLY a valid JSON array of {body.num_slides} slide objects",
+        f"Return ONLY a valid JSON array of {_safe_slides} slide objects"
+    )
+
     _attempt_configs = [
         # (temperature, prompt, num_slides, max_tokens)
-        # Budget: 3328 context window. Prompt ~600 + context ~1000 = ~1600 input tokens.
-        # Leaves ~1700 tokens for output; cap at 1500 to prevent truncation mid-JSON.
-        (0.1, prompt, body.num_slides, 1500),
+        # Each slide ~200-250 tokens; 7 slides = ~1750 tokens max output.
+        # Use 2048 to give headroom for complex diagram/chart slides.
+        (0.1, _prompt_safe, _safe_slides, 2048),
         (
             0.0,
-            f"""Create exactly {body.num_slides} slides about: {body.topic}
+            f"""Create exactly {_safe_slides} slides about: {body.topic}
 
 Context:
 {context_text[:2000]}
@@ -417,8 +392,8 @@ Return ONLY a valid JSON array. Rules:
 - {_diagram_hint}
 
 Return ONLY the JSON array, no markdown, no explanation:""",
-            body.num_slides,
-            1500,
+            _safe_slides,
+            2048,
         ),
         (
             0.0,
@@ -537,8 +512,17 @@ Use real content from the context above. Return ONLY the JSON array:""",
     # Enforce exact slide count
     target = body.num_slides
     if len(slides_data) < target:
+        # Pad with content-bearing bullet slides from context, not empty headers
+        _pad_sentences = [s.strip() for s in re.split(r'[\n]+|(?<=\.)\s+', context_text) if len(s.strip()) > 30]
+        _pad_idx = 0
         while len(slides_data) < target:
-            slides_data.insert(max(1, len(slides_data) - 1), {"layout": "section_header", "title": "Additional Content", "subtitle": ""})
+            _chunk = _pad_sentences[_pad_idx:_pad_idx+4] or ["Refer to source document for details."]
+            _pad_idx = (_pad_idx + 4) % max(1, len(_pad_sentences))
+            slides_data.insert(max(1, len(slides_data) - 1), {
+                "layout": "bullets",
+                "title": f"{body.topic} — Details",
+                "bullets": [s[:200] for s in _chunk]
+            })
     elif len(slides_data) > target:
         # Keep first (title) and last (thank_you); trim from middle
         first = slides_data[0]

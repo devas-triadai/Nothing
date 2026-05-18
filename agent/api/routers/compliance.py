@@ -164,50 +164,58 @@ async def compliance_check(
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
-    prompt = f"""Perform a clause-by-clause compliance analysis as an expert auditor for the Indian Coast Guard. Return ONLY a valid JSON array — no explanations, no prose, no markdown fences.
-
-Task: Analyze the SUBJECT DOCUMENT(S) against the STANDARD(S) below.
-
-SUBJECT DOCUMENTS ({subject_filenames_str}):
+    # ── Compliance prompt (Gemma-safe) ──
+    # Gemma echoes the first sentence when it reads like a role/instruction header.
+    # Fix: structure the prompt as pure data with the JSON array already started
+    # at the end so Gemma's first generated token continues the array, not the prompt.
+    prompt = f"""SUBJECT DOCUMENTS ({subject_filenames_str}):
 {subject_text}
 
-APPLICABLE STANDARDS:
+STANDARDS:
 {standards_text}
 {scope_note}
 
-For each relevant clause/requirement in the standard, evaluate the subject documents' compliance.
-Critically:
-- "Missing": If a requirement in the standard is completely absent in the subject document.
-- "Contradiction": If the subject documents contain conflicting specifications between themselves (Inter-Document Inconsistency) or with the standard.
-- "Selective Compliance": If the subject documents cite a standard but specifically omit or ignore a restrictive sub-clause.
-
-Return ONLY a valid JSON array of findings. Each finding must strictly follow this structure:
-{{
-  "topic": "Broad category (e.g. Fire Safety, Propulsion, Hull Structure)",
-  "clause_id": "Exact clause/section reference from the standard",
-  "requirement": "What the standard requires",
-  "acceptance_criterion": "The specific technical metric or condition required to pass",
-  "verdict": "Compliant",
-  "severity": "Critical",
-  "finding": "Detailed explanation of the compliance status, explicitly stating if it is missing, contradictory, or selectively compliant.",
-  "recommendation": "Specific action needed (if not fully compliant)",
-  "citation": "Relevant excerpt from the subject document, if any"
-}}
-
-VERDICT must be one of: Compliant, Non-Compliant, Partial, Missing, Contradiction, Unverifiable
-SEVERITY must be one of: Critical, Major, Minor, None (Critical for life-safety failures; None if Compliant)
-
-Analyse 5-8 key clauses. OUTPUT: a valid JSON array only, starting with [ and ending with ]:"""
+Instructions: Compare each standard clause against the subject documents.
+For each clause output one JSON object with keys: topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation.
+verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable
+severity: Critical | Major | Minor | None
+Output 5-8 findings. Return a JSON array only. No prose. No markdown.
+["""
 
     messages = [
         {"role": "user", "content": prompt},
     ]
 
     try:
-        findings_raw = llm_engine.generate(messages, max_tokens=800, temperature=0.2)
+        findings_raw = llm_engine.generate(messages, max_tokens=1000, temperature=0.1)
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
+
+    # ── Echo-strip: Gemma sometimes echoes the prompt before outputting JSON ──
+    # If the raw output doesn't start with '[' or '{', strip leading prose
+    # and prepend '[' since we seeded the array open bracket in the prompt.
+    _strip = findings_raw.strip()
+    if not _strip.startswith('[') and not _strip.startswith('{'):
+        # Try to find start of JSON content
+        _bracket = _strip.find('[')
+        _brace   = _strip.find('{')
+        if _bracket >= 0 and (_brace < 0 or _bracket < _brace):
+            findings_raw = _strip[_bracket:]
+        elif _brace >= 0:
+            # LLM returned objects not wrapped in array — wrap it
+            findings_raw = '[' + _strip[_brace:]
+        else:
+            # No JSON structure found at all — prepend '[' and let _clean_json handle it
+            findings_raw = '[' + _strip
+    elif _strip.startswith('{'):
+        # Single object returned instead of array
+        findings_raw = '[' + _strip + ']'
+    else:
+        # Already starts with '[' — use as-is
+        findings_raw = _strip
+
+    logger.debug("Compliance raw after echo-strip (first 200): %s", findings_raw[:200])
 
     # Workstream D: Multi-strategy JSON parsing with graceful degradation
     findings = None
@@ -242,38 +250,35 @@ Analyse 5-8 key clauses. OUTPUT: a valid JSON array only, starting with [ and en
     
     # Trim standards for the second pass to avoid exceeding context window again
     _standards_short = standards_text[:1200] if len(standards_text) > 1200 else standards_text
-    missing_prompt = f"""Review the STANDARD excerpt and identify missing requirements.
-
-STANDARD (excerpt):
+    missing_prompt = f"""STANDARD (excerpt):
 {_standards_short}
 
-The following clauses were already checked:
+Already checked clauses:
 {covered_str}
 
-Identify any CRITICAL requirements or clauses in the STANDARD that were NOT checked above, and which are completely MISSING from the subject documents.
-Return ONLY a valid JSON array of these missing findings, using the exact same format:
-{{
-  "topic": "Broad category",
-  "clause_id": "Clause reference",
-  "requirement": "What the standard requires",
-  "acceptance_criterion": "The specific metric that is missing",
-  "verdict": "Missing",
-  "severity": "Major",
-  "finding": "This requirement was completely omitted from the subject document.",
-  "recommendation": "Shipbuilder must provide details on this requirement.",
-  "citation": "N/A"
-}}
-If there are no major missing requirements, return an empty array []."""
+List any CRITICAL requirements in the STANDARD completely MISSING from the subject documents.
+Output JSON array only. Each item: {{topic, clause_id, requirement, acceptance_criterion, verdict: "Missing", severity: "Major", finding, recommendation, citation: "N/A"}}
+If none missing, return [].
+["""
 
     messages_missing = [
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=600, temperature=0.2)
-        cleaned = _clean_json(missing_raw)
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=500, temperature=0.0)
+        # Echo-strip for second pass
+        _ms = missing_raw.strip()
+        if not _ms.startswith('[') and not _ms.startswith('{'):
+            _bi = _ms.find('['); _oi = _ms.find('{')
+            if _bi >= 0 and (_oi < 0 or _bi < _oi): _ms = _ms[_bi:]
+            elif _oi >= 0: _ms = '[' + _ms[_oi:]
+            else: _ms = '[' + _ms
+        elif _ms.startswith('{'):
+            _ms = '[' + _ms + ']'
+        cleaned = _clean_json(_ms)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1
-        if start != -1 and end != 0:
+        if start != -1 and end > start:
             missing_findings = json.loads(cleaned[start:end])
             if isinstance(missing_findings, list):
                 findings.extend(missing_findings)
