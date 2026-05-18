@@ -145,7 +145,31 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
 
         return {"type": "ppt", "topic": topic, "num_slides": max(3, min(num_slides, 25))}
     if _INTENT_QUIZ.search(q):
-        return {"type": "quiz", "num_mcq": 5, "num_short_answer": 3}
+        # Parse user-specified question counts
+        mcq_match = re.search(r'(\d+)\s*(?:mcq|multiple\s*choice)', q, re.IGNORECASE)
+        tf_match  = re.search(r'(\d+)\s*(?:true\s*(?:or|and|/|&)?\s*false|t\s*[/&]\s*f|true[-/]false)', q, re.IGNORECASE)
+        sa_match  = re.search(r'(\d+)\s*(?:short\s*answer|descriptive|open[- ]ended)', q, re.IGNORECASE)
+
+        # If user asked for only a specific type, zero out the others
+        only_mcq = bool(re.search(r'\bonly\s*(?:mcq|multiple\s*choice)\b|\b(?:mcq|multiple\s*choice)\s*only\b', q, re.IGNORECASE))
+        only_tf  = bool(re.search(r'\bonly\s*(?:true\s*(?:or|and|/|&)?\s*false|t\s*[/&]\s*f)\b|\b(?:true\s*(?:or|and|/|&)?\s*false)\s*only\b', q, re.IGNORECASE))
+        only_sa  = bool(re.search(r'\bonly\s*(?:short\s*answer|descriptive)\b|\b(?:short\s*answer)\s*only\b', q, re.IGNORECASE))
+
+        if only_mcq:
+            num_mcq = int(mcq_match.group(1)) if mcq_match else 10
+            return {"type": "quiz", "num_mcq": num_mcq, "num_true_false": 0, "num_short_answer": 0}
+        if only_tf:
+            num_tf = int(tf_match.group(1)) if tf_match else 10
+            return {"type": "quiz", "num_mcq": 0, "num_true_false": num_tf, "num_short_answer": 0}
+        if only_sa:
+            num_sa = int(sa_match.group(1)) if sa_match else 5
+            return {"type": "quiz", "num_mcq": 0, "num_true_false": 0, "num_short_answer": num_sa}
+
+        # Mixed: respect individual counts if specified, else use defaults (5 MCQ + 3 T/F + 2 SA)
+        num_mcq = int(mcq_match.group(1)) if mcq_match else 5
+        num_tf  = int(tf_match.group(1))  if tf_match  else 3
+        num_sa  = int(sa_match.group(1))  if sa_match  else 2
+        return {"type": "quiz", "num_mcq": num_mcq, "num_true_false": num_tf, "num_short_answer": num_sa}
     if _INTENT_SUMMARY.search(q):
         return {"type": "summary", "summary_type": "executive"}
     if _INTENT_SOTR.search(q):

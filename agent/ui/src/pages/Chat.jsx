@@ -69,17 +69,21 @@ function InlineQuiz({ quiz, downloadUrl }) {
   const select = (qi, opt) => setAnswers(p => ({ ...p, [qi]: opt }));
   const reveal = (qi) => setRevealed(p => ({ ...p, [qi]: true }));
 
-  if (!quiz?.mcq) return null;
+  if (!quiz?.mcq && !quiz?.true_false && !quiz?.short_answer) return null;
 
   return (
     <div style={quizStyles.container}>
       <div style={quizStyles.header}>
         <ClipboardList size={16} color="#7c6ef7" />
         <span style={quizStyles.headerText}>{quiz.title || 'Knowledge Quiz'}</span>
-        <span style={quizStyles.badge}>{quiz.mcq.length} MCQ{quiz.short_answer?.length ? ` · ${quiz.short_answer.length} Short Answer` : ''}</span>
+        <span style={quizStyles.badge}>
+          {quiz.mcq?.length > 0 ? `${quiz.mcq.length} MCQ` : ''}
+          {quiz.true_false?.length > 0 ? ` · ${quiz.true_false.length} T/F` : ''}
+          {quiz.short_answer?.length > 0 ? ` · ${quiz.short_answer.length} SA` : ''}
+        </span>
       </div>
 
-      {quiz.mcq.map((q, qi) => {
+      {(quiz.mcq || []).map((q, qi) => {
         const chosen = answers[qi];
         const isRevealed = revealed[qi];
         const isCorrect = chosen === q.correct;
@@ -131,6 +135,49 @@ function InlineQuiz({ quiz, downloadUrl }) {
               <button onClick={() => reveal(qi)} style={quizStyles.revealBtn}>
                 Reveal Answer
               </button>
+            )}
+          </div>
+        );
+      })}
+
+      {quiz.true_false?.map((q, tfi) => {
+        const tfKey = `tf-${tfi}`;
+        const tfChosen = answers[tfKey];
+        const tfRevealed = revealed[tfKey];
+        const correctAns = q.answer === true || String(q.answer).toLowerCase() === 'true';
+        const correctLabel = correctAns ? 'True' : 'False';
+        return (
+          <div key={tfKey} style={quizStyles.question}>
+            <p style={quizStyles.questionText}><strong>T/F {tfi + 1}.</strong> {q.question}</p>
+            <div style={quizStyles.options}>
+              {['True', 'False'].map(opt => {
+                const isChosen = tfChosen === opt;
+                const isCorrectOpt = opt === correctLabel;
+                let bg = 'var(--bg-card)', border = 'var(--border)', color = 'var(--text-secondary)';
+                if (isChosen) {
+                  if (tfRevealed) {
+                    bg = isCorrectOpt ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+                    border = isCorrectOpt ? '#22c55e' : '#ef4444';
+                    color = isCorrectOpt ? '#22c55e' : '#ef4444';
+                  } else { bg = 'rgba(124,110,247,0.1)'; border = '#7c6ef7'; color = '#7c6ef7'; }
+                } else if (tfRevealed && isCorrectOpt) {
+                  bg = 'rgba(34,197,94,0.08)'; border = '#22c55e'; color = '#22c55e';
+                }
+                return (
+                  <button key={opt} onClick={() => !tfRevealed && setAnswers(p => ({ ...p, [tfKey]: opt }))}
+                    style={{ ...quizStyles.option, background: bg, borderColor: border, color }}>
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+            {tfRevealed && q.explanation && (
+              <div style={quizStyles.explanation}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{q.explanation}</span>
+              </div>
+            )}
+            {tfChosen && !tfRevealed && (
+              <button onClick={() => setRevealed(p => ({ ...p, [tfKey]: true }))} style={quizStyles.revealBtn}>Reveal Answer</button>
             )}
           </div>
         );
@@ -375,6 +422,9 @@ export default function Chat() {
   const streamRefs = useRef({}); // { [sessionId]: abortFn } — supports concurrent SSE across tabs
   const fileInputRef = useRef(null);
   const activeSessionIdRef = useRef(activeSessionId);
+  // Persist doc_ids uploaded per session so subsequent messages in the same session
+  // automatically include the previously uploaded document context.
+  const sessionDocIdsRef = useRef({}); // { [sessionId]: string[] }
 
   const switchSession = (id) => {
     // Workstream J: Save current messages to departing session before switching
@@ -512,7 +562,7 @@ export default function Chat() {
 
   // ── Handle generation intents from chat ──
   const handleIntent = async (intent, intentParams, originalQuestion) => {
-    const { type, doc_ids, doc_id, topic, num_slides, num_mcq, num_short_answer, summary_type } = intentParams;
+    const { type, doc_ids, doc_id, topic, num_slides, num_mcq, num_true_false, num_short_answer, summary_type } = intentParams;
     const authHeader = { Authorization: `Bearer ${token}` };
 
     try {
@@ -658,7 +708,7 @@ export default function Chat() {
         const res = await fetch(getApiUrl('/api/agent/generate/quiz'), {
           method: 'POST',
           headers: { ...authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc_id, num_mcq: num_mcq || 5, num_short_answer: num_short_answer || 3 }),
+          body: JSON.stringify({ doc_id, num_mcq: num_mcq ?? 5, num_true_false: num_true_false ?? 3, num_short_answer: num_short_answer ?? 2 }),
         });
         if (!res.ok) throw new Error(`Quiz generation failed: ${res.status}`);
         const data = await res.json();
@@ -1128,8 +1178,15 @@ export default function Chat() {
 
     let accumulatedText = '';
 
+    // Accumulate uploaded doc_ids for this session so follow-up messages include prior uploads
+    if (uploadedDocIds.length > 0) {
+      const prev = sessionDocIdsRef.current[sessId] || [];
+      sessionDocIdsRef.current[sessId] = [...new Set([...prev, ...uploadedDocIds])];
+    }
+    const persistedDocIds = sessionDocIdsRef.current[sessId] || [];
+
     const chatPayload = { question, history, session_id: sessId };
-    const allDocIds = [...new Set([...selectedDocIds, ...uploadedDocIds])];
+    const allDocIds = [...new Set([...selectedDocIds, ...persistedDocIds])];
     if (allDocIds.length > 0) {
       chatPayload.doc_ids = allDocIds;
     }

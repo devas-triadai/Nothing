@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { ShieldCheck, ShieldAlert, ShieldX, ChevronDown, ChevronUp, Download, Loader2 } from 'lucide-react';
-import api from '../utils/api';
+import api, { getApiUrl } from '../utils/api';
 
 const VERDICT_COLORS = {
   'Compliant':      { bg: 'rgba(34, 197, 94, 0.12)', border: '#22c55e', icon: '✅' },
@@ -41,7 +41,7 @@ export default function ComplianceCard({ intentParams, token }) {
   const runComplianceCheck = async () => {
     const { subject_doc_ids, standard_doc_ids, check_scope } = intentParams;
     try {
-      const apiUrl = (window.__AGRA_API_URL__ || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+      const apiUrl = getApiUrl('');
       const resp = await fetch(`${apiUrl}/api/agent/compliance/check`, {
         method: 'POST',
         headers: {
@@ -88,7 +88,7 @@ export default function ComplianceCard({ intentParams, token }) {
 
   const toggleFinding = (i) => setExpanded(prev => ({ ...prev, [i]: !prev[i] }));
 
-  const apiUrl = (window.__AGRA_API_URL__ || import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+  const apiUrl = getApiUrl('');
 
   return (
     <div style={styles.card}>

@@ -288,9 +288,12 @@ async def generate_ppt(
             None, rerank, body.topic, candidates, 10
         )
 
-    context_text = "\n\n".join(c["text"][:1500] for c in context_chunks[:15])
-    if len(context_text) > 12000:
-        context_text = context_text[:12000] + "\n[Content truncated]"
+    # Keep context tight: LLM context window is 3328 tokens (~13000 chars).
+    # PPT prompt template itself is ~800 chars; leave ~3200 chars for content
+    # so the JSON response (~2000 tokens) has room to complete without truncation.
+    context_text = "\n\n".join(c["text"][:600] for c in context_chunks[:10])
+    if len(context_text) > 4000:
+        context_text = context_text[:4000] + "\n[Content truncated]"
 
     # ── 2. Extract images from uploaded documents ──
     extracted_images = []
@@ -312,20 +315,9 @@ NOTE: {len(extracted_images)} images/diagrams were found in the source documents
 Include {min(len(extracted_images), 3)} slides with "layout": "image" to display them.
 Place image slides near relevant content sections."""
 
-    # ── 2.5 LLM Data Extraction Pre-Pass (Chart Data Enhancement) ──
-    # Skip pre-pass if context is tiny — reduces LLM load and failure rate
+    # ── 2.5 Data pre-pass skipped: context is already capped at 4000 chars to fit token window.
+    # Adding a pre-pass LLM call consumes extra tokens and causes Gemma echo artifacts.
     extracted_data_hint = ""
-    if len(context_text) > 500:
-        try:
-            data_ext_prompt = f"Analyze the following text and extract any numerical data, statistics, or metrics into structured tabular formats. Text:\n{context_text[:2000]}"
-            data_ext_messages = [{"role": "system", "content": "You extract numbers into JSON arrays."}, {"role": "user", "content": data_ext_prompt}]
-            prepass_raw = await asyncio.to_thread(
-                llm_engine.generate, data_ext_messages,
-                max_tokens=800, temperature=0.3, raw=True,
-            )
-            extracted_data_hint = f"\nNUMERICAL DATA FOR CHARTS:\n{_clean_json(prepass_raw)}\n"
-        except Exception as e:
-            logger.debug("Data pre-pass failed: %s", e)
 
     # ── 3. Build LLM prompt ──
     if body.revision_prompt and body.previous_slides_json:
@@ -407,13 +399,15 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects. No other text
 
     _attempt_configs = [
         # (temperature, prompt, num_slides, max_tokens)
-        (0.1, prompt, body.num_slides, 4096),
+        # Budget: 3328 context window. Prompt ~600 + context ~1000 = ~1600 input tokens.
+        # Leaves ~1700 tokens for output; cap at 1500 to prevent truncation mid-JSON.
+        (0.1, prompt, body.num_slides, 1500),
         (
             0.0,
             f"""Create exactly {body.num_slides} slides about: {body.topic}
 
 Context:
-{context_text[:6000]}
+{context_text[:2000]}
 
 Return ONLY a valid JSON array. Rules:
 - Slide 1: layout="title", must have "title" and "subtitle"
@@ -424,14 +418,14 @@ Return ONLY a valid JSON array. Rules:
 
 Return ONLY the JSON array, no markdown, no explanation:""",
             body.num_slides,
-            4096,
+            1500,
         ),
         (
             0.0,
             f"""Create {_reduced_slides} slides about: {body.topic}
 
 Context (use ONLY this):
-{context_text[:3000]}
+{context_text[:1500]}
 
 Return ONLY a JSON array like:
 [
@@ -442,7 +436,7 @@ Return ONLY a JSON array like:
 ]
 Use real content from the context above. Return ONLY the JSON array:""",
             _reduced_slides,
-            2048,
+            1024,
         ),
     ]
 
@@ -746,8 +740,9 @@ Cite specific sections where relevant using [Page X] notation."""
 
 class QuizRequest(BaseModel):
     doc_id: str
-    num_mcq: int = Field(default=5, ge=1, le=20)
-    num_short_answer: int = Field(default=3, ge=0, le=10)
+    num_mcq: int = Field(default=5, ge=0, le=20)
+    num_true_false: int = Field(default=3, ge=0, le=10)
+    num_short_answer: int = Field(default=2, ge=0, le=10)
     difficulty: str = Field(default="medium", description="easy, medium, hard")
     scope: str = Field(default="comprehensive", description="concepts, details, comprehensive")
 
@@ -779,6 +774,16 @@ async def generate_quiz(
         content = content[:3000] + "\n[Content truncated for quiz generation]"
     filename = chunks[0]["metadata"].get("filename", "document")
 
+    # Build question section lines based on counts > 0
+    _sections = []
+    if body.num_mcq > 0:
+        _sections.append(f"- {body.num_mcq} Multiple Choice Questions (MCQ) with 4 options each (A, B, C, D) and the correct answer key")
+    if body.num_true_false > 0:
+        _sections.append(f"- {body.num_true_false} True/False Questions with the correct answer (True or False) and a brief explanation")
+    if body.num_short_answer > 0:
+        _sections.append(f"- {body.num_short_answer} Short Answer Questions with model answers")
+    _sections_str = "\n".join(_sections)
+
     prompt = f"""Generate a knowledge assessment quiz from this document.
 
 DOCUMENT: {filename}
@@ -787,8 +792,7 @@ CONTENT:
 {content}
 
 Generate EXACTLY:
-- {body.num_mcq} Multiple Choice Questions (MCQ) with 4 options each (A, B, C, D) and the correct answer
-- {body.num_short_answer} Short Answer Questions with model answers
+{_sections_str}
 
 DIFFICULTY LEVEL: {body.difficulty.upper()}
 SCOPE FOCUS: {body.scope.upper()}
@@ -801,6 +805,13 @@ Return ONLY valid JSON in this exact format:
       "question": "...",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
       "correct": "A",
+      "explanation": "..."
+    }}
+  ],
+  "true_false": [
+    {{
+      "question": "...",
+      "answer": true,
       "explanation": "..."
     }}
   ],
@@ -853,6 +864,7 @@ Return ONLY valid JSON in this exact format:
         quiz_data = {
             "title": f"Quiz: {filename}",
             "mcq": [],
+            "true_false": [],
             "short_answer": [],
             "_fallback": True,
             "_error": "The model failed to produce structured questions. Please try again.",
@@ -861,6 +873,8 @@ Return ONLY valid JSON in this exact format:
     # Validate minimal structure
     if "mcq" not in quiz_data:
         quiz_data["mcq"] = []
+    if "true_false" not in quiz_data:
+        quiz_data["true_false"] = []
     if "short_answer" not in quiz_data:
         quiz_data["short_answer"] = []
 
@@ -878,6 +892,16 @@ Return ONLY valid JSON in this exact format:
             doc.add_paragraph(f"   {key}) {opt}")
         doc.add_paragraph(f"   ✓ Correct: {q.get('correct', '?')}")
         doc.add_paragraph("")
+
+    if quiz_data.get("true_false"):
+        doc.add_heading("True / False Questions", level=2)
+        for i, q in enumerate(quiz_data["true_false"], 1):
+            ans = "True" if q.get("answer") is True else "False"
+            doc.add_paragraph(f"Q{i}. {q['question']}", style="List Number")
+            doc.add_paragraph(f"   ✓ Answer: {ans}")
+            if q.get("explanation"):
+                doc.add_paragraph(f"   Explanation: {q['explanation']}")
+            doc.add_paragraph("")
 
     doc.add_heading("Short Answer Questions", level=2)
     for i, q in enumerate(quiz_data.get("short_answer", []), 1):

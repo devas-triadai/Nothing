@@ -164,9 +164,9 @@ async def compliance_check(
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
-    prompt = f"""ROLE: You are an expert compliance auditor for the Indian Coast Guard. Return ONLY valid JSON arrays — no explanations, no prose, no markdown fences.
+    prompt = f"""Perform a clause-by-clause compliance analysis as an expert auditor for the Indian Coast Guard. Return ONLY a valid JSON array — no explanations, no prose, no markdown fences.
 
-TASK: Perform a clause-by-clause compliance analysis of the SUBJECT DOCUMENT(S) against the STANDARD(S).
+Task: Analyze the SUBJECT DOCUMENT(S) against the STANDARD(S) below.
 
 SUBJECT DOCUMENTS ({subject_filenames_str}):
 {subject_text}
@@ -197,7 +197,7 @@ Return ONLY a valid JSON array of findings. Each finding must strictly follow th
 VERDICT must be one of: Compliant, Non-Compliant, Partial, Missing, Contradiction, Unverifiable
 SEVERITY must be one of: Critical, Major, Minor, None (Critical for life-safety failures; None if Compliant)
 
-Analyse at least 5-10 key clauses in depth. OUTPUT: a valid JSON array only, starting with [ and ending with ]:"""
+Analyse 5-8 key clauses. OUTPUT: a valid JSON array only, starting with [ and ending with ]:"""
 
     messages = [
         {"role": "user", "content": prompt},
@@ -242,8 +242,8 @@ Analyse at least 5-10 key clauses in depth. OUTPUT: a valid JSON array only, sta
     
     # Trim standards for the second pass to avoid exceeding context window again
     _standards_short = standards_text[:1200] if len(standards_text) > 1200 else standards_text
-    missing_prompt = f"""You are a compliance analyst.
-    
+    missing_prompt = f"""Review the STANDARD excerpt and identify missing requirements.
+
 STANDARD (excerpt):
 {_standards_short}
 
