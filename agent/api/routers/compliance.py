@@ -331,155 +331,101 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
 ["""
 
     # ═══════════════════════════════════════════════════════════
-    # MULTI-BATCH COMPLIANCE (Primary path for thorough findings)
-    # Slice standards into 3 batches; pair each with subject slice.
-    # 3 LLM calls × 3-5 findings each = 9-15 total findings spanning the FULL standard.
-    # Each call ~1700 input + ~1200 output tokens — safely under 3328 limit.
+    # Return StreamingResponse IMMEDIATELY so CORS headers go out
+    # before RunPod proxy times out.  ALL LLM work runs inside
+    # the sync generator (Starlette runs it in a thread pool).
     # ═══════════════════════════════════════════════════════════
-    findings = []
-    try:
-        SL = len(standards_full)
-        std_slices = [
-            standards_full[: SL // 3],
-            standards_full[SL // 3 : 2 * SL // 3],
-            standards_full[2 * SL // 3 :],
-        ] if SL > 500 else [standards_full]
+    job_id = str(uuid.uuid4())
+    check_scope = body.check_scope
 
-        # Subject slice for each batch: rotate through subject_full thirds for coverage
-        SubL = len(subject_full)
-        if SubL > 500 and len(std_slices) >= 3:
-            sub_slices = [
-                subject_full[: SubL // 3][:3500],
-                subject_full[SubL // 3 : 2 * SubL // 3][:3500],
-                subject_full[2 * SubL // 3 :][:3500],
-            ]
-        else:
-            sub_slices = [subject_full[:3500]] * len(std_slices)
-
-        loop = asyncio.get_event_loop()
-        for std_slice, sub_slice in zip(std_slices, sub_slices):
-            batch_findings = await loop.run_in_executor(
-                None, _run_compliance_batch,
-                sub_slice, std_slice[:2500], subject_filenames_str, scope_note, 1200,
-            )
-            if batch_findings:
-                findings.extend(batch_findings)
-
-        # De-duplicate by clause_id (case-insensitive)
-        seen_clauses = set()
-        deduped = []
-        for f in findings:
-            cid = (f.get("clause_id", "") or "").strip().lower()
-            if cid and cid in seen_clauses:
-                continue
-            if cid:
-                seen_clauses.add(cid)
-            deduped.append(f)
-        findings = deduped
-        logger.info("Compliance multi-batch produced %d unique findings across %d batches",
-                    len(findings), len(std_slices))
-    except Exception as e:
-        logger.warning("Compliance multi-batch failed (%s) — falling back to single-pass", e)
+    def event_stream():
+        # ── Multi-batch compliance ──
         findings = []
-
-    if findings:
-        # Skip single-pass since multi-batch succeeded
-        findings_raw = ""  # not used downstream when findings is already populated
-        _SKIP_SINGLE_PASS = True
-    else:
-        _SKIP_SINGLE_PASS = False
-
-    messages = [
-        {"role": "user", "content": prompt},
-    ]
-
-    if not _SKIP_SINGLE_PASS:
         try:
-            findings_raw = llm_engine.generate(messages, max_tokens=1200, temperature=0.1)
+            SL = len(standards_full)
+            std_slices = [
+                standards_full[: SL // 3],
+                standards_full[SL // 3 : 2 * SL // 3],
+                standards_full[2 * SL // 3 :],
+            ] if SL > 500 else [standards_full]
+
+            SubL = len(subject_full)
+            if SubL > 500 and len(std_slices) >= 3:
+                sub_slices = [
+                    subject_full[: SubL // 3][:3500],
+                    subject_full[SubL // 3 : 2 * SubL // 3][:3500],
+                    subject_full[2 * SubL // 3 :][:3500],
+                ]
+            else:
+                sub_slices = [subject_full[:3500]] * len(std_slices)
+
+            for batch_idx, (std_slice, sub_slice) in enumerate(zip(std_slices, sub_slices)):
+                yield f"data: {json.dumps({'status': 'progress', 'message': f'Analyzing batch {batch_idx + 1} of {len(std_slices)}...'})}\n\n"
+                batch_findings = _run_compliance_batch(
+                    sub_slice, std_slice[:2500], subject_filenames_str, scope_note, 1200,
+                )
+                if batch_findings:
+                    findings.extend(batch_findings)
+
+            # De-duplicate by clause_id (case-insensitive)
+            seen_clauses = set()
+            deduped = []
+            for f in findings:
+                cid = (f.get("clause_id", "") or "").strip().lower()
+                if cid and cid in seen_clauses:
+                    continue
+                if cid:
+                    seen_clauses.add(cid)
+                deduped.append(f)
+            findings = deduped
+            logger.info("Compliance multi-batch produced %d unique findings across %d batches",
+                        len(findings), len(std_slices))
         except Exception as e:
-            logger.error("Compliance LLM call failed: %s", e)
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards."},
-                headers=_CORS_HEADERS,
-            )
-    else:
-        findings_raw = "[]"  # placeholder so downstream parsing is a no-op
+            logger.warning("Compliance multi-batch failed (%s) — falling back to single-pass", e)
+            findings = []
 
-    # ── Echo-strip: Gemma echoes the prompt as markdown bullet list [* text...]
-    # A valid JSON array MUST start with '[{' or '[ {' — NOT '[*', '[\n*', '[word'.
-    # Strategy: find the first '[{' or '{' that indicates real JSON.
-    _strip = findings_raw.strip()
+        # ── Single-pass fallback ──
+        if not findings:
+            yield f"data: {json.dumps({'status': 'progress', 'message': 'Running single-pass analysis...'})}\n\n"
+            try:
+                findings_raw = llm_engine.generate(
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=1200, temperature=0.1,
+                )
+            except Exception as e:
+                logger.error("Compliance LLM call failed: %s", e)
+                findings_raw = "[]"
 
-    def _is_json_array_start(s: str) -> bool:
-        """Return True only if s starts with a real JSON array (not a markdown list)."""
-        if not s.startswith('['):
-            return False
-        # Scan past '[' and whitespace to find the first meaningful char
-        i = 1
-        while i < len(s) and s[i] in ' \t\n\r':
-            i += 1
-        return i < len(s) and s[i] == '{'
+            stripped = _strip_echo_for_json(findings_raw)
+            try:
+                cleaned = _clean_json(stripped)
+                findings = json.loads(cleaned)
+                if not isinstance(findings, list):
+                    raise ValueError("Expected a JSON array of findings")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
+                findings = _repair_json_with_llm(findings_raw)
 
-    if _is_json_array_start(_strip):
-        findings_raw = _strip
-    elif _strip.startswith('{'):
-        findings_raw = '[' + _strip + ']'
-    else:
-        # Search for first real JSON object or array-of-objects
-        _brace = _strip.find('{')
-        # Find '[{' pattern (real JSON array)
-        _bracket_brace = _strip.find('[{')
-        if _bracket_brace < 0:
-            # Try '[ {' with spaces
-            import re as _re
-            _m = _re.search(r'\[\s*\{', _strip)
-            _bracket_brace = _m.start() if _m else -1
-        if _bracket_brace >= 0 and (_brace < 0 or _bracket_brace <= _brace):
-            findings_raw = _strip[_bracket_brace:]
-        elif _brace >= 0:
-            findings_raw = '[' + _strip[_brace:]
-        else:
-            findings_raw = '[' + _strip
+        if not findings:
+            logger.error("All JSON recovery strategies failed.")
+            findings = [{
+                "topic": "Analysis Error",
+                "clause_id": "N/A",
+                "requirement": "Automated compliance parsing",
+                "acceptance_criterion": "Valid JSON output",
+                "verdict": "Unverifiable",
+                "severity": "Major",
+                "finding": "The compliance engine could not produce a structured analysis. This may be due to document complexity or context size. Please try with a narrower scope or fewer documents.",
+                "recommendation": "Re-run with check_scope targeting specific sections, or reduce document count.",
+                "citation": "N/A",
+            }]
 
-    logger.debug("Compliance raw after echo-strip (first 200): %s", findings_raw[:200])
-
-    # Workstream D: Multi-strategy JSON parsing with graceful degradation
-    # Skip this entire block if multi-batch already produced findings.
-    if not _SKIP_SINGLE_PASS:
-        findings = None
+        # ── Second pass: Missing Requirements ──
         try:
-            cleaned = _clean_json(findings_raw)
-            findings = json.loads(cleaned)
-            if not isinstance(findings, list):
-                raise ValueError("Expected a JSON array of findings")
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
-            # Fallback: LLM-based repair
-            findings = _repair_json_with_llm(findings_raw)
-
-    if not findings:
-        logger.error("All JSON recovery strategies failed. Raw (first 500): %s", findings_raw[:500])
-        # Return a single degraded finding instead of 500
-        findings = [{
-            "topic": "Analysis Error",
-            "clause_id": "N/A",
-            "requirement": "Automated compliance parsing",
-            "acceptance_criterion": "Valid JSON output",
-            "verdict": "Unverifiable",
-            "severity": "Major",
-            "finding": "The compliance engine could not produce a structured analysis. This may be due to document complexity or context size. Please try with a narrower scope or fewer documents.",
-            "recommendation": "Re-run with check_scope targeting specific sections, or reduce document count.",
-            "citation": "N/A",
-        }]
-
-    # Second pass: Missing Requirements
-    covered_clauses = [f.get("clause_id", "") for f in findings]
-    covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
-    
-    # Trim standards for the second pass to fit within 3328-token per-request limit.
-    _standards_short = standards_text[:1500] if len(standards_text) > 1500 else standards_text
-    missing_prompt = f"""STANDARD (excerpt):
+            covered_clauses = [f.get("clause_id", "") for f in findings]
+            covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
+            _standards_short = standards_text[:1500] if len(standards_text) > 1500 else standards_text
+            missing_prompt = f"""STANDARD (excerpt):
 {_standards_short}
 
 Already checked clauses:
@@ -489,95 +435,73 @@ List any CRITICAL requirements in the STANDARD completely MISSING from the subje
 Output JSON array only. Each item: {{topic, clause_id, requirement, acceptance_criterion, verdict: "Missing", severity: "Major", finding, recommendation, citation: "N/A"}}
 If none missing, return [].
 ["""
+            missing_raw = llm_engine.generate(
+                [{"role": "user", "content": missing_prompt}],
+                max_tokens=600, temperature=0.0,
+            )
+            _ms = _strip_echo_for_json(missing_raw)
+            cleaned = _clean_json(_ms)
+            start = cleaned.find("[")
+            end = cleaned.rfind("]") + 1
+            if start != -1 and end > start:
+                missing_findings = json.loads(cleaned[start:end])
+                if isinstance(missing_findings, list):
+                    findings.extend(missing_findings)
+        except Exception as e:
+            logger.warning("Second pass (Missing Requirements) failed: %s", e)
 
-    messages_missing = [
-        {"role": "user", "content": missing_prompt},
-    ]
-    try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=600, temperature=0.0)
-        # Echo-strip for second pass — same robust logic as primary pass
-        _ms = missing_raw.strip()
-        if _is_json_array_start(_ms):
-            pass  # already valid
-        elif _ms.startswith('{'):
-            _ms = '[' + _ms + ']'
-        else:
-            _brace2 = _ms.find('{')
-            _m2 = __import__('re').search(r'\[\s*\{', _ms)
-            _bb2 = _m2.start() if _m2 else -1
-            if _bb2 >= 0 and (_brace2 < 0 or _bb2 <= _brace2):
-                _ms = _ms[_bb2:]
-            elif _brace2 >= 0:
-                _ms = '[' + _ms[_brace2:]
-            else:
-                _ms = '[]'  # nothing to parse — skip gracefully
-        cleaned = _clean_json(_ms)
-        start = cleaned.find("[")
-        end = cleaned.rfind("]") + 1
-        if start != -1 and end > start:
-            missing_findings = json.loads(cleaned[start:end])
-            if isinstance(missing_findings, list):
-                findings.extend(missing_findings)
-    except Exception as e:
-        logger.warning("Second pass (Missing Requirements) failed or returned empty: %s", e)
+        # Post-process for low OCR confidence
+        if avg_conf < 0.65:
+            logger.warning(f"Low OCR confidence detected: {avg_conf:.2f}")
+            for finding in findings:
+                if finding.get("verdict") != "Missing":
+                    finding["verdict"] = "Unverifiable"
+                    finding["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + finding.get("finding", "")
 
-    # Post-process for low OCR confidence
-    if avg_conf < 0.65:
-        logger.warning(f"Low OCR confidence detected: {avg_conf:.2f}")
-        for finding in findings:
-            if finding.get("verdict") != "Missing":
-                finding["verdict"] = "Unverifiable"
-                finding["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + finding.get("finding", "")
-
-    # Third pass: Historical Feedback
-    history_findings = []
-    try:
-        history_query = f"historical non-compliance defect lessons learned failure {body.check_scope or ''}"
-        history_emb = embedder.embed_query(history_query)
-        historical_chunks = store.hybrid_search(history_query, history_emb, top_k=5)
-        
-        if historical_chunks:
-            hist_text = "\n\n".join(c["text"] for c in historical_chunks)
-            hist_prompt = f"""You are a compliance analyst.
+        # ── Third pass: Historical Feedback ──
+        history_findings = []
+        try:
+            history_query = f"historical non-compliance defect lessons learned failure {check_scope or ''}"
+            history_emb = embedder.embed_query(history_query)
+            historical_chunks = store.hybrid_search(history_query, history_emb, top_k=5)
+            if historical_chunks:
+                hist_text = "\n\n".join(c["text"] for c in historical_chunks)
+                hist_prompt = f"""You are a compliance analyst.
 Review these past historical records and lessons learned:
 {hist_text[:2000]}
 
 Based on the above, are there any common historical defects or past non-compliances that the auditor should specifically double-check in the current subject document?
 Summarize the top 2-3 historical warnings. Return a simple string paragraph. If nothing is relevant, return 'None'."""
-            hist_res = llm_engine.generate([{"role": "user", "content": hist_prompt}], max_tokens=500)
-            if hist_res.strip() and hist_res.strip().lower() != 'none':
-                history_findings.append(hist_res.strip())
-    except Exception as e:
-        logger.warning("Historical feedback pass failed: %s", e)
+                hist_res = llm_engine.generate([{"role": "user", "content": hist_prompt}], max_tokens=500)
+                if hist_res.strip() and hist_res.strip().lower() != 'none':
+                    history_findings.append(hist_res.strip())
+        except Exception as e:
+            logger.warning("Historical feedback pass failed: %s", e)
 
-    # Stream findings as SSE
-    job_id = str(uuid.uuid4())
-
-    def event_stream():
+        # ── Yield findings as SSE events ──
         for i, finding in enumerate(findings):
             yield f"data: {json.dumps({'finding': finding, 'index': i + 1, 'total': len(findings)})}\n\n"
 
-        # Build DOCX report
+        # ── Build DOCX report ──
         docx_path = _OUTPUTS_DIR / f"{job_id}_compliance.docx"
         doc = DocxDocument()
         doc.add_heading("Compliance Analysis Report", level=1)
         doc.add_heading(f"Subjects: {subject_filenames_str}", level=2)
-        doc.add_paragraph(f"Scope: {body.check_scope or 'Full Document'}")
+        doc.add_paragraph(f"Scope: {check_scope or 'Full Document'}")
         doc.add_paragraph("")
 
-        # Summary metrics
         compliant = sum(1 for f in findings if f.get("verdict") == "Compliant")
         non_compliant = sum(1 for f in findings if f.get("verdict") == "Non-Compliant")
         partial = sum(1 for f in findings if f.get("verdict") == "Partial")
         missing = sum(1 for f in findings if f.get("verdict") == "Missing")
         contradiction = sum(1 for f in findings if f.get("verdict") == "Contradiction")
         unverifiable = sum(1 for f in findings if f.get("verdict") == "Unverifiable")
-        
+
         critical_issues = sum(1 for f in findings if f.get("severity") == "Critical" and f.get("verdict") != "Compliant")
-        
+
         total_evaluable = len(findings) - unverifiable
         compliance_score = (compliant / total_evaluable * 100) if total_evaluable > 0 else 0
-        
+
         overall_rec = "APPROVE"
         if critical_issues > 0 or compliance_score < 70:
             overall_rec = "REJECT"
@@ -589,7 +513,7 @@ Summarize the top 2-3 historical warnings. Return a simple string paragraph. If 
         doc.add_paragraph(f"Final Recommendation: {overall_rec}").bold = True
         doc.add_paragraph(f"Critical Deficiencies Found: {critical_issues}")
         doc.add_paragraph("")
-        
+
         if history_findings:
             doc.add_heading("Historical Feedback & Lessons Learned", level=2)
             doc.add_paragraph(history_findings[0])
