@@ -585,23 +585,45 @@ export default function Chat() {
           ...(prevSlides && { previous_slides_json: prevSlides }),
         };
 
-        // Fire PPT generation in background (non-blocking)
+        // Fire PPT generation in background (non-blocking, async job pattern)
+        // POST returns job_id immediately; we poll /status/{job_id} every 5s
         setIsProcessingBg(true);
         (async () => {
           try {
-            const res = await fetch(getApiUrl('/api/agent/generate/ppt'), {
+            // Step 1: Start the job
+            const startRes = await fetch(getApiUrl('/api/agent/generate/ppt'), {
               method: 'POST',
               headers: { ...authHeader, 'Content-Type': 'application/json' },
               body: JSON.stringify(requestBody),
             });
-            if (!res.ok) throw new Error(`PPT generation failed: ${res.status}`);
+            if (!startRes.ok) throw new Error(`PPT start failed: ${startRes.status}`);
+            const { job_id } = await startRes.json();
+            if (!job_id) throw new Error('No job_id returned from PPT start');
 
-            const slidesJson = res.headers.get('X-Slides-JSON') || null;
-            const blob = await res.blob();
+            // Step 2: Poll status every 5s (up to 10 minutes)
+            let pollData = null;
+            const maxAttempts = 120; // 120 × 5s = 10 minutes
+            for (let i = 0; i < maxAttempts; i++) {
+              await new Promise(r => setTimeout(r, 5000));
+              const statusRes = await fetch(getApiUrl(`/api/agent/generate/ppt/status/${job_id}`), {
+                headers: authHeader,
+              });
+              if (!statusRes.ok) throw new Error(`Status check failed: ${statusRes.status}`);
+              const statusData = await statusRes.json();
+              if (statusData.status === 'done') { pollData = statusData; break; }
+              if (statusData.status === 'error') throw new Error(statusData.error || 'PPT generation failed on server');
+              // still pending — keep polling
+            }
+            if (!pollData) throw new Error('PPT generation timed out after 10 minutes');
+
+            const slidesJson = pollData.slides_json || null;
+            // Download the file using the download URL from the status response
+            const downloadRes = await fetch(getApiUrl(pollData.download_url), { headers: authHeader });
+            if (!downloadRes.ok) throw new Error(`PPT download failed: ${downloadRes.status}`);
+            const blob = await downloadRes.blob();
             const url = URL.createObjectURL(blob);
             const versionLabel = version > 1 ? ` v${version}` : '';
-            const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
-              || `AGRA_${topic.slice(0, 30)}${version > 1 ? '_v' + version : ''}.pptx`;
+            const filename = pollData.filename || `AGRA_${topic.slice(0, 30)}${version > 1 ? '_v' + version : ''}.pptx`;
 
             setPptHistory(prev => ({
               ...prev,

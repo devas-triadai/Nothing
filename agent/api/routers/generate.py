@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.utils.auth_check import get_current_user
@@ -21,6 +21,10 @@ from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
 from api.rag.reranker import rerank
 from api.generators.ppt_gen import build_pptx
+
+# ── Async PPT job store (in-memory, per-process) ──
+# Maps job_id -> {"status": "pending"|"done"|"error", "filename": str, "slides_json": str, "error": str}
+_ppt_jobs: dict = {}
 from docx import Document as DocxDocument
 
 logger = logging.getLogger("agra.generate")
@@ -244,24 +248,44 @@ class PPTRequest(BaseModel):
     version: int = Field(default=1, ge=1, description="Version number (v1, v2, v3...)")
 
 
-@router.post("/generate/ppt")
-async def generate_ppt(
-    body: PPTRequest,
+@router.get("/generate/ppt/status/{job_id}")
+async def ppt_job_status(
+    job_id: str,
     user: dict = Depends(get_current_user),
-    request: Request = None,
 ):
     """
-    Generate a PowerPoint presentation from RAG context.
-    Intelligently selects slide layouts based on content analysis.
-    Extracts images from uploaded documents when available.
-    Returns the .pptx file as a download.
+    Poll the status of an async PPT generation job.
+    Returns {status, download_url, filename, slides_json} when done.
     """
-    auth_header_token = ""
-    if request:
-        auth_h = request.headers.get("authorization", "")
-        auth_header_token = auth_h.replace("Bearer ", "") if auth_h else ""
+    job = _ppt_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="PPT job not found")
+    if job["status"] == "done":
+        return JSONResponse({
+            "status": "done",
+            "download_url": f"/api/agent/download/{job['filename']}",
+            "filename": job["filename"],
+            "slides_json": job.get("slides_json", ""),
+        })
+    if job["status"] == "error":
+        return JSONResponse({"status": "error", "error": job.get("error", "Unknown error")})
+    return JSONResponse({"status": "pending"})
+
+
+async def _run_ppt_job(job_id: str, body: PPTRequest, auth_header_token: str):
+    """Background coroutine: runs full PPT generation and stores result in _ppt_jobs."""
     store = get_store()
     start_time = time.time()
+    try:
+        await _do_generate_ppt(job_id, body, auth_header_token, store, start_time)
+    except Exception as exc:
+        logger.error("PPT background job %s failed: %s", job_id, exc, exc_info=True)
+        _ppt_jobs[job_id] = {"status": "error", "error": str(exc)}
+
+
+async def _do_generate_ppt(job_id: str, body: PPTRequest, auth_header_token: str, store, start_time: float):
+    """Core PPT generation logic (extracted so it can run as background task)."""
+    # NOTE: job_id is reused as the UUID for the output filename
 
     # ── 1. Gather context from documents ──
     _loop = asyncio.get_event_loop()
@@ -543,7 +567,7 @@ Use real content from the context above. Return ONLY the JSON array:""",
         slides_data[-2] = {"layout": "sources", "title": "Sources & References", "sources": source_names[:20]}
 
     # ── 6. Build PPTX ──
-    job_id = str(uuid.uuid4())
+    # job_id is passed in as parameter (matches the polling key in _ppt_jobs)
     version_label = f"_v{body.version}" if body.version > 1 else ""
     # When doc_ids are provided and topic is a generic fallback, derive a meaningful
     # presentation title from the first document's filename (strip extension).
@@ -587,12 +611,37 @@ Use real content from the context above. Return ONLY the JSON array:""",
         response_time_ms=elapsed_ms,
     )
 
-    return FileResponse(
-        path=str(output_path),
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        filename=f"AGRA_{safe_topic}{version_label}.pptx",
-        headers={"X-PPT-Version": str(body.version), "X-Slides-JSON": json.dumps(slides_data)},
-    )
+    # Store result in job store so status endpoint can serve it
+    _ppt_jobs[job_id] = {
+        "status": "done",
+        "filename": output_filename,
+        "pretty_filename": f"AGRA_{safe_topic}{version_label}.pptx",
+        "slides_json": json.dumps(slides_data),
+        "version": body.version,
+    }
+
+
+@router.post("/generate/ppt")
+async def generate_ppt(
+    body: PPTRequest,
+    user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """
+    Start async PPT generation. Returns {job_id} immediately (no timeout risk).
+    Frontend polls GET /generate/ppt/status/{job_id} every 5s for completion.
+    """
+    auth_header_token = ""
+    if request:
+        auth_h = request.headers.get("authorization", "")
+        auth_header_token = auth_h.replace("Bearer ", "") if auth_h else ""
+
+    job_id = str(uuid.uuid4())
+    _ppt_jobs[job_id] = {"status": "pending"}
+
+    asyncio.create_task(_run_ppt_job(job_id, body, auth_header_token))
+
+    return JSONResponse({"job_id": job_id, "status": "pending"})
 
 
 # ═══════════════════════════════════════════════════════════════
