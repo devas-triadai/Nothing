@@ -154,6 +154,50 @@ def _strip_echo_for_json(raw: str) -> str:
     return '[]'
 
 
+def _repair_truncated_json(raw: str) -> str:
+    """Local repair for common LLM truncation issues: unterminated strings, incomplete objects/arrays."""
+    s = raw.strip()
+    if not s:
+        return '[]'
+
+    # Close unterminated strings
+    in_string = False
+    escape_next = False
+    for i, c in enumerate(s):
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\':
+            escape_next = True
+            continue
+        if c == '"':
+            in_string = not in_string
+
+    if in_string:
+        s = s + '"'
+
+    # Extract outermost array if present
+    start = s.find('[')
+    end = s.rfind(']') + 1
+    if start >= 0 and end > start:
+        s = s[start:end]
+
+    # Strip trailing incomplete content (comma at end, partial key, etc.)
+    s = re.sub(r',\s*"[^"]*$', '', s)
+    s = re.sub(r',\s*$', '', s)
+
+    # Close remaining open structures
+    open_braces = s.count('{') - s.count('}')
+    open_brackets = s.count('[') - s.count(']')
+    s += '}' * max(0, open_braces)
+    s += ']' * max(0, open_brackets)
+
+    # Remove trailing commas before closing brackets/braces
+    s = re.sub(r',\s*(\}|\])', r'\1', s)
+
+    return s
+
+
 def _run_compliance_batch(subject_slice: str, standard_slice: str, subject_filenames_str: str,
                           scope_note: str, max_tokens: int = 1200) -> list:
     """
@@ -188,6 +232,15 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
         if isinstance(data, list):
             return [d for d in data if isinstance(d, dict)]
     except (json.JSONDecodeError, ValueError) as e:
+        # Try local repair for truncated/unterminated strings
+        try:
+            repaired = _repair_truncated_json(cleaned)
+            data = json.loads(repaired)
+            if isinstance(data, list):
+                logger.info("Local JSON repair succeeded for compliance batch")
+                return [d for d in data if isinstance(d, dict)]
+        except Exception:
+            pass
         logger.warning("Compliance batch JSON parse failed: %s", e)
     return []
 
