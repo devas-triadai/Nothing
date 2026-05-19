@@ -103,33 +103,48 @@ def _is_json_array_start_global(s: str) -> bool:
 
 
 def _strip_echo_for_json(raw: str) -> str:
-    """Aggressively strip prompt-echo prefix and return a JSON-array-shaped string."""
+    """Aggressively strip prompt-echo prefix and return a JSON-array-shaped string.
+    Handles Gemma's markdown list echoes like '[* Subject Documents...' """
     s = (raw or "").strip()
     if not s:
         return '[]'
 
-    # Fast path: already valid JSON array
+    # Fast path: already valid JSON array starting with '[{'
     if _is_json_array_start_global(s):
         return s
 
-    # If it starts with '[' but NOT '[{' it's a markdown list echo (like [* item...])
-    # Find the FIRST occurrence of '[{' which is real JSON array start
-    json_array_start = s.find('[{')
-    if json_array_start > 0:
-        return s[json_array_start:]
+    # If it starts with '[' followed by '*' or other non-JSON content, it's a markdown list echo
+    # Strip until we find actual JSON
+    if s.startswith('['):
+        # Look for the real JSON array start '[{'
+        json_array_start = s.find('[{')
+        if json_array_start >= 0:
+            return s[json_array_start:]
+        # Or look for a single JSON object starting with '{'
+        first_brace = s.find('{')
+        if first_brace >= 0:
+            last_brace = s.rfind('}')
+            if last_brace > first_brace:
+                return '[' + s[first_brace:last_brace+1] + ']'
+            return '[' + s[first_brace:] + ']'
+        # No JSON found, return empty
+        return '[]'
 
-    # If we see single '{' object, wrap it
-    first_brace = s.find('{')
-    if first_brace >= 0:
-        # Check if there's a closing brace
+    # If it starts with '{' wrap it
+    if s.startswith('{'):
         last_brace = s.rfind('}')
-        if last_brace > first_brace:
-            return '[' + s[first_brace:last_brace+1] + ']'
-        return '[' + s[first_brace:] + ']'
+        if last_brace > 0:
+            return '[' + s[:last_brace+1] + ']'
+        return '[' + s + ']'
 
-    # Try to find any JSON-like structure
-    # Look for patterns like {"key": or [{"key":
-    json_obj_match = re.search(r'\{[\s]*"', s)
+    # Search for any JSON array or object in the text
+    # Find first occurrence of '[{'
+    json_array_match = re.search(r'\[\s*\{', s)
+    if json_array_match:
+        return s[json_array_match.start():]
+
+    # Find first '{' that looks like JSON (followed by quote)
+    json_obj_match = re.search(r'\{\s*"', s)
     if json_obj_match:
         # Extract from first { to last }
         start = json_obj_match.start()
@@ -196,6 +211,14 @@ async def compliance_check_options():
     )
 
 
+# CORS headers for all compliance responses
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+}
+
+
 @router.post("/compliance/check")
 async def compliance_check(
     request: Request,
@@ -221,18 +244,33 @@ async def compliance_check(
             subject_chunks.extend(chunks)
 
     if not subject_chunks:
-        raise HTTPException(status_code=404, detail="Subject documents not found in knowledge base.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Subject documents not found in knowledge base."},
+            headers=_CORS_HEADERS,
+        )
 
     # Load standard document chunks
     standard_chunks = []
     for std_id in body.standard_doc_ids:
         std = store.get_chunks_by_doc(std_id)
         if not std:
-            raise HTTPException(status_code=404, detail=f"Standard document {std_id} not found.")
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"Standard document {std_id} not found."},
+                headers=_CORS_HEADERS,
+            )
         standard_chunks.extend(std)
 
     if not standard_chunks:
-        raise HTTPException(status_code=400, detail="No standard document content found.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "No standard document content found."},
+            headers=_CORS_HEADERS,
+        )
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
@@ -514,12 +552,6 @@ Summarize the top 2-3 historical warnings. Return a simple string paragraph. If 
     # Stream findings as SSE
     job_id = str(uuid.uuid4())
 
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    }
-
     def event_stream():
         for i, finding in enumerate(findings):
             yield f"data: {json.dumps({'finding': finding, 'index': i + 1, 'total': len(findings)})}\n\n"
@@ -611,5 +643,5 @@ Summarize the top 2-3 historical warnings. Return a simple string paragraph. If 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers=headers,
+        headers=_CORS_HEADERS,
     )
