@@ -272,6 +272,105 @@ async def ppt_job_status(
     return JSONResponse({"status": "pending"})
 
 
+async def _generate_slide_batch(prompt_text: str, max_tokens: int = 1500, temperature: float = 0.1) -> list:
+    """Make one LLM call and return parsed slides list (empty list on failure)."""
+    try:
+        raw = await asyncio.to_thread(
+            llm_engine.generate, [{"role": "user", "content": prompt_text}],
+            max_tokens=max_tokens, temperature=temperature, raw=True,
+        )
+        if not raw or len(raw.strip()) < 10:
+            return []
+        cleaned = _clean_json(raw)
+        if not cleaned:
+            recovered = _repair_truncated_array(raw)
+            cleaned = recovered or raw
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            recovered = _repair_truncated_array(cleaned)
+            if not recovered:
+                return []
+            data = json.loads(recovered)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        if isinstance(data, dict):
+            return [data]
+    except Exception as e:
+        logger.warning("Slide batch failed: %s", e)
+    return []
+
+
+async def _generate_slides_multibatch(body: "PPTRequest", context_full: str, source_filenames: list) -> list:
+    """
+    Generate slides via 3-4 batched LLM calls for RICH content per slide.
+    Splits document into thirds. Each call produces 3-4 detailed slides referencing
+    the actual document content. Also generates a dedicated table slide and a
+    flowchart/architecture slide.
+    """
+    topic = body.topic or "Document Overview"
+    num_slides = body.num_slides
+
+    # Split context into 3 slices to expose the FULL document across batches
+    L = len(context_full)
+    s1 = context_full[: L // 3][:4500]
+    s2 = context_full[L // 3 : 2 * L // 3][:4500]
+    s3 = context_full[2 * L // 3 :][:4500]
+
+    # Filename hint for in-deck citations
+    files_str = ", ".join(sorted({f for f in source_filenames if f})[:5]) or "the source document"
+
+    # ── Batch 1: slides 1-3 (title + introduction + key concept) ──
+    prompt1 = f"""DOCUMENT EXCERPT (Part 1 of 3, from {files_str}):
+{s1}
+
+Create exactly 3 PowerPoint slides about: {topic}
+Slide 1: layout="title", title="{topic}", subtitle (presenter/org from doc)
+Slide 2: layout="bullets", title="Overview" or similar, 4-5 detailed bullets summarizing the document's purpose, scope, stakeholders. Each bullet 12-25 words.
+Slide 3: layout="bullets", title for main concept/problem statement, 4-5 detailed bullets with specifics from the document.
+
+Return ONLY a JSON array of 3 objects. No prose. Start with [
+["""
+    batch1 = await _generate_slide_batch(prompt1, max_tokens=1500, temperature=0.1)
+
+    # ── Batch 2: slides 4-7 (technical/methodology with table) ──
+    prompt2 = f"""DOCUMENT EXCERPT (Part 2 of 3, from {files_str}):
+{s2}
+
+Create exactly 4 PowerPoint slides continuing a presentation about: {topic}
+Slide 1: layout="section_header", title for a major section in this excerpt
+Slide 2: layout="bullets", 4-5 detailed bullets on methodology/approach/technical details, 12-25 words each
+Slide 3: layout="table", title="Comparison" or feature/spec table, with table_data={{"headers":["Feature","Description","Status"], "rows":[[...],[...],[...]]}} (4-6 rows from the document)
+Slide 4: layout="two_column", title, left_column=["..3-4 items.."], right_column=["..3-4 items.."] with real document content
+
+Return ONLY a JSON array of 4 objects. No prose. Start with [
+["""
+    batch2 = await _generate_slide_batch(prompt2, max_tokens=1800, temperature=0.1)
+
+    # ── Batch 3: slides 8-10 (architecture flowchart + conclusion + thank_you) ──
+    prompt3 = f"""DOCUMENT EXCERPT (Part 3 of 3, from {files_str}):
+{s3}
+
+Create exactly 3 PowerPoint slides concluding a presentation about: {topic}
+Slide 1: layout="diagram", title="System Architecture" or similar, diagram_data={{"type":"flowchart","nodes":[{{"id":"A","label":"<step from doc>","shape":"rounded_rect"}},{{"id":"B","label":"<step>","shape":"rect"}},{{"id":"C","label":"<step>","shape":"rect"}},{{"id":"D","label":"<output>","shape":"rounded_rect"}}],"edges":[{{"from":"A","to":"B"}},{{"from":"B","to":"C"}},{{"from":"C","to":"D"}}]}} — use REAL terminology from the document for node labels
+Slide 2: layout="bullets", title="Key Takeaways" or "Conclusion", 4-5 detailed bullets summarizing outcomes/benefits/next steps
+Slide 3: layout="thank_you", title="Thank You", subtitle (organization name from doc, e.g. "Indian Coast Guard")
+
+Return ONLY a JSON array of 3 objects. No prose. Start with [
+["""
+    batch3 = await _generate_slide_batch(prompt3, max_tokens=1800, temperature=0.1)
+
+    combined = []
+    combined.extend(batch1)
+    combined.extend(batch2)
+    combined.extend(batch3)
+
+    # If we got something reasonable, return it (may be 7-10 slides; pad/trim happens later)
+    if len(combined) >= 3:
+        return combined
+    return []
+
+
 async def _run_ppt_job(job_id: str, body: PPTRequest, auth_header_token: str):
     """Background coroutine: runs full PPT generation and stores result in _ppt_jobs."""
     store = get_store()
@@ -302,12 +401,17 @@ async def _do_generate_ppt(job_id: str, body: PPTRequest, auth_header_token: str
             None, rerank, body.topic, candidates, 40
         )
 
-    # LLM context window is 16640 tokens (~66000 chars).
-    # PPT prompt template ~500 tokens; output 10 slides ~2500 tokens.
-    # Available for context: ~13600 tokens (~54000 chars). Use generously.
-    context_text = "\n\n".join(c["text"] for c in context_chunks[:40])
-    if len(context_text) > 50000:
-        context_text = context_text[:50000] + "\n[Content truncated]"
+    # llama-server runs 5 parallel slots: TOTAL 16640 tokens / 5 = 3328 tokens per request.
+    # Budget: 3328 - 500 (prompt template) - 1500 (output) = ~1300 tokens (~5000 chars) for context.
+    # We keep a FULL context buffer (~30000 chars) used in multi-batch mode for richer output;
+    # the per-call slice is small enough to stay safely under 3328 tokens.
+    context_full_text = "\n\n".join(c["text"] for c in context_chunks[:40])
+    if len(context_full_text) > 30000:
+        context_full_text = context_full_text[:30000] + "\n[Content truncated]"
+    # Single-pass context (used by fallback paths) — safely under 3328-token window.
+    context_text = context_full_text[:4500]
+    if len(context_full_text) > 4500:
+        context_text = context_text + "\n[Content truncated]"
 
     # ── 2. Extract images from uploaded documents ──
     extracted_images = []
@@ -374,12 +478,13 @@ Rules:
 Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     # ── 4. Generate slides with retry ──
-    # Token budget: 16640 context. Input (prompt+context) ~3000-4000 tokens.
-    # Remaining for output ~12000+ tokens. Each slide JSON ~250 tokens.
-    # Can safely generate full body.num_slides (up to 25) in one pass.
-    # max_tokens=4096 gives 16 slides of headroom; use body.num_slides directly.
-    _safe_slides = body.num_slides
-    _reduced_slides = min(body.num_slides, 10)
+    # Per-request budget: 3328 tokens. Input (prompt+context) ~1300 tokens.
+    # Remaining for output ~2000 tokens. Each slide JSON ~250 tokens.
+    # Safe cap: 7 slides single-pass (1400-1750 tokens output).
+    # Multi-batch mode (used FIRST below) generates the full body.num_slides via
+    # 3 LLM calls of 3-4 slides each — each call uses fresh context slice.
+    _safe_slides = min(7, body.num_slides)
+    _reduced_slides = min(5, body.num_slides)
 
     _diagram_hint = (
         'Include ONE slide with layout "diagram" containing a diagram_data object with '
@@ -398,15 +503,15 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     _attempt_configs = [
         # (temperature, prompt, num_slides, max_tokens)
-        # 16640-token window: input ~4000 tokens, output budget ~12000 tokens.
-        # Each slide ~250 tokens; 10 slides = ~2500 tokens. max_tokens=4096 is safe.
-        (0.1, _prompt_safe, _safe_slides, 4096),
+        # 3328-token window: input ~1300 tokens, output budget ~2000 tokens.
+        # Each slide ~250 tokens; 7 slides = ~1750 tokens. max_tokens=2048 safe.
+        (0.1, _prompt_safe, _safe_slides, 2048),
         (
             0.0,
             f"""Create exactly {_safe_slides} slides about: {body.topic}
 
 Context:
-{context_text[:30000]}
+{context_text[:3500]}
 
 Return ONLY a valid JSON array. Rules:
 - Slide 1: layout="title", must have "title" and "subtitle"
@@ -417,14 +522,14 @@ Return ONLY a valid JSON array. Rules:
 
 Return ONLY the JSON array, no markdown, no explanation:""",
             _safe_slides,
-            4096,
+            2048,
         ),
         (
             0.0,
             f"""Create {_reduced_slides} slides about: {body.topic}
 
 Context (use ONLY this):
-{context_text[:20000]}
+{context_text[:2500]}
 
 Return ONLY a JSON array like:
 [
@@ -435,11 +540,36 @@ Return ONLY a JSON array like:
 ]
 Use real content from the context above. Return ONLY the JSON array:""",
             _reduced_slides,
-            4096,
+            1024,
         ),
     ]
 
     slides_data = None
+
+    # ═══════════════════════════════════════════════════════════
+    # MULTI-BATCH GENERATION (Primary path for RICH content)
+    # 3 LLM calls × 3-4 slides each = 10 slides with detailed bullets, tables, diagrams.
+    # Each call uses ~1300 input + ~1500 output tokens — safely under 3328 limit.
+    # ═══════════════════════════════════════════════════════════
+    if not body.revision_prompt and body.num_slides >= 6:
+        try:
+            slides_data = await _generate_slides_multibatch(
+                body, context_full_text, source_filenames=[
+                    c.get("metadata", {}).get("filename", "") for c in context_chunks
+                ]
+            )
+            if slides_data and len(slides_data) >= 3:
+                logger.info("PPT multi-batch generation: produced %d rich slides", len(slides_data))
+            else:
+                slides_data = None
+        except Exception as e:
+            logger.warning("PPT multi-batch generation failed (%s) — falling back to single-pass", e)
+            slides_data = None
+
+    if slides_data:
+        # Skip the single-pass attempt loop since multi-batch succeeded
+        _attempt_configs = []
+
     for attempt, (temp, prompt_text, n_slides, max_tok) in enumerate(_attempt_configs, 1):
         raw = ""
         try:

@@ -91,6 +91,71 @@ def _repair_json_with_llm(broken_json: str) -> list:
     return []
 
 
+def _is_json_array_start_global(s: str) -> bool:
+    """Return True only if s starts with a real JSON array (not '[*' markdown list)."""
+    if not s.startswith('['):
+        return False
+    i = 1
+    while i < len(s) and s[i] in ' \t\n\r':
+        i += 1
+    return i < len(s) and s[i] == '{'
+
+
+def _strip_echo_for_json(raw: str) -> str:
+    """Robustly strip prompt-echo prefix and return a JSON-array-shaped string."""
+    s = (raw or "").strip()
+    if _is_json_array_start_global(s):
+        return s
+    if s.startswith('{'):
+        return '[' + s + ']'
+    brace = s.find('{')
+    m = re.search(r'\[\s*\{', s)
+    bb = m.start() if m else -1
+    if bb >= 0 and (brace < 0 or bb <= brace):
+        return s[bb:]
+    if brace >= 0:
+        return '[' + s[brace:]
+    return '[]'
+
+
+def _run_compliance_batch(subject_slice: str, standard_slice: str, subject_filenames_str: str,
+                          scope_note: str, max_tokens: int = 1200) -> list:
+    """
+    One compliance LLM call on a (subject_slice, standard_slice) pair.
+    Returns parsed findings list (may be empty on failure).
+    """
+    prompt = f"""SUBJECT DOCUMENTS ({subject_filenames_str}):
+{subject_slice}
+
+STANDARDS:
+{standard_slice}
+{scope_note}
+
+Instructions: Compare each standard clause against the subject documents.
+For each clause output one JSON object with keys: topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation.
+verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable
+severity: Critical | Major | Minor | None
+Output 3-5 findings. Return a JSON array only. No prose. No markdown.
+["""
+    try:
+        raw = llm_engine.generate(
+            [{"role": "user", "content": prompt}],
+            max_tokens=max_tokens, temperature=0.1,
+        )
+    except Exception as e:
+        logger.warning("Compliance batch LLM call failed: %s", e)
+        return []
+    stripped = _strip_echo_for_json(raw)
+    try:
+        cleaned = _clean_json(stripped)
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("Compliance batch JSON parse failed: %s", e)
+    return []
+
+
 class ComplianceRequest(BaseModel):
     subject_doc_ids: List[str] = Field(..., min_length=1, description="Documents being checked")
     standard_doc_ids: List[str] = Field(..., min_length=1, description="Standards to check against")
@@ -137,13 +202,17 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    # Context caps for 16640-token llama-server context window.
-    # Budget: 16640 tokens - 400 (prompt template) - 1500 (output) = ~14740 tokens for content.
-    # At ~4 chars/token: ~58960 chars total. Split: 60% subject (35000) + 40% standard (24000).
-    _MAX_SUBJECT_CHARS = 35000
-    _MAX_STANDARD_CHARS = 20000
-    _MAX_SUBJECT_CHUNKS = 60
-    _MAX_STANDARD_CHUNKS = 40
+    # Context caps for 3328-token per-request limit (llama-server has 5 parallel slots
+    # sharing 16640 total tokens = 3328 per slot).
+    # Budget: 3328 - 400 (prompt template) - 1200 (output) = ~1728 tokens for content.
+    # At ~4 chars/token: ~6900 chars total. Split: 60% subject (4000) + 40% standard (2800).
+    _MAX_SUBJECT_CHARS = 4000
+    _MAX_STANDARD_CHARS = 2800
+    _MAX_SUBJECT_CHUNKS = 10
+    _MAX_STANDARD_CHUNKS = 6
+    # Keep a FULL buffer for multi-batch mode (used below) — gives richer findings.
+    _FULL_SUBJECT_CHARS = 18000
+    _FULL_STANDARD_CHARS = 12000
 
     subject_text = "\n\n".join(
         f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
@@ -160,6 +229,17 @@ async def compliance_check(
     standards_text = "\n\n".join(c["text"] for c in standard_chunks[:_MAX_STANDARD_CHUNKS])
     if len(standards_text) > _MAX_STANDARD_CHARS:
         standards_text = standards_text[:_MAX_STANDARD_CHARS] + "\n[Content truncated]"
+
+    # Full buffers used by multi-batch mode below for richer clause-by-clause analysis
+    subject_full = "\n\n".join(
+        f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
+        for c in subject_chunks[:30]
+    )
+    if len(subject_full) > _FULL_SUBJECT_CHARS:
+        subject_full = subject_full[:_FULL_SUBJECT_CHARS]
+    standards_full = "\n\n".join(c["text"] for c in standard_chunks[:20])
+    if len(standards_full) > _FULL_STANDARD_CHARS:
+        standards_full = standards_full[:_FULL_STANDARD_CHARS]
 
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
@@ -181,15 +261,77 @@ severity: Critical | Major | Minor | None
 Output 5-8 findings. Return a JSON array only. No prose. No markdown.
 ["""
 
+    # ═══════════════════════════════════════════════════════════
+    # MULTI-BATCH COMPLIANCE (Primary path for thorough findings)
+    # Slice standards into 3 batches; pair each with subject slice.
+    # 3 LLM calls × 3-5 findings each = 9-15 total findings spanning the FULL standard.
+    # Each call ~1700 input + ~1200 output tokens — safely under 3328 limit.
+    # ═══════════════════════════════════════════════════════════
+    findings = []
+    try:
+        SL = len(standards_full)
+        std_slices = [
+            standards_full[: SL // 3],
+            standards_full[SL // 3 : 2 * SL // 3],
+            standards_full[2 * SL // 3 :],
+        ] if SL > 500 else [standards_full]
+
+        # Subject slice for each batch: rotate through subject_full thirds for coverage
+        SubL = len(subject_full)
+        if SubL > 500 and len(std_slices) >= 3:
+            sub_slices = [
+                subject_full[: SubL // 3][:3500],
+                subject_full[SubL // 3 : 2 * SubL // 3][:3500],
+                subject_full[2 * SubL // 3 :][:3500],
+            ]
+        else:
+            sub_slices = [subject_full[:3500]] * len(std_slices)
+
+        loop = asyncio.get_event_loop()
+        for std_slice, sub_slice in zip(std_slices, sub_slices):
+            batch_findings = await loop.run_in_executor(
+                None, _run_compliance_batch,
+                sub_slice, std_slice[:2500], subject_filenames_str, scope_note, 1200,
+            )
+            if batch_findings:
+                findings.extend(batch_findings)
+
+        # De-duplicate by clause_id (case-insensitive)
+        seen_clauses = set()
+        deduped = []
+        for f in findings:
+            cid = (f.get("clause_id", "") or "").strip().lower()
+            if cid and cid in seen_clauses:
+                continue
+            if cid:
+                seen_clauses.add(cid)
+            deduped.append(f)
+        findings = deduped
+        logger.info("Compliance multi-batch produced %d unique findings across %d batches",
+                    len(findings), len(std_slices))
+    except Exception as e:
+        logger.warning("Compliance multi-batch failed (%s) — falling back to single-pass", e)
+        findings = []
+
+    if findings:
+        # Skip single-pass since multi-batch succeeded
+        findings_raw = ""  # not used downstream when findings is already populated
+        _SKIP_SINGLE_PASS = True
+    else:
+        _SKIP_SINGLE_PASS = False
+
     messages = [
         {"role": "user", "content": prompt},
     ]
 
-    try:
-        findings_raw = llm_engine.generate(messages, max_tokens=1500, temperature=0.1)
-    except Exception as e:
-        logger.error("Compliance LLM call failed: %s", e)
-        raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
+    if not _SKIP_SINGLE_PASS:
+        try:
+            findings_raw = llm_engine.generate(messages, max_tokens=1200, temperature=0.1)
+        except Exception as e:
+            logger.error("Compliance LLM call failed: %s", e)
+            raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
+    else:
+        findings_raw = "[]"  # placeholder so downstream parsing is a no-op
 
     # ── Echo-strip: Gemma echoes the prompt as markdown bullet list [* text...]
     # A valid JSON array MUST start with '[{' or '[ {' — NOT '[*', '[\n*', '[word'.
@@ -230,16 +372,18 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
     logger.debug("Compliance raw after echo-strip (first 200): %s", findings_raw[:200])
 
     # Workstream D: Multi-strategy JSON parsing with graceful degradation
-    findings = None
-    try:
-        cleaned = _clean_json(findings_raw)
-        findings = json.loads(cleaned)
-        if not isinstance(findings, list):
-            raise ValueError("Expected a JSON array of findings")
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
-        # Fallback: LLM-based repair
-        findings = _repair_json_with_llm(findings_raw)
+    # Skip this entire block if multi-batch already produced findings.
+    if not _SKIP_SINGLE_PASS:
+        findings = None
+        try:
+            cleaned = _clean_json(findings_raw)
+            findings = json.loads(cleaned)
+            if not isinstance(findings, list):
+                raise ValueError("Expected a JSON array of findings")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
+            # Fallback: LLM-based repair
+            findings = _repair_json_with_llm(findings_raw)
 
     if not findings:
         logger.error("All JSON recovery strategies failed. Raw (first 500): %s", findings_raw[:500])
@@ -260,8 +404,8 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
     covered_clauses = [f.get("clause_id", "") for f in findings]
     covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
     
-    # Trim standards for the second pass — use generous slice given 16640-token window
-    _standards_short = standards_text[:8000] if len(standards_text) > 8000 else standards_text
+    # Trim standards for the second pass to fit within 3328-token per-request limit.
+    _standards_short = standards_text[:1500] if len(standards_text) > 1500 else standards_text
     missing_prompt = f"""STANDARD (excerpt):
 {_standards_short}
 
@@ -277,7 +421,7 @@ If none missing, return [].
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=800, temperature=0.0)
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=600, temperature=0.0)
         # Echo-strip for second pass — same robust logic as primary pass
         _ms = missing_raw.strip()
         if _is_json_array_start(_ms):
