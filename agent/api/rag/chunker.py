@@ -151,6 +151,7 @@ def chunk_text(
     document_type: Optional[str] = None,
     bidder_key: Optional[str] = None,
     problem_statement: Optional[str] = None,
+    content_hash: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk a block of text into segments of ~512 tokens with 64-token overlap.
@@ -226,6 +227,8 @@ def chunk_text(
                 metadata["bidder_key"] = bidder_key
             if problem_statement:
                 metadata["problem_statement"] = problem_statement
+            if content_hash:
+                metadata["content_hash"] = content_hash
             chunks.append({
                 "text": chunk_text_joined,
                 "metadata": metadata,
@@ -281,6 +284,7 @@ def chunk_pages(
     document_type: Optional[str] = None,
     bidder_key: Optional[str] = None,
     problem_statement: Optional[str] = None,
+    content_hash: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Chunk multiple pages at once with contextual headers.
@@ -324,6 +328,7 @@ def chunk_pages(
             document_type=document_type,
             bidder_key=bidder_key,
             problem_statement=problem_statement,
+            content_hash=content_hash,
         )
 
         # Prepend contextual header and store section in metadata

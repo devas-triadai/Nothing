@@ -253,15 +253,22 @@ def _build_bullets_slide(prs, title: str, bullets: List[str], notes: str = ""):
         slide.notes_slide.notes_text_frame.text = notes
 
 
-def _build_two_column_slide(prs, title: str, left_data: dict, right_data: dict, notes: str = ""):
+def _build_two_column_slide(prs, title: str, left_data, right_data, notes: str = ""):
     """Layout 4: Two-column comparison slide."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _set_slide_bg(slide, _NAVY)
     _add_title_bar(slide, title)
 
-    # Left column header
-    left_title = left_data.get("header", "Left")
-    left_items = left_data.get("items", [])
+    # Normalize left_data / right_data — LLM may return lists instead of dicts
+    if isinstance(left_data, list):
+        left_title = "Key Points"
+        left_items = left_data
+    elif isinstance(left_data, dict):
+        left_title = left_data.get("header", "Left")
+        left_items = left_data.get("items", []) if isinstance(left_data.get("items"), list) else []
+    else:
+        left_title = "Left"
+        left_items = []
 
     # Left header box
     lh = slide.shapes.add_shape(
@@ -297,9 +304,16 @@ def _build_two_column_slide(prs, title: str, left_data: dict, right_data: dict, 
     div.fill.fore_color.rgb = _GOLD
     div.line.fill.background()
 
-    # Right column
-    right_title = right_data.get("header", "Right")
-    right_items = right_data.get("items", [])
+    # Normalize right_data same as left
+    if isinstance(right_data, list):
+        right_title = "Key Points"
+        right_items = right_data
+    elif isinstance(right_data, dict):
+        right_title = right_data.get("header", "Right")
+        right_items = right_data.get("items", []) if isinstance(right_data.get("items"), list) else []
+    else:
+        right_title = "Right"
+        right_items = []
 
     rh = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE,

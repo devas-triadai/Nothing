@@ -10,6 +10,7 @@ Two endpoints:
                          (document_type, bidder_key, problem_statement).
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -222,6 +223,16 @@ def _llm_extract_metadata(text: str) -> dict:
         return _heuristic_extract_metadata(text)
 
 
+def _stream_duplicate(doc_id: str, filename: str, bytes_written: int, meta: dict):
+    """
+    SSE stream for duplicate file detection.
+    Yields the same events as normal upload but immediately completes with existing doc info.
+    """
+    yield f"data: {json.dumps({'stage': 'saved', 'doc_id': doc_id, 'filename': filename, 'bytes': bytes_written, 'duplicate': True})}\n\n"
+    yield f"data: {json.dumps({'stage': 'metadata_extracted', 'metadata': meta})}\n\n"
+    yield f"data: {json.dumps({'stage': 'done', 'doc_id': doc_id, 'filename': filename, 'pages': meta.get('pages', 0), 'chunks': meta.get('chunks', 0), 'duplicate': True})}\n\n"
+
+
 @router.post("/upload")
 async def chat_upload(
     request: Request,
@@ -253,12 +264,14 @@ async def chat_upload(
     if ext not in _ALLOWED_EXTS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
 
-    # ── Save bytes to disk (streamed) with size guard ──
-    doc_id = str(uuid.uuid4())
+    # ── Save bytes to disk (streamed) with size guard + content hash for dedup ──
     safe_name = re.sub(r"[^A-Za-z0-9._\-]+", "_", file.filename)[:200]
-    saved_path = _CHAT_UPLOADS_DIR / f"{doc_id}_{safe_name}"
     bytes_written = 0
-    with open(saved_path, "wb") as fout:
+    hasher = hashlib.sha256()
+
+    # Stream to temp file while computing hash
+    temp_path = _CHAT_UPLOADS_DIR / f"_temp_{uuid.uuid4()}_{safe_name}"
+    with open(temp_path, "wb") as fout:
         while True:
             chunk = await file.read(1024 * 256)
             if not chunk:
@@ -267,11 +280,37 @@ async def chat_upload(
             if bytes_written > _MAX_UPLOAD_BYTES:
                 fout.close()
                 try:
-                    saved_path.unlink(missing_ok=True)
+                    temp_path.unlink(missing_ok=True)
                 except Exception:
                     pass
                 raise HTTPException(status_code=413, detail="File exceeds 50 MB limit.")
             fout.write(chunk)
+            hasher.update(chunk)
+
+    content_hash = hasher.hexdigest()
+
+    # ── Check for duplicate by content hash ──
+    from api.rag.vector_store import get_store
+    store = get_store()
+    existing_doc_id = store.get_doc_id_by_content_hash(content_hash)
+    if existing_doc_id:
+        # Duplicate found — clean up temp file and return existing doc info
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        logger.info("[Chat Upload] Duplicate detected (hash=%s), returning existing doc_id=%s", content_hash[:16], existing_doc_id)
+        # Return existing doc info immediately (skip re-processing)
+        existing_meta = store.get_document_metadata(existing_doc_id) or {}
+        return StreamingResponse(
+            _stream_duplicate(existing_doc_id, safe_name, bytes_written, existing_meta),
+            media_type="text/event-stream",
+        )
+
+    # Not a duplicate — proceed with new doc_id
+    doc_id = str(uuid.uuid4())
+    saved_path = _CHAT_UPLOADS_DIR / f"{doc_id}_{safe_name}"
+    temp_path.rename(saved_path)
 
     logger.info(
         "[Chat Upload] saved doc_id=%s filename=%s bytes=%d type=%s",
@@ -350,6 +389,7 @@ async def chat_upload(
                 document_type=eff_doc_type,
                 bidder_key=eff_bidder,
                 problem_statement=eff_problem,
+                content_hash=content_hash,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as ex:

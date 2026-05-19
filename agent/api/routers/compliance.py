@@ -3,6 +3,7 @@ AGRA Phase 2 — Router: Compliance Check Engine
 Clause-by-clause analysis against ingested standards.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -104,17 +105,27 @@ def _is_json_array_start_global(s: str) -> bool:
 def _strip_echo_for_json(raw: str) -> str:
     """Robustly strip prompt-echo prefix and return a JSON-array-shaped string."""
     s = (raw or "").strip()
+    # Fast path: valid JSON array start
     if _is_json_array_start_global(s):
         return s
+    # Gemma outputs markdown bullet list [* item] as echo — aggressively strip it
+    # Look for first real JSON object start '{'
+    first_brace = s.find('{')
+    # Also look for JSON array-of-objects start '[{'
+    m = re.search(r'\[\s*\{', s)
+    first_bracket_brace = m.start() if m else -1
+    # If we see '[*' or '[ \n*' pattern, it's markdown list NOT JSON — skip past it
+    if s.startswith('[') and not _is_json_array_start_global(s):
+        # Find the first '{' after the opening junk
+        if first_brace >= 0:
+            return '[' + s[first_brace:]
+        return '[]'
     if s.startswith('{'):
         return '[' + s + ']'
-    brace = s.find('{')
-    m = re.search(r'\[\s*\{', s)
-    bb = m.start() if m else -1
-    if bb >= 0 and (brace < 0 or bb <= brace):
-        return s[bb:]
-    if brace >= 0:
-        return '[' + s[brace:]
+    if first_bracket_brace >= 0 and (first_brace < 0 or first_bracket_brace <= first_brace):
+        return s[first_bracket_brace:]
+    if first_brace >= 0:
+        return '[' + s[first_brace:]
     return '[]'
 
 

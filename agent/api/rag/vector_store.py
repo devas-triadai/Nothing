@@ -467,7 +467,38 @@ class VectorStore:
                 "bidder_keys": sorted(slot["bidder_keys"]),
                 "chunks": slot["chunks"],
             })
-        return {"bidders": bidders_out, "problem_statements": problems_out}
+        return {"bidders": bidders_out, "problems": problems_out}
+
+    def get_doc_id_by_content_hash(self, content_hash: str) -> Optional[str]:
+        """
+        Find a document ID by its content hash (SHA256).
+        Returns the doc_id if found, None otherwise.
+        """
+        if not content_hash:
+            return None
+        for pid, meta in self._chunk_meta.items():
+            if meta.get("content_hash") == content_hash:
+                return meta.get("doc_id")
+        return None
+
+    def get_document_metadata(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve metadata for a specific document by doc_id.
+        Returns the metadata dict or None if not found.
+        """
+        for pid, meta in self._chunk_meta.items():
+            if meta.get("doc_id") == doc_id:
+                return {
+                    "doc_id": doc_id,
+                    "filename": meta.get("filename", "Unknown"),
+                    "pages": meta.get("page_count", 0),
+                    "chunks": sum(1 for m in self._chunk_meta.values() if m.get("doc_id") == doc_id),
+                    "category": meta.get("category", "General"),
+                    "document_type": meta.get("document_type"),
+                    "bidder_key": meta.get("bidder_key"),
+                    "problem_statement": meta.get("problem_statement"),
+                }
+        return None
 
     def collection_count(self) -> int:
         """Total number of points in the collection."""

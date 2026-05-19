@@ -297,6 +297,7 @@ def ingest_document(
     document_type: Optional[str] = None,
     bidder_key: Optional[str] = None,
     problem_statement: Optional[str] = None,
+    content_hash: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
@@ -326,6 +327,7 @@ def ingest_document(
         document_type=document_type,
         bidder_key=bidder_key,
         problem_statement=problem_statement,
+        content_hash=content_hash,
     )
     if not chunks:
         yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}
