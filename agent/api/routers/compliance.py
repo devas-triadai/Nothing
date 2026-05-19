@@ -103,29 +103,39 @@ def _is_json_array_start_global(s: str) -> bool:
 
 
 def _strip_echo_for_json(raw: str) -> str:
-    """Robustly strip prompt-echo prefix and return a JSON-array-shaped string."""
+    """Aggressively strip prompt-echo prefix and return a JSON-array-shaped string."""
     s = (raw or "").strip()
-    # Fast path: valid JSON array start
+    if not s:
+        return '[]'
+
+    # Fast path: already valid JSON array
     if _is_json_array_start_global(s):
         return s
-    # Gemma outputs markdown bullet list [* item] as echo — aggressively strip it
-    # Look for first real JSON object start '{'
+
+    # If it starts with '[' but NOT '[{' it's a markdown list echo (like [* item...])
+    # Find the FIRST occurrence of '[{' which is real JSON array start
+    json_array_start = s.find('[{')
+    if json_array_start > 0:
+        return s[json_array_start:]
+
+    # If we see single '{' object, wrap it
     first_brace = s.find('{')
-    # Also look for JSON array-of-objects start '[{'
-    m = re.search(r'\[\s*\{', s)
-    first_bracket_brace = m.start() if m else -1
-    # If we see '[*' or '[ \n*' pattern, it's markdown list NOT JSON — skip past it
-    if s.startswith('[') and not _is_json_array_start_global(s):
-        # Find the first '{' after the opening junk
-        if first_brace >= 0:
-            return '[' + s[first_brace:]
-        return '[]'
-    if s.startswith('{'):
-        return '[' + s + ']'
-    if first_bracket_brace >= 0 and (first_brace < 0 or first_bracket_brace <= first_brace):
-        return s[first_bracket_brace:]
     if first_brace >= 0:
-        return '[' + s[first_brace:]
+        # Check if there's a closing brace
+        last_brace = s.rfind('}')
+        if last_brace > first_brace:
+            return '[' + s[first_brace:last_brace+1] + ']'
+        return '[' + s[first_brace:] + ']'
+
+    # Try to find any JSON-like structure
+    # Look for patterns like {"key": or [{"key":
+    json_obj_match = re.search(r'\{[\s]*"', s)
+    if json_obj_match:
+        # Extract from first { to last }
+        start = json_obj_match.start()
+        end = s.rfind('}') + 1
+        return '[' + s[start:end] + ']'
+
     return '[]'
 
 
@@ -173,11 +183,24 @@ class ComplianceRequest(BaseModel):
     check_scope: Optional[str] = Field(None, description="Specific area to focus on")
 
 
+@router.options("/compliance/check")
+async def compliance_check_options():
+    """Handle CORS preflight for compliance check endpoint."""
+    return StreamingResponse(
+        iter([]),
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+    )
+
+
 @router.post("/compliance/check")
 async def compliance_check(
+    request: Request,
     body: ComplianceRequest,
     user: dict = Depends(get_current_user),
-    request: Request = None,
 ):
     """
     Run clause-by-clause compliance analysis.
@@ -491,6 +514,12 @@ Summarize the top 2-3 historical warnings. Return a simple string paragraph. If 
     # Stream findings as SSE
     job_id = str(uuid.uuid4())
 
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    }
+
     def event_stream():
         for i, finding in enumerate(findings):
             yield f"data: {json.dumps({'finding': finding, 'index': i + 1, 'total': len(findings)})}\n\n"
@@ -582,5 +611,5 @@ Summarize the top 2-3 historical warnings. Return a simple string paragraph. If 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=headers,
     )

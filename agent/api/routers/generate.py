@@ -109,6 +109,34 @@ def _repair_truncated_array(raw: str) -> Optional[str]:
     return None
 
 
+def _extract_section_title(text_snippet: str) -> Optional[str]:
+    """Extract a meaningful section title from a text snippet (sentence or heading)."""
+    if not text_snippet:
+        return None
+    # Clean up the text
+    text = text_snippet.strip().replace('\n', ' ').replace('  ', ' ')
+    # Remove common prefixes like bullet markers
+    text = re.sub(r'^[-*•]\s*', '', text)
+    # Try to find a colon-separated heading (e.g., "System Architecture: Overview")
+    if ':' in text and len(text.split(':')[0]) > 5:
+        candidate = text.split(':')[0].strip()
+        if 10 <= len(candidate) <= 50:
+            return candidate
+    # Try to find ALL CAPS headings
+    words = text.split()
+    if len(words) >= 2:
+        # Check for title case pattern (first word capitalized)
+        if words[0][0].isupper() if words[0] else False:
+            # Take first 4-6 words as title
+            title_words = words[:min(6, len(words))]
+            candidate = ' '.join(title_words)
+            # Remove trailing punctuation
+            candidate = re.sub(r'[;:,]$', '', candidate)
+            if 10 <= len(candidate) <= 55:
+                return candidate
+    return None
+
+
 def _clean_json(raw: str) -> str:
     """
     Strip markdown code fences and extract the first balanced JSON array or
@@ -272,32 +300,50 @@ async def ppt_job_status(
     return JSONResponse({"status": "pending"})
 
 
-async def _generate_slide_batch(prompt_text: str, max_tokens: int = 1500, temperature: float = 0.1) -> list:
-    """Make one LLM call and return parsed slides list (empty list on failure)."""
-    try:
-        raw = await asyncio.to_thread(
-            llm_engine.generate, [{"role": "user", "content": prompt_text}],
-            max_tokens=max_tokens, temperature=temperature, raw=True,
-        )
-        if not raw or len(raw.strip()) < 10:
-            return []
-        cleaned = _clean_json(raw)
-        if not cleaned:
-            recovered = _repair_truncated_array(raw)
-            cleaned = recovered or raw
+async def _generate_slide_batch(prompt_text: str, max_tokens: int = 1500, temperature: float = 0.1, expected_count: int = 0) -> list:
+    """Make one LLM call and return parsed slides list (empty list on failure).
+    If expected_count is provided and we get fewer slides, retry once with stronger prompt."""
+    for attempt in range(2):
         try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError:
-            recovered = _repair_truncated_array(cleaned)
-            if not recovered:
-                return []
-            data = json.loads(recovered)
-        if isinstance(data, list):
-            return [d for d in data if isinstance(d, dict)]
-        if isinstance(data, dict):
-            return [data]
-    except Exception as e:
-        logger.warning("Slide batch failed: %s", e)
+            actual_prompt = prompt_text
+            if attempt == 1 and expected_count > 0:
+                # Retry with stronger emphasis
+                actual_prompt = prompt_text.replace(
+                    "Create exactly",
+                    "IMPORTANT: You MUST create exactly"
+                ) + f"\n\nCRITICAL: Return EXACTLY {expected_count} slide objects in the JSON array. No more, no less."
+
+            raw = await asyncio.to_thread(
+                llm_engine.generate, [{"role": "user", "content": actual_prompt}],
+                max_tokens=max_tokens, temperature=temperature, raw=True,
+            )
+            if not raw or len(raw.strip()) < 10:
+                continue
+            cleaned = _clean_json(raw)
+            if not cleaned:
+                recovered = _repair_truncated_array(raw)
+                cleaned = recovered or raw
+            try:
+                data = json.loads(cleaned)
+            except json.JSONDecodeError:
+                recovered = _repair_truncated_array(cleaned)
+                if not recovered:
+                    continue
+                data = json.loads(recovered)
+            if isinstance(data, list):
+                slides = [d for d in data if isinstance(d, dict)]
+                # If we got expected count or more, return immediately
+                if not expected_count or len(slides) >= expected_count:
+                    return slides
+                # Otherwise retry if this was first attempt
+                if attempt == 0:
+                    logger.warning(f"Slide batch returned {len(slides)} slides, expected {expected_count}. Retrying...")
+                    continue
+                return slides
+            if isinstance(data, dict):
+                return [data]
+        except Exception as e:
+            logger.warning("Slide batch failed (attempt %d): %s", attempt + 1, e)
     return []
 
 
@@ -331,7 +377,7 @@ Slide 3: layout="bullets", title for main concept/problem statement, 4-5 detaile
 
 Return ONLY a JSON array of 3 objects. No prose. Start with [
 ["""
-    batch1 = await _generate_slide_batch(prompt1, max_tokens=1500, temperature=0.1)
+    batch1 = await _generate_slide_batch(prompt1, max_tokens=1800, temperature=0.1, expected_count=3)
 
     # ── Batch 2: slides 4-7 (technical/methodology with table) ──
     prompt2 = f"""DOCUMENT EXCERPT (Part 2 of 3, from {files_str}):
@@ -345,7 +391,7 @@ Slide 4: layout="two_column", title, left_column=["..3-4 items.."], right_column
 
 Return ONLY a JSON array of 4 objects. No prose. Start with [
 ["""
-    batch2 = await _generate_slide_batch(prompt2, max_tokens=1800, temperature=0.1)
+    batch2 = await _generate_slide_batch(prompt2, max_tokens=2000, temperature=0.1, expected_count=4)
 
     # ── Batch 3: slides 8-10 (architecture flowchart + conclusion + thank_you) ──
     prompt3 = f"""DOCUMENT EXCERPT (Part 3 of 3, from {files_str}):
@@ -358,7 +404,7 @@ Slide 3: layout="thank_you", title="Thank You", subtitle (organization name from
 
 Return ONLY a JSON array of 3 objects. No prose. Start with [
 ["""
-    batch3 = await _generate_slide_batch(prompt3, max_tokens=1800, temperature=0.1)
+    batch3 = await _generate_slide_batch(prompt3, max_tokens=2000, temperature=0.1, expected_count=3)
 
     combined = []
     combined.extend(batch1)
@@ -666,17 +712,22 @@ Use real content from the context above. Return ONLY the JSON array:""",
     # Enforce exact slide count
     target = body.num_slides
     if len(slides_data) < target:
-        # Pad with content-bearing bullet slides from context, not empty headers
-        _pad_sentences = [s.strip() for s in re.split(r'[\n]+|(?<=\.)\s+', context_text) if len(s.strip()) > 30]
+        # Pad with content-bearing bullet slides from context, with meaningful titles
+        _pad_sentences = [s.strip() for s in re.split(r'[\n]+|(?<=\.)\s+', context_text) if len(s.strip()) > 40]
         _pad_idx = 0
+        _slide_num = len(slides_data) + 1
         while len(slides_data) < target:
-            _chunk = _pad_sentences[_pad_idx:_pad_idx+4] or ["Refer to source document for details."]
+            _chunk = _pad_sentences[_pad_idx:_pad_idx+4] or ["Refer to source document for additional technical details."]
             _pad_idx = (_pad_idx + 4) % max(1, len(_pad_sentences))
+            # Extract a meaningful title from first sentence or use section-based title
+            _title_source = _chunk[0][:60] if _chunk else "Additional Information"
+            _section_title = _extract_section_title(_title_source) or f"Section {_slide_num - 1}"
             slides_data.insert(max(1, len(slides_data) - 1), {
                 "layout": "bullets",
-                "title": f"{body.topic} — Details",
-                "bullets": [s[:200] for s in _chunk]
+                "title": _section_title,
+                "bullets": [s[:180] for s in _chunk]
             })
+            _slide_num += 1
     elif len(slides_data) > target:
         # Keep first (title) and last (thank_you); trim from middle
         first = slides_data[0]
@@ -695,6 +746,43 @@ Use real content from the context above. Return ONLY the JSON array:""",
     if source_names and len(slides_data) >= 3:
         # Replace second-to-last slide (before thank_you) with sources
         slides_data[-2] = {"layout": "sources", "title": "Sources & References", "sources": source_names[:20]}
+
+    # ── Post-process: clean slide content ──
+    # Remove footer text, source trace bullets, and other artifacts
+    _FOOTER_PATTERNS = [
+        r'AI-Generated Draft\s*\|\s*Indian Coast Guard\s*\|\s*AGRA System\s*\|\s*Confidential',
+        r'\[Document:.*?\| Page \d+\]',
+        r'Generated by AGRA.*?System',
+    ]
+    for slide in slides_data:
+        # Clean bullets
+        if slide.get("bullets"):
+            cleaned_bullets = []
+            for bullet in slide["bullets"]:
+                # Skip source trace bullets
+                if re.search(r'\[Document:.*?\|', bullet):
+                    continue
+                # Remove footer patterns from bullet text
+                for pattern in _FOOTER_PATTERNS:
+                    bullet = re.sub(pattern, '', bullet, flags=re.IGNORECASE)
+                bullet = bullet.strip()
+                if bullet and len(bullet) > 5:
+                    cleaned_bullets.append(bullet)
+            slide["bullets"] = cleaned_bullets
+        # Clean two_column content
+        if slide.get("layout") == "two_column":
+            for key in ["left_column", "right_column", "left_items", "right_items"]:
+                if slide.get(key):
+                    cleaned = []
+                    for item in slide[key]:
+                        if re.search(r'\[Document:.*?\|', item):
+                            continue
+                        for pattern in _FOOTER_PATTERNS:
+                            item = re.sub(pattern, '', item, flags=re.IGNORECASE)
+                        item = item.strip()
+                        if item and len(item) > 5:
+                            cleaned.append(item)
+                    slide[key] = cleaned
 
     # ── 6. Build PPTX ──
     # job_id is passed in as parameter (matches the polling key in _ppt_jobs)
