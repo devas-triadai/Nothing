@@ -162,6 +162,24 @@ def _sanitize_json_string(s: str) -> str:
     return ''.join(c for c in s if ord(c) >= 32 or c in allowed)
 
 
+def _extract_json_objects_regex(raw: str) -> list:
+    """Last-resort: use regex to extract individual { ... } objects from garbled LLM output."""
+    findings = []
+    # Pattern to match JSON objects: start with {, then content, then }
+    # This is greedy but tries to be careful about nesting
+    pattern = r'\{[^{}]*"[^"]+"[^{}]*\}'
+    matches = re.findall(pattern, raw)
+    for match in matches:
+        try:
+            sanitized = _sanitize_json_string(match)
+            obj = json.loads(sanitized)
+            if isinstance(obj, dict) and any(k in obj for k in ['clause_id', 'verdict', 'finding']):
+                findings.append(obj)
+        except Exception:
+            continue
+    return findings
+
+
 def _repair_truncated_json(raw: str) -> str:
     """Local repair for common LLM truncation issues: unterminated strings, incomplete objects/arrays."""
     # First sanitize to remove invalid control characters
@@ -254,7 +272,16 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
                 return [d for d in data if isinstance(d, dict)]
         except Exception:
             pass
+        # Last resort: try regex extraction of individual objects
+        try:
+            findings = _extract_json_objects_regex(stripped)
+            if findings:
+                logger.info("Regex extraction recovered %d findings from batch", len(findings))
+                return findings
+        except Exception:
+            pass
         logger.warning("Compliance batch JSON parse failed: %s", e)
+        logger.debug("Raw LLM output (first 300 chars): %s", repr(stripped[:300]))
     return []
 
 
@@ -473,6 +500,16 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
                 findings = _repair_json_with_llm(findings_raw)
+
+        if not findings:
+            # Last resort: try regex extraction from the raw LLM output
+            try:
+                regex_findings = _extract_json_objects_regex(findings_raw)
+                if regex_findings:
+                    logger.info("Regex extraction recovered %d findings from single-pass", len(regex_findings))
+                    findings = regex_findings
+            except Exception as e:
+                logger.debug("Regex extraction also failed: %s", e)
 
         if not findings:
             logger.error("All JSON recovery strategies failed.")
