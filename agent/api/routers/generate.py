@@ -296,18 +296,18 @@ async def _do_generate_ppt(job_id: str, body: PPTRequest, auth_header_token: str
     else:
         query_emb = await _loop.run_in_executor(None, embedder.embed_query, body.topic)
         candidates = await _loop.run_in_executor(
-            None, store.hybrid_search, body.topic, query_emb, 20
+            None, store.hybrid_search, body.topic, query_emb, 80
         )
         context_chunks = await _loop.run_in_executor(
-            None, rerank, body.topic, candidates, 10
+            None, rerank, body.topic, candidates, 40
         )
 
-    # Keep context tight: LLM context window is 3328 tokens (~13000 chars).
-    # PPT prompt template itself is ~800 chars; leave ~3200 chars for content
-    # so the JSON response (~2000 tokens) has room to complete without truncation.
-    context_text = "\n\n".join(c["text"][:600] for c in context_chunks[:10])
-    if len(context_text) > 4000:
-        context_text = context_text[:4000] + "\n[Content truncated]"
+    # LLM context window is 16640 tokens (~66000 chars).
+    # PPT prompt template ~500 tokens; output 10 slides ~2500 tokens.
+    # Available for context: ~13600 tokens (~54000 chars). Use generously.
+    context_text = "\n\n".join(c["text"] for c in context_chunks[:40])
+    if len(context_text) > 50000:
+        context_text = context_text[:50000] + "\n[Content truncated]"
 
     # ── 2. Extract images from uploaded documents ──
     extracted_images = []
@@ -374,12 +374,12 @@ Rules:
 Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     # ── 4. Generate slides with retry ──
-    # Token budget: 3328 context. Input (prompt+context) ~800-1000 tokens.
-    # Remaining for output ~2200 tokens. Each slide JSON ~200-250 tokens.
-    # Safe cap: 7 slides (1400-1750 tokens) leaves buffer for complex slides.
-    # Attempt 3 falls back to 5 slides for absolute safety.
-    _safe_slides = min(7, body.num_slides)
-    _reduced_slides = min(5, body.num_slides)
+    # Token budget: 16640 context. Input (prompt+context) ~3000-4000 tokens.
+    # Remaining for output ~12000+ tokens. Each slide JSON ~250 tokens.
+    # Can safely generate full body.num_slides (up to 25) in one pass.
+    # max_tokens=4096 gives 16 slides of headroom; use body.num_slides directly.
+    _safe_slides = body.num_slides
+    _reduced_slides = min(body.num_slides, 10)
 
     _diagram_hint = (
         'Include ONE slide with layout "diagram" containing a diagram_data object with '
@@ -398,15 +398,15 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     _attempt_configs = [
         # (temperature, prompt, num_slides, max_tokens)
-        # Each slide ~200-250 tokens; 7 slides = ~1750 tokens max output.
-        # Use 2048 to give headroom for complex diagram/chart slides.
-        (0.1, _prompt_safe, _safe_slides, 2048),
+        # 16640-token window: input ~4000 tokens, output budget ~12000 tokens.
+        # Each slide ~250 tokens; 10 slides = ~2500 tokens. max_tokens=4096 is safe.
+        (0.1, _prompt_safe, _safe_slides, 4096),
         (
             0.0,
             f"""Create exactly {_safe_slides} slides about: {body.topic}
 
 Context:
-{context_text[:2000]}
+{context_text[:30000]}
 
 Return ONLY a valid JSON array. Rules:
 - Slide 1: layout="title", must have "title" and "subtitle"
@@ -417,14 +417,14 @@ Return ONLY a valid JSON array. Rules:
 
 Return ONLY the JSON array, no markdown, no explanation:""",
             _safe_slides,
-            2048,
+            4096,
         ),
         (
             0.0,
             f"""Create {_reduced_slides} slides about: {body.topic}
 
 Context (use ONLY this):
-{context_text[:1500]}
+{context_text[:20000]}
 
 Return ONLY a JSON array like:
 [
@@ -435,7 +435,7 @@ Return ONLY a JSON array like:
 ]
 Use real content from the context above. Return ONLY the JSON array:""",
             _reduced_slides,
-            1024,
+            4096,
         ),
     ]
 

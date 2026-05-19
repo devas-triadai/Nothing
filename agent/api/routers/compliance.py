@@ -137,14 +137,13 @@ async def compliance_check(
 
     subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
     subject_filenames_str = ", ".join(subject_filenames)
-    # Context caps for 3328-token llama-server context window.
-    # Budget: 3328 tokens total - 300 (prompt template) - 800 (output) = ~2228 tokens for content.
-    # At ~4 chars/token: ~8900 chars total subject+standard.
-    # Split: 60% subject (5300 chars) + 40% standard (3500 chars).
-    _MAX_SUBJECT_CHARS = 2500
-    _MAX_STANDARD_CHARS = 1800
-    _MAX_SUBJECT_CHUNKS = 6
-    _MAX_STANDARD_CHUNKS = 4
+    # Context caps for 16640-token llama-server context window.
+    # Budget: 16640 tokens - 400 (prompt template) - 1500 (output) = ~14740 tokens for content.
+    # At ~4 chars/token: ~58960 chars total. Split: 60% subject (35000) + 40% standard (24000).
+    _MAX_SUBJECT_CHARS = 35000
+    _MAX_STANDARD_CHARS = 20000
+    _MAX_SUBJECT_CHUNKS = 60
+    _MAX_STANDARD_CHUNKS = 40
 
     subject_text = "\n\n".join(
         f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
@@ -187,33 +186,46 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
     ]
 
     try:
-        findings_raw = llm_engine.generate(messages, max_tokens=1000, temperature=0.1)
+        findings_raw = llm_engine.generate(messages, max_tokens=1500, temperature=0.1)
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
         raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
 
-    # ── Echo-strip: Gemma sometimes echoes the prompt before outputting JSON ──
-    # If the raw output doesn't start with '[' or '{', strip leading prose
-    # and prepend '[' since we seeded the array open bracket in the prompt.
+    # ── Echo-strip: Gemma echoes the prompt as markdown bullet list [* text...]
+    # A valid JSON array MUST start with '[{' or '[ {' — NOT '[*', '[\n*', '[word'.
+    # Strategy: find the first '[{' or '{' that indicates real JSON.
     _strip = findings_raw.strip()
-    if not _strip.startswith('[') and not _strip.startswith('{'):
-        # Try to find start of JSON content
-        _bracket = _strip.find('[')
-        _brace   = _strip.find('{')
-        if _bracket >= 0 and (_brace < 0 or _bracket < _brace):
-            findings_raw = _strip[_bracket:]
-        elif _brace >= 0:
-            # LLM returned objects not wrapped in array — wrap it
-            findings_raw = '[' + _strip[_brace:]
-        else:
-            # No JSON structure found at all — prepend '[' and let _clean_json handle it
-            findings_raw = '[' + _strip
+
+    def _is_json_array_start(s: str) -> bool:
+        """Return True only if s starts with a real JSON array (not a markdown list)."""
+        if not s.startswith('['):
+            return False
+        # Scan past '[' and whitespace to find the first meaningful char
+        i = 1
+        while i < len(s) and s[i] in ' \t\n\r':
+            i += 1
+        return i < len(s) and s[i] == '{'
+
+    if _is_json_array_start(_strip):
+        findings_raw = _strip
     elif _strip.startswith('{'):
-        # Single object returned instead of array
         findings_raw = '[' + _strip + ']'
     else:
-        # Already starts with '[' — use as-is
-        findings_raw = _strip
+        # Search for first real JSON object or array-of-objects
+        _brace = _strip.find('{')
+        # Find '[{' pattern (real JSON array)
+        _bracket_brace = _strip.find('[{')
+        if _bracket_brace < 0:
+            # Try '[ {' with spaces
+            import re as _re
+            _m = _re.search(r'\[\s*\{', _strip)
+            _bracket_brace = _m.start() if _m else -1
+        if _bracket_brace >= 0 and (_brace < 0 or _bracket_brace <= _brace):
+            findings_raw = _strip[_bracket_brace:]
+        elif _brace >= 0:
+            findings_raw = '[' + _strip[_brace:]
+        else:
+            findings_raw = '[' + _strip
 
     logger.debug("Compliance raw after echo-strip (first 200): %s", findings_raw[:200])
 
@@ -248,8 +260,8 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
     covered_clauses = [f.get("clause_id", "") for f in findings]
     covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
     
-    # Trim standards for the second pass to avoid exceeding context window again
-    _standards_short = standards_text[:1200] if len(standards_text) > 1200 else standards_text
+    # Trim standards for the second pass — use generous slice given 16640-token window
+    _standards_short = standards_text[:8000] if len(standards_text) > 8000 else standards_text
     missing_prompt = f"""STANDARD (excerpt):
 {_standards_short}
 
@@ -265,16 +277,23 @@ If none missing, return [].
         {"role": "user", "content": missing_prompt},
     ]
     try:
-        missing_raw = llm_engine.generate(messages_missing, max_tokens=500, temperature=0.0)
-        # Echo-strip for second pass
+        missing_raw = llm_engine.generate(messages_missing, max_tokens=800, temperature=0.0)
+        # Echo-strip for second pass — same robust logic as primary pass
         _ms = missing_raw.strip()
-        if not _ms.startswith('[') and not _ms.startswith('{'):
-            _bi = _ms.find('['); _oi = _ms.find('{')
-            if _bi >= 0 and (_oi < 0 or _bi < _oi): _ms = _ms[_bi:]
-            elif _oi >= 0: _ms = '[' + _ms[_oi:]
-            else: _ms = '[' + _ms
+        if _is_json_array_start(_ms):
+            pass  # already valid
         elif _ms.startswith('{'):
             _ms = '[' + _ms + ']'
+        else:
+            _brace2 = _ms.find('{')
+            _m2 = __import__('re').search(r'\[\s*\{', _ms)
+            _bb2 = _m2.start() if _m2 else -1
+            if _bb2 >= 0 and (_brace2 < 0 or _bb2 <= _brace2):
+                _ms = _ms[_bb2:]
+            elif _brace2 >= 0:
+                _ms = '[' + _ms[_brace2:]
+            else:
+                _ms = '[]'  # nothing to parse — skip gracefully
         cleaned = _clean_json(_ms)
         start = cleaned.find("[")
         end = cleaned.rfind("]") + 1
