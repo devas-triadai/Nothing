@@ -37,6 +37,7 @@ export default function CompliancePage() {
   const [summary, setSummary] = useState(null);
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [error, setError] = useState('');
+  const [progressMsg, setProgressMsg] = useState('');
 
   const findingsEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -97,21 +98,27 @@ export default function CompliancePage() {
         subject_doc_ids: subjectDocIds,
         standard_doc_ids: standardDocIds,
       },
-      // onToken — each finding
+      // onToken — each finding or progress
       (data) => {
         if (data.finding) {
           setFindings(prev => [...prev, data.finding]);
+          setProgressMsg(''); // Clear progress when findings arrive
+        }
+        if (data.status === 'progress' && data.message) {
+          setProgressMsg(data.message);
         }
       },
       // onDone
       (data) => {
         setRunning(false);
+        setProgressMsg('');
         if (data.download_url) setDownloadUrl(data.download_url);
         if (data.summary) setSummary(data.summary);
       },
       // onError
       (err) => {
         setRunning(false);
+        setProgressMsg('');
         setError(err.message);
       }
     );
@@ -560,7 +567,7 @@ export default function CompliancePage() {
                 <div style={{ textAlign: 'center', padding: '24px' }}>
                   <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} color="var(--primary)" />
                   <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                    Analysing clauses...
+                    {progressMsg || 'Analysing clauses...'}
                   </div>
                 </div>
               )}
