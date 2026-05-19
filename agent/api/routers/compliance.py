@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from docx import Document as DocxDocument
 
@@ -244,7 +244,6 @@ async def compliance_check(
             subject_chunks.extend(chunks)
 
     if not subject_chunks:
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=404,
             content={"detail": "Subject documents not found in knowledge base."},
@@ -256,7 +255,6 @@ async def compliance_check(
     for std_id in body.standard_doc_ids:
         std = store.get_chunks_by_doc(std_id)
         if not std:
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=404,
                 content={"detail": f"Standard document {std_id} not found."},
@@ -265,7 +263,6 @@ async def compliance_check(
         standard_chunks.extend(std)
 
     if not standard_chunks:
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=400,
             content={"detail": "No standard document content found."},
@@ -401,7 +398,11 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
             findings_raw = llm_engine.generate(messages, max_tokens=1200, temperature=0.1)
         except Exception as e:
             logger.error("Compliance LLM call failed: %s", e)
-            raise HTTPException(status_code=500, detail="Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards.")
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Compliance analysis engine is temporarily unavailable. Please try with smaller documents or fewer standards."},
+                headers=_CORS_HEADERS,
+            )
     else:
         findings_raw = "[]"  # placeholder so downstream parsing is a no-op
 
