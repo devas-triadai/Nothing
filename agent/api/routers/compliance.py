@@ -83,7 +83,8 @@ def _repair_json_with_llm(broken_json: str) -> list:
             temperature=0.0,
         )
         cleaned = _clean_json(repaired_raw)
-        # Sanitize to remove invalid control characters
+        # Sanitize content inside strings (escape newlines, etc.) then remove control chars
+        cleaned = _sanitize_json_content(cleaned)
         cleaned = _sanitize_json_string(cleaned)
         result = json.loads(cleaned)
         if isinstance(result, list):
@@ -162,46 +163,78 @@ def _sanitize_json_string(s: str) -> str:
     return ''.join(c for c in s if ord(c) >= 32 or c in allowed)
 
 
+def _sanitize_json_content(s: str) -> str:
+    """
+    Sanitize content inside JSON string values.
+    Escapes unescaped newlines, tabs, quotes, and backslashes that would break JSON parsing.
+    """
+    result = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        # Handle control characters that need escaping in JSON strings
+        if c == '\n':
+            result.append('\\n')
+        elif c == '\r':
+            result.append('\\r')
+        elif c == '\t':
+            result.append('\\t')
+        elif c == '"':
+            # Escape unescaped quotes
+            if i == 0 or s[i-1] != '\\':
+                result.append('\\"')
+            else:
+                result.append('"')
+        elif c == '\\':
+            # Check if this is already an escape sequence
+            if i + 1 < len(s) and s[i+1] in '"\\/bfnrt':
+                result.append(c)
+            else:
+                result.append('\\\\')
+        elif ord(c) < 32:
+            # Remove other control characters
+            pass
+        else:
+            result.append(c)
+        i += 1
+    return ''.join(result)
+
+
 def _extract_json_objects_regex(raw: str) -> list:
     """Last-resort: use regex to extract individual { ... } objects from garbled LLM output."""
     findings = []
-    # First try to find complete objects with proper structure
-    # Pattern: { followed by key:value pairs, then }
-    pattern = r'\{[^{}]*"[^"]+"[^{}]*\}'
+    
+    # Strategy 1: Find complete objects with proper key:value structure
+    # Use a pattern that captures nested braces more carefully
+    pattern = r'\{(?:[^{}]|"(?:[^"\\]|\\.)*")*\}'
     matches = re.findall(pattern, raw)
+    
     for match in matches:
         try:
-            # Apply string repair to close any unterminated strings
+            # Check if it looks like a compliance finding
+            if not any(k in match.lower() for k in ['clause', 'verdict', 'finding', 'requirement']):
+                continue
+            
+            # Apply comprehensive sanitization
             repaired = _repair_truncated_json(match)
-            # Sanitize and parse
+            # Sanitize content inside string values
+            repaired = _sanitize_json_content(repaired)
             sanitized = _sanitize_json_string(repaired)
             obj = json.loads(sanitized)
-            if isinstance(obj, dict) and any(k in obj for k in ['clause_id', 'verdict', 'finding']):
+            if isinstance(obj, dict) and any(k in obj for k in ['clause_id', 'verdict', 'finding', 'requirement']):
                 findings.append(obj)
         except Exception:
             continue
-    
-    # If no findings, try more aggressive pattern that finds partial objects
-    if not findings:
-        # Find any { ... } block that looks like it has compliance keys
-        aggressive_pattern = r'\{[^{}]*(?:clause|verdict|finding|requirement)[^{}]*\}'
-        for match in re.findall(aggressive_pattern, raw, re.IGNORECASE):
-            try:
-                repaired = _repair_truncated_json(match)
-                sanitized = _sanitize_json_string(repaired)
-                obj = json.loads(sanitized)
-                if isinstance(obj, dict):
-                    findings.append(obj)
-            except Exception:
-                continue
     
     return findings
 
 
 def _repair_truncated_json(raw: str) -> str:
     """Local repair for common LLM truncation issues: unterminated strings, incomplete objects/arrays."""
-    # First sanitize to remove invalid control characters
-    s = _sanitize_json_string(raw.strip())
+    # First sanitize content inside strings (escape newlines, etc.)
+    s = _sanitize_json_content(raw)
+    # Then remove invalid control characters
+    s = _sanitize_json_string(s.strip())
     if not s:
         return '[]'
 
@@ -280,7 +313,8 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
     stripped = _strip_echo_for_json(raw)
     try:
         cleaned = _clean_json(stripped)
-        # Sanitize to remove invalid control characters before parsing
+        # Sanitize content inside strings (escape newlines, etc.) then remove control chars
+        cleaned = _sanitize_json_content(cleaned)
         sanitized = _sanitize_json_string(cleaned)
         data = json.loads(sanitized)
         if isinstance(data, list):
@@ -290,6 +324,7 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
         try:
             repaired = _repair_truncated_json(cleaned)
             # Sanitize again after repair
+            repaired = _sanitize_json_content(repaired)
             repaired = _sanitize_json_string(repaired)
             data = json.loads(repaired)
             if isinstance(data, list):
@@ -517,7 +552,8 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
             stripped = _strip_echo_for_json(findings_raw)
             try:
                 cleaned = _clean_json(stripped)
-                # Sanitize to remove invalid control characters before parsing
+                # Sanitize content inside strings (escape newlines, etc.) then remove control chars
+                cleaned = _sanitize_json_content(cleaned)
                 sanitized = _sanitize_json_string(cleaned)
                 findings = json.loads(sanitized)
                 if not isinstance(findings, list):
@@ -571,7 +607,8 @@ If none missing, return [].
             )
             _ms = _strip_echo_for_json(missing_raw)
             cleaned = _clean_json(_ms)
-            # Sanitize before parsing
+            # Sanitize content inside strings (escape newlines, etc.) then remove control chars
+            cleaned = _sanitize_json_content(cleaned)
             cleaned = _sanitize_json_string(cleaned)
             start = cleaned.find("[")
             end = cleaned.rfind("]") + 1
