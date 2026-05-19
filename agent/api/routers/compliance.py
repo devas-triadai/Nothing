@@ -83,6 +83,8 @@ def _repair_json_with_llm(broken_json: str) -> list:
             temperature=0.0,
         )
         cleaned = _clean_json(repaired_raw)
+        # Sanitize to remove invalid control characters
+        cleaned = _sanitize_json_string(cleaned)
         result = json.loads(cleaned)
         if isinstance(result, list):
             logger.info("LLM JSON repair succeeded: %d items recovered", len(result))
@@ -154,9 +156,16 @@ def _strip_echo_for_json(raw: str) -> str:
     return '[]'
 
 
+def _sanitize_json_string(s: str) -> str:
+    """Remove invalid control characters (0x00-0x1F except allowed whitespace: tab, lf, cr)."""
+    allowed = {'\t', '\n', '\r'}
+    return ''.join(c for c in s if ord(c) >= 32 or c in allowed)
+
+
 def _repair_truncated_json(raw: str) -> str:
     """Local repair for common LLM truncation issues: unterminated strings, incomplete objects/arrays."""
-    s = raw.strip()
+    # First sanitize to remove invalid control characters
+    s = _sanitize_json_string(raw.strip())
     if not s:
         return '[]'
 
@@ -228,13 +237,17 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
     stripped = _strip_echo_for_json(raw)
     try:
         cleaned = _clean_json(stripped)
-        data = json.loads(cleaned)
+        # Sanitize to remove invalid control characters before parsing
+        sanitized = _sanitize_json_string(cleaned)
+        data = json.loads(sanitized)
         if isinstance(data, list):
             return [d for d in data if isinstance(d, dict)]
     except (json.JSONDecodeError, ValueError) as e:
         # Try local repair for truncated/unterminated strings
         try:
             repaired = _repair_truncated_json(cleaned)
+            # Sanitize again after repair
+            repaired = _sanitize_json_string(repaired)
             data = json.loads(repaired)
             if isinstance(data, list):
                 logger.info("Local JSON repair succeeded for compliance batch")
@@ -452,7 +465,9 @@ Output 5-8 findings. Return a JSON array only. No prose. No markdown.
             stripped = _strip_echo_for_json(findings_raw)
             try:
                 cleaned = _clean_json(stripped)
-                findings = json.loads(cleaned)
+                # Sanitize to remove invalid control characters before parsing
+                sanitized = _sanitize_json_string(cleaned)
+                findings = json.loads(sanitized)
                 if not isinstance(findings, list):
                     raise ValueError("Expected a JSON array of findings")
             except (json.JSONDecodeError, ValueError) as e:
@@ -494,6 +509,8 @@ If none missing, return [].
             )
             _ms = _strip_echo_for_json(missing_raw)
             cleaned = _clean_json(_ms)
+            # Sanitize before parsing
+            cleaned = _sanitize_json_string(cleaned)
             start = cleaned.find("[")
             end = cleaned.rfind("]") + 1
             if start != -1 and end > start:
