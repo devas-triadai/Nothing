@@ -165,18 +165,36 @@ def _sanitize_json_string(s: str) -> str:
 def _extract_json_objects_regex(raw: str) -> list:
     """Last-resort: use regex to extract individual { ... } objects from garbled LLM output."""
     findings = []
-    # Pattern to match JSON objects: start with {, then content, then }
-    # This is greedy but tries to be careful about nesting
+    # First try to find complete objects with proper structure
+    # Pattern: { followed by key:value pairs, then }
     pattern = r'\{[^{}]*"[^"]+"[^{}]*\}'
     matches = re.findall(pattern, raw)
     for match in matches:
         try:
-            sanitized = _sanitize_json_string(match)
+            # Apply string repair to close any unterminated strings
+            repaired = _repair_truncated_json(match)
+            # Sanitize and parse
+            sanitized = _sanitize_json_string(repaired)
             obj = json.loads(sanitized)
             if isinstance(obj, dict) and any(k in obj for k in ['clause_id', 'verdict', 'finding']):
                 findings.append(obj)
         except Exception:
             continue
+    
+    # If no findings, try more aggressive pattern that finds partial objects
+    if not findings:
+        # Find any { ... } block that looks like it has compliance keys
+        aggressive_pattern = r'\{[^{}]*(?:clause|verdict|finding|requirement)[^{}]*\}'
+        for match in re.findall(aggressive_pattern, raw, re.IGNORECASE):
+            try:
+                repaired = _repair_truncated_json(match)
+                sanitized = _sanitize_json_string(repaired)
+                obj = json.loads(sanitized)
+                if isinstance(obj, dict):
+                    findings.append(obj)
+            except Exception:
+                continue
+    
     return findings
 
 
@@ -187,7 +205,7 @@ def _repair_truncated_json(raw: str) -> str:
     if not s:
         return '[]'
 
-    # Close unterminated strings
+    # Close unterminated strings (handle escape sequences properly)
     in_string = False
     escape_next = False
     for i, c in enumerate(s):
@@ -200,7 +218,10 @@ def _repair_truncated_json(raw: str) -> str:
         if c == '"':
             in_string = not in_string
 
-    if in_string:
+    # If we ended with an escape, add a space to complete it, then close string
+    if escape_next:
+        s = s + ' "'
+    elif in_string:
         s = s + '"'
 
     # Extract outermost array if present
@@ -209,9 +230,13 @@ def _repair_truncated_json(raw: str) -> str:
     if start >= 0 and end > start:
         s = s[start:end]
 
-    # Strip trailing incomplete content (comma at end, partial key, etc.)
-    s = re.sub(r',\s*"[^"]*$', '', s)
+    # Aggressively strip trailing incomplete content
+    # Pattern: , "key... at end -> remove from comma onward
+    s = re.sub(r',\s*"[^"}]*$', '', s)
+    # Pattern: , at end before ] or } or EOF
     s = re.sub(r',\s*$', '', s)
+    # Pattern: "key": "value with no closing quote
+    s = re.sub(r'"[^"]*$', '"', s)
 
     # Close remaining open structures
     open_braces = s.count('{') - s.count('}')
@@ -281,7 +306,7 @@ Output 3-5 findings. Return a JSON array only. No prose. No markdown.
         except Exception:
             pass
         logger.warning("Compliance batch JSON parse failed: %s", e)
-        logger.debug("Raw LLM output (first 300 chars): %s", repr(stripped[:300]))
+        logger.warning("Raw LLM output (first 400 chars): %s", repr(stripped[:400]))
     return []
 
 
