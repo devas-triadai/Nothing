@@ -498,21 +498,17 @@ async def compliance_check(
     # - user: contains ONLY the data and the specific task
     # - NO trailing `[` in user message (triggers markdown-list echo)
     # - response_format omitted (silently ignored by this llama-server build)
-    system_msg = (
-        "You are a strict maritime compliance checker. "
-        "Output ONLY a valid JSON array of finding objects. "
-        "No prose, no explanation, no markdown, no code fences. "
-        "Every response must start with [ and end with ]."
-    )
+    system_msg = "Output JSON only."
     user_msg = (
         f"SUBJECT DOCUMENT ({subject_filenames_str}):\n{subject_text}\n\n"
         f"STANDARDS:\n{standard_text}"
         f"{scope_note}\n\n"
-        "Produce 5 to 8 compliance findings as a JSON array. "
-        "Each element must have these keys: "
+        "Compare each standard clause against the subject document. "
+        "Return a JSON array of 5-8 objects, each with keys: "
         "topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation. "
         "verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable. "
-        "severity: Critical | Major | Minor | None."
+        "severity: Critical | Major | Minor | None. "
+        "JSON array only, no prose. /no_think"
     )
 
     # ── LLM call ──
@@ -532,24 +528,43 @@ async def compliance_check(
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
 
-    # Normalise: unwrap {"findings":[...]} dict if model returned that,
-    # otherwise ensure we have a bare JSON array string.
+    # ── Pre-parse: extract JSON from raw output ──
+    # Gemma 4 may leak reasoning prose before the JSON. Strip everything before
+    # the first `[` or `{` so the parser only sees JSON content.
     raw_stripped = (findings_raw or "").strip()
-    try:
-        _tmp = json.loads(raw_stripped)
-        if isinstance(_tmp, dict):
-            # Find the first list value (handles {"findings":[...]}, {"items":[...]}, etc.)
+
+    # Find the earliest JSON structure start
+    first_bracket = raw_stripped.find("[")
+    first_brace = raw_stripped.find("{")
+    if first_bracket == -1 and first_brace == -1:
+        # No JSON structure found at all — log and let fallback handle
+        logger.warning("No JSON structure ([/{) found in LLM output: %s", raw_stripped[:200])
+    elif first_bracket != -1 and (first_brace == -1 or first_bracket <= first_brace):
+        # Array comes first (or only array) — extract from first [ to last ]
+        last_bracket = raw_stripped.rfind("]")
+        if last_bracket > first_bracket:
+            raw_stripped = raw_stripped[first_bracket:last_bracket + 1]
+        else:
+            raw_stripped = raw_stripped[first_bracket:]
+    else:
+        # Object comes first — try to unwrap {"findings":[...]} etc.
+        last_brace = raw_stripped.rfind("}")
+        if last_brace > first_brace:
+            obj_str = raw_stripped[first_brace:last_brace + 1]
+        else:
+            obj_str = raw_stripped[first_brace:]
+        try:
+            _tmp = json.loads(obj_str)
             for _v in _tmp.values():
                 if isinstance(_v, list):
-                    findings_raw = json.dumps(_v)
+                    raw_stripped = json.dumps(_v)
                     break
             else:
-                findings_raw = "[]"  # dict but no list value — let fallback handle it
-        else:
-            findings_raw = raw_stripped  # already a list or primitive
-    except (json.JSONDecodeError, AttributeError):
-        # Not valid JSON — pass to _parse_llm_json for repair
-        findings_raw = raw_stripped
+                raw_stripped = obj_str
+        except (json.JSONDecodeError, AttributeError):
+            raw_stripped = obj_str
+
+    findings_raw = raw_stripped
 
     # ── Parse JSON (3 layers) ──
     findings = _parse_llm_json(findings_raw)

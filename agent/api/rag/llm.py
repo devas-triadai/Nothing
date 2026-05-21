@@ -151,6 +151,23 @@ def sanitize_text(text: str) -> str:
     return text
 
 
+def strip_think(text: str) -> str:
+    """
+    Remove Gemma 4 / reasoning-model thinking blocks from raw LLM output.
+    Handles both closed (<think>...</think>) and unclosed (truncated) blocks.
+    Safe to call on any output including JSON.
+    """
+    if not text or "<think" not in text.lower():
+        return text
+    # Remove properly closed think/thought blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove unclosed think block that runs to end of string (truncated reasoning)
+    text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<thought>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
+
+
 def clean_llm_output(text: str) -> str:
     """
     Sanitize and lightly clean LLM output. Removes <thought> blocks and
@@ -160,8 +177,7 @@ def clean_llm_output(text: str) -> str:
         return ""
 
     # 1. Remove explicit reasoning/thinking blocks
-    text = re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = strip_think(text)
 
     # 2. Sanitize encoding and LaTeX (always)
     text = sanitize_text(text)
@@ -247,7 +263,8 @@ def generate(
         content = msg["reasoning_content"]
 
     if raw:
-        return content
+        # Even in raw mode, strip think blocks — they are never valid output
+        return strip_think(content)
     return clean_llm_output(content)
 
 
