@@ -348,22 +348,23 @@ async def generate_hyde_document(query: str) -> str:
                     ],
                     "temperature": 0.4,
                     "max_tokens": 1024,
-                    "stream": False
+                    "stream": False,
+                    "budget_tokens": 0,
                 }
             )
             resp.raise_for_status()
             data = resp.json()
             msg = data["choices"][0]["message"]
-            content = msg.get("content", "").strip()
-            
+            content = strip_think(msg.get("content", "").strip())
+
             # Fallback for reasoning models
             if not content and "reasoning_content" in msg:
-                content = msg["reasoning_content"].strip()
-            
+                content = strip_think(msg["reasoning_content"].strip())
+
             if not content:
                 logger.warning("LLM returned empty content for HyDE. Raw response: %s", data)
                 return query
-                
+
             return clean_llm_output(content)
     except Exception as e:
         logger.warning("HyDE generation failed (%s: %s), falling back to raw query.", type(e).__name__, e)
