@@ -6,7 +6,6 @@ Routes:
   /api/agent/upload        — Document upload & management
   /api/agent/chat          — Conversational Q&A (SSE)
   /api/agent/generate/*    — PPT, Summary, Quiz generation
-  /api/agent/compliance/*  — Compliance check engine
   /api/agent/download/*    — File downloads for generated content
 """
 
@@ -97,7 +96,7 @@ app = FastAPI(
     title="AGRA Agent API",
     description=(
         "Air-Gapped Retrieval Agent — Document Q&A, PPT generation, "
-        "summary, quiz, and compliance analysis. "
+        "summary, and quiz. "
         "All processing runs locally — zero internet access."
     ),
     version="2.0.0",
@@ -187,12 +186,11 @@ async def cors_middleware(request: Request, call_next):
 
 
 # ── Register Routers ──
-from api.routers import upload, chat, generate, compliance, vlm, drawing, compare, sessions
+from api.routers import upload, chat, generate, vlm, drawing, compare, sessions
 
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
 app.include_router(generate.router,   prefix="/api/agent", tags=["Generation"])
-app.include_router(compliance.router, prefix="/api/agent", tags=["Compliance"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
 app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
 app.include_router(compare.router,    prefix="/api/agent", tags=["Compare"])
@@ -212,7 +210,6 @@ async def root():
             "ppt_generation",
             "executive_summary",
             "knowledge_quiz",
-            "compliance_check",
         ],
     }
 

@@ -58,13 +58,6 @@ _INTENT_COMPARE = re.compile(
     r'|\b(both|two|multiple)\s+(bids?|bidders?|proposals?|vendors?)\b',
     re.IGNORECASE,
 )
-# Workstream E: Compliance intent — triggers inline compliance check from chat
-_INTENT_COMPLIANCE = re.compile(
-    r'\b(check|run|perform|do|start|execute)\b.{0,40}\b(compliance|conformity|audit|verification)\b'
-    r'|\b(compliance|conformity)\s+(check|analysis|report|audit|review)\b'
-    r'|\b(is\s+.{3,40}\s+compliant|compliant\s+with)\b',
-    re.IGNORECASE,
-)
 # Workstream K: Drawing analysis intent — auto-detect drawings/schematics even without "analyze"
 _INTENT_DRAWING = re.compile(
     r'\b(analy[zs]e|extract|parse|read|interpret|inspect|check|look\s+at|view|verify|identify)\b.{0,60}\b(drawing|schematic|blueprint|diagram|plan|sketch|image|map|layout|photo|figure|chart|specification|schemes?)\b'
@@ -176,14 +169,6 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
         return {"type": "draft_sotr"}
     if _INTENT_TECH_REVIEW.search(q):
         return {"type": "tech_review", "target_audience": "shipyard"}
-    # Workstream E: Compliance intent detection
-    if _INTENT_COMPLIANCE.search(q):
-        scope_match = re.search(
-            r'(?:for|on|regarding|about|of|against|with)\s+["\']?(.+?)["\']?\s*$',
-            q, re.IGNORECASE,
-        )
-        scope = scope_match.group(1).strip() if scope_match else None
-        return {"type": "compliance", "check_scope": scope}
     # Workstream F: Drawing analysis intent detection
     if _INTENT_DRAWING.search(q):
         return {"type": "drawing_extract"}
@@ -452,36 +437,6 @@ async def query_pipeline(
                     "comparable_tenders": comparable_tenders,
                     "problem_statement": validated_ps,
                     "problem_statement_error": ps_validation_error,
-                },
-                "done": True,
-                "sources": [],
-            }
-            return
-
-        # Workstream E: Compliance intent — route to inline compliance from chat
-        if intent.get("type") == "compliance":
-            if doc_ids_filter:
-                doc_ids = doc_ids_filter
-            else:
-                doc_ids = await _loop.run_in_executor(None, _get_all_doc_ids)
-            if not doc_ids:
-                yield {"token": "No documents are indexed yet. Please upload documents first."}
-                yield {"done": True, "sources": []}
-                return
-            # Split docs: user-uploaded = subjects, builtin = standards
-            subject_ids = [d for d in doc_ids if not d.startswith("builtin:")]
-            standard_ids = [d for d in doc_ids if d.startswith("builtin:")]
-            if not subject_ids:
-                subject_ids = doc_ids[:1]
-            if not standard_ids:
-                standard_ids = [d for d in doc_ids if d != subject_ids[0]][:2]
-            yield {
-                "intent": "compliance",
-                "intent_params": {
-                    **intent,
-                    "subject_doc_ids": subject_ids,
-                    "standard_doc_ids": standard_ids,
-                    "doc_ids": doc_ids,
                 },
                 "done": True,
                 "sources": [],

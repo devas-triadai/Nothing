@@ -19,7 +19,6 @@ import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
 import ComparisonCard from '../components/ComparisonCard';
-import ComplianceCard from '../components/ComplianceCard'; // Workstream E
 
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
@@ -1304,24 +1303,6 @@ export default function Chat() {
             return;
           }
 
-          // Workstream E: Compliance intent — render inline ComplianceCard
-          if (intentType === 'compliance') {
-            setIsStreaming(false);
-            setMessages(prev => {
-              const copy = [...prev];
-              copy[copy.length - 1] = {
-                ...copy[copy.length - 1],
-                content: 'Running compliance analysis…',
-                streaming: false,
-                complianceIntent: intentParams, // Signals ComplianceCard to render
-              };
-              persistMessages(copy, sessId);
-              return copy;
-            });
-            delete streamRefs.current[sessId];
-            return;
-          }
-
           // Workstream K/M: Drawing analysis intent — auto-trigger VLM extraction from chat
           if (intentType === 'drawing_extract') {
             setIsStreaming(false);
@@ -1870,7 +1851,6 @@ export default function Chat() {
         )}
 
         <div style={styles.navSection}>
-          <Link to="/compliance" style={styles.navLink}><ShieldCheck size={15} />{!sidebarCollapsed && <span>{isHindi ? 'अनुपालन' : 'Compliance'}</span>}</Link>
           {isSuperAdmin && (
             <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
           )}
@@ -2004,11 +1984,6 @@ export default function Chat() {
                       {/* Branch-isolated Comparison Card */}
                       {msg.comparison && !msg.streaming && (
                         <ComparisonCard data={msg.comparison} />
-                      )}
-
-                      {/* Workstream E: Inline Compliance Analysis */}
-                      {msg.complianceIntent && !msg.streaming && (
-                        <ComplianceCard intentParams={msg.complianceIntent} token={token} />
                       )}
 
                       {/* Workstream F: Inline Drawing Extraction Results */}
