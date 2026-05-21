@@ -1,9 +1,15 @@
 """
-AGRA Phase 2 — Router: Compliance Check Engine
-Clause-by-clause analysis against ingested standards.
+AGRA Phase 2 — Router: Compliance Check Engine (v2)
+Ground-up rewrite. Key fixes vs v1:
+  - raw=True on ALL llm_engine.generate() calls for JSON — prevents clean_llm_output()
+    from stripping lines containing "topic", "Task:", "Role:" etc.
+  - Correct _sanitize_json_content() — state-machine, only touches inside strings
+  - Single-pass architecture — no multi-batch complexity, no streaming
+  - 3 JSON repair layers max (was 6)
+  - Smart standard recommendation via cosine similarity
+  - Always returns a response — never hangs
 """
 
-import asyncio
 import json
 import logging
 import re
@@ -12,8 +18,9 @@ import uuid
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from docx import Document as DocxDocument
 
@@ -21,7 +28,6 @@ from api.utils.auth_check import get_current_user
 from api.utils.usage_logger import log_usage
 from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
-from api.rag.reranker import rerank
 
 logger = logging.getLogger("agra.compliance")
 
@@ -34,142 +40,34 @@ if not _DATA_DIR.exists():
 _OUTPUTS_DIR = _DATA_DIR / "outputs"
 _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JSON HELPERS  (3 layers max — no more)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _clean_json(raw: str) -> str:
-    """
-    Workstream D: Recursive JSON extraction with multiple fallback strategies.
-    1. Strip markdown code fences
-    2. Extract outermost [...] array
-    3. If truncated, try closing partial objects/arrays
-    """
-    cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-    cleaned = cleaned.strip()
-
-    # Strategy 1: Find outermost array brackets
-    start = cleaned.find("[")
-    end = cleaned.rfind("]") + 1
+    """Strip markdown fences and extract outermost [...] array."""
+    s = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+    s = re.sub(r"```\s*$", "", s.strip(), flags=re.MULTILINE)
+    s = s.strip()
+    start = s.find("[")
+    end = s.rfind("]") + 1
     if start != -1 and end > start:
-        return cleaned[start:end]
-
-    # Strategy 2: Array started but truncated — close partial objects
-    if start != -1 and end <= start:
-        partial = cleaned[start:]
-        # Count open braces and try to close them
-        open_braces = partial.count("{") - partial.count("}")
-        open_brackets = partial.count("[") - partial.count("]")
-        # Strip trailing comma or incomplete key
-        partial = re.sub(r',\s*"[^"]*$', '', partial)
-        partial = re.sub(r',\s*$', '', partial)
-        partial += "}" * max(0, open_braces)
-        partial += "]" * max(0, open_brackets)
-        return partial
-
-    return cleaned
-
-
-def _repair_json_with_llm(broken_json: str) -> list:
-    """
-    Workstream D: Last-resort LLM-based JSON repair.
-    Send the broken JSON to the LLM with a tiny prompt asking it to fix it.
-    """
-    repair_prompt = f"""The following JSON array is malformed or truncated. Fix it and return ONLY a valid JSON array. Do not add new data, just fix the syntax:
-
-{broken_json[:2000]}"""
-    try:
-        repaired_raw = llm_engine.generate(
-            [{"role": "user", "content": repair_prompt}],
-            max_tokens=600,
-            temperature=0.0,
-        )
-        cleaned = _clean_json(repaired_raw)
-        # Sanitize content inside strings (escape newlines, etc.) then remove control chars
-        cleaned = _sanitize_json_content(cleaned)
-        cleaned = _sanitize_json_string(cleaned)
-        result = json.loads(cleaned)
-        if isinstance(result, list):
-            logger.info("LLM JSON repair succeeded: %d items recovered", len(result))
-            return result
-    except Exception as e:
-        logger.warning("LLM JSON repair also failed: %s", e)
-    return []
-
-
-def _is_json_array_start_global(s: str) -> bool:
-    """Return True only if s starts with a real JSON array (not '[*' markdown list)."""
-    if not s.startswith('['):
-        return False
-    i = 1
-    while i < len(s) and s[i] in ' \t\n\r':
-        i += 1
-    return i < len(s) and s[i] == '{'
-
-
-def _strip_echo_for_json(raw: str) -> str:
-    """Aggressively strip prompt-echo prefix and return a JSON-array-shaped string.
-    Handles Gemma's markdown list echoes like '[* Subject Documents...' """
-    s = (raw or "").strip()
-    if not s:
-        return '[]'
-
-    # Fast path: already valid JSON array starting with '[{'
-    if _is_json_array_start_global(s):
-        return s
-
-    # If it starts with '[' followed by '*' or other non-JSON content, it's a markdown list echo
-    # Strip until we find actual JSON
-    if s.startswith('['):
-        # Look for the real JSON array start '[{'
-        json_array_start = s.find('[{')
-        if json_array_start >= 0:
-            return s[json_array_start:]
-        # Or look for a single JSON object starting with '{'
-        first_brace = s.find('{')
-        if first_brace >= 0:
-            last_brace = s.rfind('}')
-            if last_brace > first_brace:
-                return '[' + s[first_brace:last_brace+1] + ']'
-            return '[' + s[first_brace:] + ']'
-        # No JSON found, return empty
-        return '[]'
-
-    # If it starts with '{' wrap it
-    if s.startswith('{'):
-        last_brace = s.rfind('}')
-        if last_brace > 0:
-            return '[' + s[:last_brace+1] + ']'
-        return '[' + s + ']'
-
-    # Search for any JSON array or object in the text
-    # Find first occurrence of '[{'
-    json_array_match = re.search(r'\[\s*\{', s)
-    if json_array_match:
-        return s[json_array_match.start():]
-
-    # Find first '{' that looks like JSON (followed by quote)
-    json_obj_match = re.search(r'\{\s*"', s)
-    if json_obj_match:
-        # Extract from first { to last }
-        start = json_obj_match.start()
-        end = s.rfind('}') + 1
-        return '[' + s[start:end] + ']'
-
-    return '[]'
-
-
-def _sanitize_json_string(s: str) -> str:
-    """Remove invalid control characters (0x00-0x1F except allowed whitespace: tab, lf, cr)."""
-    allowed = {'\t', '\n', '\r'}
-    return ''.join(c for c in s if ord(c) >= 32 or c in allowed)
+        return s[start:end]
+    return s
 
 
 def _sanitize_json_content(s: str) -> str:
     """
-    Fix raw (unescaped) control characters that appear INSIDE JSON string values.
-    Only modifies content inside quoted strings — leaves structural JSON intact.
-    Handles: raw newline -> \\n, raw tab -> \\t, raw carriage return -> \\r,
-             other raw control chars < 0x20 -> removed.
-    Does NOT touch quotes or backslashes (those are structural JSON).
+    Fix raw control characters INSIDE JSON string values only.
+    State-machine approach — never touches structural quotes or backslashes.
+    Raw newline/tab/CR inside a string value → escaped \\n / \\t / \\r.
+    Other control chars (< 0x20) inside string → removed.
     """
     result = []
     in_string = False
@@ -177,26 +75,22 @@ def _sanitize_json_content(s: str) -> str:
     while i < len(s):
         c = s[i]
         if in_string:
-            if c == '\\':
-                # Pass through the escape sequence as-is
+            if c == "\\":
                 result.append(c)
                 if i + 1 < len(s):
                     i += 1
                     result.append(s[i])
             elif c == '"':
-                # End of string
                 in_string = False
                 result.append(c)
-            elif c == '\n':
-                # Raw newline inside string value — escape it
-                result.append('\\n')
-            elif c == '\r':
-                result.append('\\r')
-            elif c == '\t':
-                result.append('\\t')
+            elif c == "\n":
+                result.append("\\n")
+            elif c == "\r":
+                result.append("\\r")
+            elif c == "\t":
+                result.append("\\t")
             elif ord(c) < 32:
-                # Other control chars inside string — remove
-                pass
+                pass  # drop other control chars inside strings
             else:
                 result.append(c)
         else:
@@ -206,178 +100,313 @@ def _sanitize_json_content(s: str) -> str:
             else:
                 result.append(c)
         i += 1
-    return ''.join(result)
+    return "".join(result)
 
 
-def _extract_json_objects_regex(raw: str) -> list:
-    """Last-resort: use regex to extract individual { ... } objects from garbled LLM output."""
-    findings = []
-    
-    # Strategy 1: Find complete objects with proper key:value structure
-    # Use a pattern that captures nested braces more carefully
-    pattern = r'\{(?:[^{}]|"(?:[^"\\]|\\.)*")*\}'
-    matches = re.findall(pattern, raw)
-    
-    for match in matches:
-        try:
-            # Check if it looks like a compliance finding
-            if not any(k in match.lower() for k in ['clause', 'verdict', 'finding', 'requirement']):
-                continue
-            
-            # Apply comprehensive sanitization
-            repaired = _repair_truncated_json(match)
-            # Sanitize content inside string values
-            repaired = _sanitize_json_content(repaired)
-            sanitized = _sanitize_json_string(repaired)
-            obj = json.loads(sanitized)
-            if isinstance(obj, dict) and any(k in obj for k in ['clause_id', 'verdict', 'finding', 'requirement']):
-                findings.append(obj)
-        except Exception:
-            continue
-    
-    return findings
-
-
-def _repair_truncated_json(raw: str) -> str:
-    """Local repair for common LLM truncation issues: unterminated strings, incomplete objects/arrays."""
-    # First sanitize content inside strings (escape newlines, etc.)
-    s = _sanitize_json_content(raw)
-    # Then remove invalid control characters
-    s = _sanitize_json_string(s.strip())
+def _repair_truncated_json(s: str) -> str:
+    """Close open braces/brackets and remove trailing commas to fix truncated JSON."""
+    s = s.strip()
     if not s:
-        return '[]'
-
-    # Close unterminated strings (handle escape sequences properly)
+        return "[]"
+    # Close unterminated string
     in_string = False
-    escape_next = False
-    for i, c in enumerate(s):
-        if escape_next:
-            escape_next = False
+    escaped = False
+    for c in s:
+        if escaped:
+            escaped = False
             continue
-        if c == '\\':
-            escape_next = True
+        if c == "\\":
+            escaped = True
             continue
         if c == '"':
             in_string = not in_string
-
-    # If we ended with an escape, add a space to complete it, then close string
-    if escape_next:
-        s = s + ' "'
-    elif in_string:
-        s = s + '"'
-
-    # Extract outermost array if present
-    start = s.find('[')
-    end = s.rfind(']') + 1
-    if start >= 0 and end > start:
-        s = s[start:end]
-
-    # Aggressively strip trailing incomplete content
-    # Pattern: , "key... at end -> remove from comma onward
-    s = re.sub(r',\s*"[^"}]*$', '', s)
-    # Pattern: , at end before ] or } or EOF
-    s = re.sub(r',\s*$', '', s)
-    # Pattern: "key": "value with no closing quote
-    s = re.sub(r'"[^"]*$', '"', s)
-
-    # Close remaining open structures
-    open_braces = s.count('{') - s.count('}')
-    open_brackets = s.count('[') - s.count(']')
-    s += '}' * max(0, open_braces)
-    s += ']' * max(0, open_brackets)
-
+    if in_string:
+        s += '"'
+    # Strip trailing comma before closing
+    s = re.sub(r",\s*$", "", s)
+    # Count and close open structures
+    open_braces = s.count("{") - s.count("}")
+    open_brackets = s.count("[") - s.count("]")
+    s += "}" * max(0, open_braces)
+    s += "]" * max(0, open_brackets)
     # Remove trailing commas before closing brackets/braces
-    s = re.sub(r',\s*(\}|\])', r'\1', s)
-
+    s = re.sub(r",\s*([}\]])", r"\1", s)
     return s
 
 
-def _run_compliance_batch(subject_slice: str, standard_slice: str, subject_filenames_str: str,
-                          scope_note: str, max_tokens: int = 1200) -> list:
-    """
-    One compliance LLM call on a (subject_slice, standard_slice) pair.
-    Returns parsed findings list (may be empty on failure).
-    """
-    prompt = f"""SUBJECT DOCUMENTS ({subject_filenames_str}):
-{subject_slice}
+def _extract_json_objects_regex(raw: str) -> list:
+    """Last resort — extract individual {...} objects from garbled output."""
+    findings = []
+    pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}"
+    for match in re.findall(pattern, raw, re.DOTALL):
+        if not any(k in match.lower() for k in ["clause", "verdict", "finding", "requirement"]):
+            continue
+        try:
+            obj = json.loads(_sanitize_json_content(match))
+            if isinstance(obj, dict):
+                findings.append(obj)
+        except Exception:
+            continue
+    return findings
 
-STANDARDS:
-{standard_slice}
-{scope_note}
 
-Instructions: Compare each standard clause against the subject documents.
-For each clause output one JSON object with keys: topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation.
-verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable
-severity: Critical | Major | Minor | None
-Output 3-5 findings. Return a JSON array only. No prose. No markdown.
-["""
+def _parse_llm_json(raw: str) -> list:
+    """
+    Parse LLM output into a list of finding dicts.
+    3 layers: clean → sanitize → parse → repair → regex.
+    Always returns a list (never raises).
+    """
+    # Layer 1: clean + sanitize + parse
     try:
-        raw = llm_engine.generate(
-            [{"role": "user", "content": prompt}],
-            max_tokens=max_tokens, temperature=0.1,
-        )
-    except Exception as e:
-        logger.warning("Compliance batch LLM call failed: %s", e)
-        return []
-    stripped = _strip_echo_for_json(raw)
-    try:
-        cleaned = _clean_json(stripped)
-        # Sanitize content inside strings (escape newlines, etc.) then remove control chars
-        cleaned = _sanitize_json_content(cleaned)
-        sanitized = _sanitize_json_string(cleaned)
+        cleaned = _clean_json(raw)
+        sanitized = _sanitize_json_content(cleaned)
         data = json.loads(sanitized)
         if isinstance(data, list):
             return [d for d in data if isinstance(d, dict)]
-    except (json.JSONDecodeError, ValueError) as e:
-        # Try local repair for truncated/unterminated strings
-        try:
-            repaired = _repair_truncated_json(cleaned)
-            # Sanitize again after repair
-            repaired = _sanitize_json_content(repaired)
-            repaired = _sanitize_json_string(repaired)
-            data = json.loads(repaired)
-            if isinstance(data, list):
-                logger.info("Local JSON repair succeeded for compliance batch")
-                return [d for d in data if isinstance(d, dict)]
-        except Exception:
-            pass
-        # Last resort: try regex extraction of individual objects
-        try:
-            findings = _extract_json_objects_regex(stripped)
-            if findings:
-                logger.info("Regex extraction recovered %d findings from batch", len(findings))
-                return findings
-        except Exception:
-            pass
-        logger.warning("Compliance batch JSON parse failed: %s", e)
-        logger.warning("Raw LLM output (first 400 chars): %s", repr(stripped[:400]))
+        if isinstance(data, dict):
+            return [data]
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Layer 2: repair truncated + retry
+    try:
+        cleaned = _clean_json(raw)
+        sanitized = _sanitize_json_content(cleaned)
+        repaired = _repair_truncated_json(sanitized)
+        data = json.loads(repaired)
+        if isinstance(data, list):
+            logger.info("JSON repair succeeded: %d items", len(data))
+            return [d for d in data if isinstance(d, dict)]
+    except Exception:
+        pass
+
+    # Layer 3: regex object extraction
+    findings = _extract_json_objects_regex(raw)
+    if findings:
+        logger.info("Regex extraction recovered %d findings", len(findings))
+        return findings
+
+    logger.warning("All JSON parse strategies failed. Raw (first 300): %s", repr(raw[:300]))
     return []
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# COSINE SIMILARITY HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cosine_sim(a: list, b: list) -> float:
+    """Cosine similarity between two embedding vectors."""
+    va = np.array(a, dtype=np.float32)
+    vb = np.array(b, dtype=np.float32)
+    denom = np.linalg.norm(va) * np.linalg.norm(vb)
+    if denom == 0:
+        return 0.0
+    return float(np.dot(va, vb) / denom)
+
+
+def _mean_embedding(chunks: list) -> list:
+    """Compute mean embedding across a list of document chunks."""
+    texts = [c["text"] for c in chunks if c.get("text", "").strip()][:10]
+    if not texts:
+        return []
+    vecs = embedder.embed_texts(texts)
+    arr = np.array(vecs, dtype=np.float32)
+    mean = arr.mean(axis=0)
+    norm = np.linalg.norm(mean)
+    if norm > 0:
+        mean = mean / norm
+    return mean.tolist()
+
+
+def _select_best_chunks(chunks: list, query_embedding: list, max_chars: int) -> str:
+    """
+    Select the most relevant chunks up to max_chars total.
+    Scores each chunk by cosine similarity to the query embedding,
+    returns the top chunks concatenated as a string.
+    """
+    if not chunks:
+        return ""
+    if not query_embedding:
+        # Fallback: just take first N chars
+        text = "\n\n".join(c["text"] for c in chunks)
+        return text[:max_chars]
+
+    scored = []
+    for c in chunks:
+        text = c.get("text", "").strip()
+        if not text:
+            continue
+        vec = embedder.embed_query(text[:500])  # embed first 500 chars for speed
+        score = _cosine_sim(query_embedding, vec)
+        scored.append((score, c))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    result_parts = []
+    total = 0
+    for _, c in scored:
+        fname = c.get("metadata", {}).get("filename", "")
+        text = c.get("text", "")
+        part = f"[{fname}]: {text}" if fname else text
+        if total + len(part) > max_chars:
+            remaining = max_chars - total
+            if remaining > 100:
+                result_parts.append(part[:remaining])
+            break
+        result_parts.append(part)
+        total += len(part)
+
+    return "\n\n".join(result_parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PYDANTIC MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RecommendRequest(BaseModel):
+    subject_doc_id: str = Field(..., description="Doc ID of the subject document")
+
+
 class ComplianceRequest(BaseModel):
-    subject_doc_ids: List[str] = Field(..., min_length=1, description="Documents being checked")
-    standard_doc_ids: List[str] = Field(..., min_length=1, description="Standards to check against")
-    check_scope: Optional[str] = Field(None, description="Specific area to focus on")
+    subject_doc_ids: List[str] = Field(..., min_length=1)
+    standard_doc_ids: List[str] = Field(..., min_length=1)
+    check_scope: Optional[str] = Field(None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS OPTIONS HANDLERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.options("/compliance/recommend-standards")
+async def recommend_options():
+    return JSONResponse(content={}, headers=_CORS_HEADERS)
 
 
 @router.options("/compliance/check")
-async def compliance_check_options():
-    """Handle CORS preflight for compliance check endpoint."""
-    return StreamingResponse(
-        iter([]),
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
+async def check_options():
+    return JSONResponse(content={}, headers=_CORS_HEADERS)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT 1: RECOMMEND STANDARDS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/compliance/recommend-standards")
+async def recommend_standards(
+    body: RecommendRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Given a subject document ID, returns all available standard documents
+    ranked by cosine similarity to the subject doc's content.
+    Standards with similarity >= 0.30 are flagged as recommended.
+    """
+    store = get_store()
+
+    # Load subject chunks
+    subject_chunks = store.get_chunks_by_doc(body.subject_doc_id)
+    if not subject_chunks:
+        raise HTTPException(
+            status_code=404,
+            detail="Subject document not found in knowledge base.",
+            headers=_CORS_HEADERS,
+        )
+
+    # Compute subject mean embedding
+    subject_embedding = _mean_embedding(subject_chunks)
+
+    # Get all documents from store
+    all_docs = store.list_unique_documents()
+    standard_docs = [
+        d for d in all_docs
+        if d.get("doc_id") != body.subject_doc_id
+        and (
+            d.get("doc_id", "").startswith("builtin:")
+            or (d.get("category", "").lower() in ["standard", "global standard", "sotr", "imo", "rule"])
+            or (d.get("document_type", "") == "standard")
+        )
+    ]
+
+    if not standard_docs:
+        # If no docs are tagged as standards, return all non-subject docs ranked
+        standard_docs = [d for d in all_docs if d.get("doc_id") != body.subject_doc_id]
+
+    recommendations = []
+    for std_doc in standard_docs:
+        std_chunks = store.get_chunks_by_doc(std_doc["doc_id"])
+        if not std_chunks:
+            continue
+
+        std_embedding = _mean_embedding(std_chunks)
+        score = _cosine_sim(subject_embedding, std_embedding) if subject_embedding and std_embedding else 0.0
+
+        # Generate a one-line reason using LLM (only for top candidates to save tokens)
+        reason = ""
+        if score >= 0.25:
+            try:
+                subject_snippet = subject_chunks[0]["text"][:400] if subject_chunks else ""
+                std_snippet = std_chunks[0]["text"][:400] if std_chunks else ""
+                reason_prompt = (
+                    f"Subject document excerpt:\n{subject_snippet}\n\n"
+                    f"Standard document excerpt:\n{std_snippet}\n\n"
+                    "In one sentence (max 20 words), explain why this standard is relevant to the subject document. "
+                    "Be specific about which aspect matches. Output the sentence only."
+                )
+                reason = llm_engine.generate(
+                    [{"role": "user", "content": reason_prompt}],
+                    max_tokens=60,
+                    temperature=0.1,
+                    raw=True,
+                ).strip()
+                # Clean up any markdown or extra whitespace
+                reason = re.sub(r"^[*_`#\-]+|[*_`#\-]+$", "", reason).strip()
+            except Exception as e:
+                logger.debug("Reason generation failed for %s: %s", std_doc["doc_id"], e)
+                reason = ""
+
+        recommendations.append({
+            "doc_id": std_doc["doc_id"],
+            "filename": std_doc.get("filename", "Unknown"),
+            "category": std_doc.get("category", ""),
+            "chunks": std_doc.get("chunks", 0),
+            "score": round(score, 3),
+            "recommended": score >= 0.30,
+            "reason": reason,
+        })
+
+    # Sort by score descending
+    recommendations.sort(key=lambda x: x["score"], reverse=True)
+    logger.info(
+        "Standard recommendation for %s: %d total, %d recommended",
+        body.subject_doc_id,
+        len(recommendations),
+        sum(1 for r in recommendations if r["recommended"]),
+    )
+
+    return JSONResponse(
+        content={"recommendations": recommendations},
+        headers=_CORS_HEADERS,
     )
 
 
-# CORS headers for all compliance responses
-_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT 2: COMPLIANCE CHECK (single-pass, non-streaming, raw=True)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ERROR_FINDING = {
+    "topic": "Analysis Error",
+    "clause_id": "N/A",
+    "requirement": "Automated compliance parsing",
+    "acceptance_criterion": "Valid structured output from LLM",
+    "verdict": "Unverifiable",
+    "severity": "Major",
+    "finding": (
+        "The compliance engine could not produce a structured analysis. "
+        "This may be due to document complexity or LLM output format issues. "
+        "Please try again with a narrower check scope or fewer documents."
+    ),
+    "recommendation": "Re-run with check_scope targeting specific sections, or reduce document count.",
+    "citation": "N/A",
 }
 
 
@@ -389,362 +418,240 @@ async def compliance_check(
 ):
     """
     Run clause-by-clause compliance analysis.
-    Returns SSE stream of findings, then a .docx report download link.
+    Returns a JSON response with all findings + a .docx report download URL.
+
+    Key design decisions vs v1:
+    - raw=True on all LLM calls → clean_llm_output() never strips JSON keys
+    - Single-pass: one LLM call, no multi-batch complexity
+    - Cosine similarity to select best chunks (not just first N)
+    - 3-layer JSON parsing max
+    - Always returns — never hangs
     """
-    compliance_start = time.time()
+    start_time = time.time()
     auth_tok = ""
     if request:
         ah = request.headers.get("authorization", "")
         auth_tok = ah.replace("Bearer ", "") if ah else ""
+
     store = get_store()
 
-    # Load subject document chunks
+    # ── Load subject chunks ──
     subject_chunks = []
     for s_id in body.subject_doc_ids:
-        chunks = store.get_chunks_by_doc(s_id)
-        if chunks:
-            subject_chunks.extend(chunks)
+        subject_chunks.extend(store.get_chunks_by_doc(s_id))
 
     if not subject_chunks:
-        return JSONResponse(
+        raise HTTPException(
             status_code=404,
-            content={"detail": "Subject documents not found in knowledge base."},
+            detail="Subject documents not found in knowledge base.",
             headers=_CORS_HEADERS,
         )
 
-    # Load standard document chunks
+    # ── Load standard chunks ──
     standard_chunks = []
     for std_id in body.standard_doc_ids:
         std = store.get_chunks_by_doc(std_id)
         if not std:
-            return JSONResponse(
+            raise HTTPException(
                 status_code=404,
-                content={"detail": f"Standard document {std_id} not found."},
+                detail=f"Standard document {std_id} not found.",
                 headers=_CORS_HEADERS,
             )
         standard_chunks.extend(std)
 
     if not standard_chunks:
-        return JSONResponse(
+        raise HTTPException(
             status_code=400,
-            content={"detail": "No standard document content found."},
+            detail="No standard document content found.",
             headers=_CORS_HEADERS,
         )
 
-    subject_filenames = list(set(c["metadata"].get("filename", "Subject Document") for c in subject_chunks if "metadata" in c))
+    subject_filenames = list({
+        c["metadata"].get("filename", "Subject")
+        for c in subject_chunks if "metadata" in c
+    })
     subject_filenames_str = ", ".join(subject_filenames)
-    # Context caps for 3328-token per-request limit (llama-server has 5 parallel slots
-    # sharing 16640 total tokens = 3328 per slot).
-    # Budget: 3328 - 400 (prompt template) - 1200 (output) = ~1728 tokens for content.
-    # At ~4 chars/token: ~6900 chars total. Split: 60% subject (4000) + 40% standard (2800).
-    _MAX_SUBJECT_CHARS = 4000
-    _MAX_STANDARD_CHARS = 2800
-    _MAX_SUBJECT_CHUNKS = 10
-    _MAX_STANDARD_CHUNKS = 6
-    # Keep a FULL buffer for multi-batch mode (used below) — gives richer findings.
-    _FULL_SUBJECT_CHARS = 18000
-    _FULL_STANDARD_CHARS = 12000
-
-    subject_text = "\n\n".join(
-        f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
-        for c in subject_chunks[:_MAX_SUBJECT_CHUNKS]
-    )
-    if len(subject_text) > _MAX_SUBJECT_CHARS:
-        subject_text = subject_text[:_MAX_SUBJECT_CHARS] + "\n[Content truncated]"
-
-    # Calculate average OCR confidence
-    conf_scores = [c["metadata"].get("ocr_confidence", 1.0) for c in subject_chunks if "metadata" in c]
-    avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 1.0
-
-    # Extract key clauses from standards
-    standards_text = "\n\n".join(c["text"] for c in standard_chunks[:_MAX_STANDARD_CHUNKS])
-    if len(standards_text) > _MAX_STANDARD_CHARS:
-        standards_text = standards_text[:_MAX_STANDARD_CHARS] + "\n[Content truncated]"
-
-    # Full buffers used by multi-batch mode below for richer clause-by-clause analysis
-    subject_full = "\n\n".join(
-        f"[{c['metadata'].get('filename', 'Unknown')}]: {c['text']}"
-        for c in subject_chunks[:30]
-    )
-    if len(subject_full) > _FULL_SUBJECT_CHARS:
-        subject_full = subject_full[:_FULL_SUBJECT_CHARS]
-    standards_full = "\n\n".join(c["text"] for c in standard_chunks[:20])
-    if len(standards_full) > _FULL_STANDARD_CHARS:
-        standards_full = standards_full[:_FULL_STANDARD_CHARS]
-
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
-    # ── Compliance prompt (Gemma-safe) ──
-    # Gemma echoes the first sentence when it reads like a role/instruction header.
-    # Fix: structure the prompt as pure data with the JSON array already started
-    # at the end so Gemma's first generated token continues the array, not the prompt.
-    prompt = f"""SUBJECT DOCUMENTS ({subject_filenames_str}):
-{subject_text}
+    # ── Select best chunks using cosine similarity ──
+    # Token budget: 3328 total slot - 200 prompt template - 1200 output = 1928 input tokens
+    # At ~4 chars/token: ~7700 chars. Split 55/45 subject/standard.
+    _MAX_SUBJECT_CHARS = 2000
+    _MAX_STANDARD_CHARS = 1800
 
-STANDARDS:
-{standards_text}
-{scope_note}
+    subject_query = f"compliance requirements {body.check_scope or ''} {subject_filenames_str}"
+    try:
+        query_embedding = embedder.embed_query(subject_query)
+        subject_text = _select_best_chunks(subject_chunks, query_embedding, _MAX_SUBJECT_CHARS)
+        standard_text = _select_best_chunks(standard_chunks, query_embedding, _MAX_STANDARD_CHARS)
+    except Exception as e:
+        logger.warning("Embedding-based chunk selection failed (%s), falling back to first-N", e)
+        subject_text = "\n\n".join(
+            f"[{c['metadata'].get('filename','Unknown')}]: {c['text']}"
+            for c in subject_chunks[:8]
+        )[:_MAX_SUBJECT_CHARS]
+        standard_text = "\n\n".join(c["text"] for c in standard_chunks[:6])[:_MAX_STANDARD_CHARS]
 
-Instructions: Compare each standard clause against the subject documents.
-For each clause output one JSON object with keys: topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation.
-verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable
-severity: Critical | Major | Minor | None
-Output 5-8 findings. Return a JSON array only. No prose. No markdown.
-["""
+    # ── Build prompt ──
+    # Prompt ends with `[` so Gemma's first token continues the JSON array.
+    # This prevents echo of the instruction header.
+    prompt = (
+        f"SUBJECT DOCUMENTS ({subject_filenames_str}):\n"
+        f"{subject_text}\n\n"
+        f"STANDARDS:\n"
+        f"{standard_text}"
+        f"{scope_note}\n\n"
+        "Compare each standard clause against the subject documents.\n"
+        "For each clause output one JSON object with these exact keys:\n"
+        "  topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation\n"
+        "verdict must be one of: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable\n"
+        "severity must be one of: Critical | Major | Minor | None\n"
+        "Output 5 to 8 findings. Return a JSON array only. No prose. No markdown fences.\n"
+        "["
+    )
 
-    # ═══════════════════════════════════════════════════════════
-    # Return StreamingResponse IMMEDIATELY so CORS headers go out
-    # before RunPod proxy times out.  ALL LLM work runs inside
-    # the sync generator (Starlette runs it in a thread pool).
-    # ═══════════════════════════════════════════════════════════
+    # ── LLM call — raw=True is critical ──
+    findings_raw = "[]"
+    try:
+        findings_raw = llm_engine.generate(
+            [{"role": "user", "content": prompt}],
+            max_tokens=1200,
+            temperature=0.1,
+            raw=True,  # CRITICAL: bypass clean_llm_output() which strips JSON keys
+        )
+        logger.info("LLM compliance call completed, raw output length: %d", len(findings_raw))
+    except Exception as e:
+        logger.error("Compliance LLM call failed: %s", e)
+
+    # The prompt ends with `[` and llama-server returns the continuation,
+    # so we prepend `[` to reconstruct the full array.
+    if findings_raw and not findings_raw.strip().startswith("["):
+        findings_raw = "[" + findings_raw
+
+    # ── Parse JSON (3 layers) ──
+    findings = _parse_llm_json(findings_raw)
+
+    # ── Fallback error finding ──
+    if not findings:
+        logger.error("All JSON parse strategies failed — returning error finding")
+        findings = [_ERROR_FINDING]
+
+    # ── OCR confidence post-processing ──
+    conf_scores = [
+        c["metadata"].get("ocr_confidence", 1.0)
+        for c in subject_chunks if "metadata" in c
+    ]
+    avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 1.0
+    if avg_conf < 0.65:
+        logger.warning("Low OCR confidence: %.2f — marking findings as Unverifiable", avg_conf)
+        for f in findings:
+            if f.get("verdict") != "Missing":
+                f["verdict"] = "Unverifiable"
+                f["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + f.get("finding", "")
+
+    # ── Compute summary statistics ──
+    compliant = sum(1 for f in findings if f.get("verdict") == "Compliant")
+    non_compliant = sum(1 for f in findings if f.get("verdict") == "Non-Compliant")
+    partial = sum(1 for f in findings if f.get("verdict") == "Partial")
+    missing = sum(1 for f in findings if f.get("verdict") == "Missing")
+    contradiction = sum(1 for f in findings if f.get("verdict") == "Contradiction")
+    unverifiable = sum(1 for f in findings if f.get("verdict") == "Unverifiable")
+
+    total_evaluable = len(findings) - unverifiable
+    compliance_score = round((compliant / total_evaluable * 100) if total_evaluable > 0 else 0.0, 1)
+
+    critical_issues = sum(
+        1 for f in findings
+        if f.get("severity") == "Critical" and f.get("verdict") != "Compliant"
+    )
+
+    if critical_issues > 0 or compliance_score < 70:
+        recommendation = "REJECT"
+    elif non_compliant > 0 or missing > 0 or partial > 0:
+        recommendation = "APPROVE WITH CONDITIONS (REVISE)"
+    else:
+        recommendation = "APPROVE"
+
+    # ── Build DOCX report ──
     job_id = str(uuid.uuid4())
-    check_scope = body.check_scope
-
-    def event_stream():
-        # ── Multi-batch compliance ──
-        findings = []
-        try:
-            SL = len(standards_full)
-            std_slices = [
-                standards_full[: SL // 3],
-                standards_full[SL // 3 : 2 * SL // 3],
-                standards_full[2 * SL // 3 :],
-            ] if SL > 500 else [standards_full]
-
-            SubL = len(subject_full)
-            if SubL > 500 and len(std_slices) >= 3:
-                sub_slices = [
-                    subject_full[: SubL // 3][:3500],
-                    subject_full[SubL // 3 : 2 * SubL // 3][:3500],
-                    subject_full[2 * SubL // 3 :][:3500],
-                ]
-            else:
-                sub_slices = [subject_full[:3500]] * len(std_slices)
-
-            for batch_idx, (std_slice, sub_slice) in enumerate(zip(std_slices, sub_slices)):
-                yield f"data: {json.dumps({'status': 'progress', 'message': f'Analyzing batch {batch_idx + 1} of {len(std_slices)}...'})}\n\n"
-                batch_findings = _run_compliance_batch(
-                    sub_slice, std_slice[:2500], subject_filenames_str, scope_note, 1200,
-                )
-                if batch_findings:
-                    findings.extend(batch_findings)
-
-            # De-duplicate by clause_id (case-insensitive)
-            seen_clauses = set()
-            deduped = []
-            for f in findings:
-                cid = (f.get("clause_id", "") or "").strip().lower()
-                if cid and cid in seen_clauses:
-                    continue
-                if cid:
-                    seen_clauses.add(cid)
-                deduped.append(f)
-            findings = deduped
-            logger.info("Compliance multi-batch produced %d unique findings across %d batches",
-                        len(findings), len(std_slices))
-        except Exception as e:
-            logger.warning("Compliance multi-batch failed (%s) — falling back to single-pass", e)
-            findings = []
-
-        # ── Single-pass fallback ──
-        if not findings:
-            yield f"data: {json.dumps({'status': 'progress', 'message': 'Running single-pass analysis...'})}\n\n"
-            try:
-                findings_raw = llm_engine.generate(
-                    [{"role": "user", "content": prompt}],
-                    max_tokens=1200, temperature=0.1,
-                )
-            except Exception as e:
-                logger.error("Compliance LLM call failed: %s", e)
-                findings_raw = "[]"
-
-            stripped = _strip_echo_for_json(findings_raw)
-            try:
-                cleaned = _clean_json(stripped)
-                # Sanitize content inside strings (escape newlines, etc.) then remove control chars
-                cleaned = _sanitize_json_content(cleaned)
-                sanitized = _sanitize_json_string(cleaned)
-                findings = json.loads(sanitized)
-                if not isinstance(findings, list):
-                    raise ValueError("Expected a JSON array of findings")
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning("Primary JSON parse failed: %s — attempting LLM repair", e)
-                findings = _repair_json_with_llm(findings_raw)
-
-        if not findings:
-            # Last resort: try regex extraction from the raw LLM output
-            try:
-                regex_findings = _extract_json_objects_regex(findings_raw)
-                if regex_findings:
-                    logger.info("Regex extraction recovered %d findings from single-pass", len(regex_findings))
-                    findings = regex_findings
-            except Exception as e:
-                logger.debug("Regex extraction also failed: %s", e)
-
-        if not findings:
-            logger.error("All JSON recovery strategies failed.")
-            findings = [{
-                "topic": "Analysis Error",
-                "clause_id": "N/A",
-                "requirement": "Automated compliance parsing",
-                "acceptance_criterion": "Valid JSON output",
-                "verdict": "Unverifiable",
-                "severity": "Major",
-                "finding": "The compliance engine could not produce a structured analysis. This may be due to document complexity or context size. Please try with a narrower scope or fewer documents.",
-                "recommendation": "Re-run with check_scope targeting specific sections, or reduce document count.",
-                "citation": "N/A",
-            }]
-
-        # ── Second pass: Missing Requirements ──
-        try:
-            covered_clauses = [f.get("clause_id", "") for f in findings]
-            covered_str = "\n".join(f"- {c}" for c in covered_clauses if c)
-            _standards_short = standards_text[:1500] if len(standards_text) > 1500 else standards_text
-            missing_prompt = f"""STANDARD (excerpt):
-{_standards_short}
-
-Already checked clauses:
-{covered_str}
-
-List any CRITICAL requirements in the STANDARD completely MISSING from the subject documents.
-Output JSON array only. Each item: {{topic, clause_id, requirement, acceptance_criterion, verdict: "Missing", severity: "Major", finding, recommendation, citation: "N/A"}}
-If none missing, return [].
-["""
-            missing_raw = llm_engine.generate(
-                [{"role": "user", "content": missing_prompt}],
-                max_tokens=600, temperature=0.0,
-            )
-            _ms = _strip_echo_for_json(missing_raw)
-            cleaned = _clean_json(_ms)
-            # Sanitize content inside strings (escape newlines, etc.) then remove control chars
-            cleaned = _sanitize_json_content(cleaned)
-            cleaned = _sanitize_json_string(cleaned)
-            start = cleaned.find("[")
-            end = cleaned.rfind("]") + 1
-            if start != -1 and end > start:
-                missing_findings = json.loads(cleaned[start:end])
-                if isinstance(missing_findings, list):
-                    findings.extend(missing_findings)
-        except Exception as e:
-            logger.warning("Second pass (Missing Requirements) failed: %s", e)
-
-        # Post-process for low OCR confidence
-        if avg_conf < 0.65:
-            logger.warning(f"Low OCR confidence detected: {avg_conf:.2f}")
-            for finding in findings:
-                if finding.get("verdict") != "Missing":
-                    finding["verdict"] = "Unverifiable"
-                    finding["finding"] = f"[LOW OCR CONFIDENCE: {avg_conf:.2f}] " + finding.get("finding", "")
-
-        # ── Third pass: Historical Feedback ──
-        history_findings = []
-        try:
-            history_query = f"historical non-compliance defect lessons learned failure {check_scope or ''}"
-            history_emb = embedder.embed_query(history_query)
-            historical_chunks = store.hybrid_search(history_query, history_emb, top_k=5)
-            if historical_chunks:
-                hist_text = "\n\n".join(c["text"] for c in historical_chunks)
-                hist_prompt = f"""You are a compliance analyst.
-Review these past historical records and lessons learned:
-{hist_text[:2000]}
-
-Based on the above, are there any common historical defects or past non-compliances that the auditor should specifically double-check in the current subject document?
-Summarize the top 2-3 historical warnings. Return a simple string paragraph. If nothing is relevant, return 'None'."""
-                hist_res = llm_engine.generate([{"role": "user", "content": hist_prompt}], max_tokens=500)
-                if hist_res.strip() and hist_res.strip().lower() != 'none':
-                    history_findings.append(hist_res.strip())
-        except Exception as e:
-            logger.warning("Historical feedback pass failed: %s", e)
-
-        # ── Yield findings as SSE events ──
-        for i, finding in enumerate(findings):
-            yield f"data: {json.dumps({'finding': finding, 'index': i + 1, 'total': len(findings)})}\n\n"
-
-        # ── Build DOCX report ──
-        docx_path = _OUTPUTS_DIR / f"{job_id}_compliance.docx"
+    docx_path = _OUTPUTS_DIR / f"{job_id}_compliance.docx"
+    try:
         doc = DocxDocument()
         doc.add_heading("Compliance Analysis Report", level=1)
         doc.add_heading(f"Subjects: {subject_filenames_str}", level=2)
-        doc.add_paragraph(f"Scope: {check_scope or 'Full Document'}")
+        doc.add_paragraph(f"Scope: {body.check_scope or 'Full Document'}")
         doc.add_paragraph("")
-
-        compliant = sum(1 for f in findings if f.get("verdict") == "Compliant")
-        non_compliant = sum(1 for f in findings if f.get("verdict") == "Non-Compliant")
-        partial = sum(1 for f in findings if f.get("verdict") == "Partial")
-        missing = sum(1 for f in findings if f.get("verdict") == "Missing")
-        contradiction = sum(1 for f in findings if f.get("verdict") == "Contradiction")
-        unverifiable = sum(1 for f in findings if f.get("verdict") == "Unverifiable")
-
-        critical_issues = sum(1 for f in findings if f.get("severity") == "Critical" and f.get("verdict") != "Compliant")
-
-        total_evaluable = len(findings) - unverifiable
-        compliance_score = (compliant / total_evaluable * 100) if total_evaluable > 0 else 0
-
-        overall_rec = "APPROVE"
-        if critical_issues > 0 or compliance_score < 70:
-            overall_rec = "REJECT"
-        elif non_compliant > 0 or missing > 0 or partial > 0:
-            overall_rec = "APPROVE WITH CONDITIONS (REVISE)"
-
         doc.add_heading("Executive Summary", level=2)
-        doc.add_paragraph(f"Overall Compliance Score: {compliance_score:.1f}%")
-        doc.add_paragraph(f"Final Recommendation: {overall_rec}").bold = True
+        doc.add_paragraph(f"Overall Compliance Score: {compliance_score}%")
+        rec_para = doc.add_paragraph(f"Final Recommendation: {recommendation}")
+        rec_para.runs[0].bold = True
         doc.add_paragraph(f"Critical Deficiencies Found: {critical_issues}")
         doc.add_paragraph("")
-
-        if history_findings:
-            doc.add_heading("Historical Feedback & Lessons Learned", level=2)
-            doc.add_paragraph(history_findings[0])
-            doc.add_paragraph("")
-
         doc.add_heading("Summary Statistics", level=2)
-        summary_table = doc.add_table(rows=7, cols=2)
-        summary_table.style = "Table Grid"
-        cells = summary_table.rows[0].cells
-        cells[0].text = "Total Clauses Checked"
-        cells[1].text = str(len(findings))
-        cells = summary_table.rows[1].cells
-        cells[0].text = "Compliant"
-        cells[1].text = str(compliant)
-        cells = summary_table.rows[2].cells
-        cells[0].text = "Non-Compliant"
-        cells[1].text = str(non_compliant)
-        cells = summary_table.rows[3].cells
-        cells[0].text = "Partial"
-        cells[1].text = str(partial)
-        cells = summary_table.rows[4].cells
-        cells[0].text = "Missing"
-        cells[1].text = str(missing)
-        cells = summary_table.rows[5].cells
-        cells[0].text = "Contradiction"
-        cells[1].text = str(contradiction)
-        cells = summary_table.rows[6].cells
-        cells[0].text = "Unverifiable"
-        cells[1].text = str(unverifiable)
-
+        tbl = doc.add_table(rows=7, cols=2)
+        tbl.style = "Table Grid"
+        rows_data = [
+            ("Total Clauses Checked", str(len(findings))),
+            ("Compliant", str(compliant)),
+            ("Non-Compliant", str(non_compliant)),
+            ("Partial", str(partial)),
+            ("Missing", str(missing)),
+            ("Contradiction", str(contradiction)),
+            ("Unverifiable", str(unverifiable)),
+        ]
+        for i, (label, val) in enumerate(rows_data):
+            tbl.rows[i].cells[0].text = label
+            tbl.rows[i].cells[1].text = val
         doc.add_paragraph("")
         doc.add_heading("Detailed Findings Register", level=2)
-
         for i, f in enumerate(findings, 1):
             doc.add_heading(f"Finding {i}: {f.get('clause_id', 'N/A')}", level=3)
             doc.add_paragraph(f"Verdict: {f.get('verdict', 'N/A')} | Severity: {f.get('severity', 'None')}")
+            doc.add_paragraph(f"Topic: {f.get('topic', 'N/A')}")
             doc.add_paragraph(f"Requirement: {f.get('requirement', 'N/A')}")
             doc.add_paragraph(f"Acceptance Criterion: {f.get('acceptance_criterion', 'N/A')}")
             doc.add_paragraph(f"Finding: {f.get('finding', 'N/A')}")
             doc.add_paragraph(f"Recommendation: {f.get('recommendation', 'N/A')}")
             doc.add_paragraph(f"Citation: {f.get('citation', 'N/A')}")
             doc.add_paragraph("")
-
         doc.save(str(docx_path))
+        download_url = f"/api/agent/download/{job_id}_compliance.docx"
+        logger.info("DOCX report saved: %s", docx_path)
+    except Exception as e:
+        logger.error("DOCX generation failed: %s", e)
+        download_url = None
 
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_compliance.docx', 'summary': {'total': len(findings), 'compliant': compliant, 'non_compliant': non_compliant, 'partial': partial, 'missing': missing, 'contradiction': contradiction, 'unverifiable': unverifiable, 'score': round(compliance_score, 1), 'recommendation': overall_rec}})}\n\n"
+    # ── Log usage ──
+    elapsed_ms = (time.time() - start_time) * 1000
+    log_usage(
+        action_type="compliance",
+        module="compliance",
+        token=auth_tok,
+        response_time_ms=elapsed_ms,
+    )
 
-        # Log usage
-        elapsed_ms = (time.time() - compliance_start) * 1000
-        log_usage(action_type="compliance", module="compliance", token=auth_tok, response_time_ms=elapsed_ms)
+    logger.info(
+        "Compliance check done: %d findings, score=%.1f%%, rec=%s, elapsed=%.0fms",
+        len(findings), compliance_score, recommendation, elapsed_ms,
+    )
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
+    return JSONResponse(
+        content={
+            "findings": findings,
+            "summary": {
+                "total": len(findings),
+                "compliant": compliant,
+                "non_compliant": non_compliant,
+                "partial": partial,
+                "missing": missing,
+                "contradiction": contradiction,
+                "unverifiable": unverifiable,
+                "score": compliance_score,
+                "recommendation": recommendation,
+            },
+            "download_url": download_url,
+        },
         headers=_CORS_HEADERS,
     )
+
+
