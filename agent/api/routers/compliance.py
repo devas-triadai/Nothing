@@ -519,7 +519,7 @@ async def compliance_check(
                 {"role": "system", "content": system_msg},
                 {"role": "user",   "content": user_msg},
             ],
-            max_tokens=1400,
+            max_tokens=2400,
             temperature=0.1,
             raw=True,  # CRITICAL: bypass clean_llm_output() which strips JSON keys
         )
@@ -528,31 +528,30 @@ async def compliance_check(
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
 
-    # ── Pre-parse: extract JSON from raw output ──
-    # Gemma 4 may leak reasoning prose before the JSON. Strip everything before
-    # the first `[` or `{` so the parser only sees JSON content.
+    # ── Pre-parse: extract JSON array from raw output ──
+    # Strategy: find the first `[` that is followed (possibly with whitespace) by `{`
+    # This avoids false matches on [filename] inline references in document text.
     raw_stripped = (findings_raw or "").strip()
 
-    # Find the earliest JSON structure start
-    first_bracket = raw_stripped.find("[")
-    first_brace = raw_stripped.find("{")
-    if first_bracket == -1 and first_brace == -1:
-        # No JSON structure found at all — log and let fallback handle
-        logger.warning("No JSON structure ([/{) found in LLM output: %s", raw_stripped[:200])
-    elif first_bracket != -1 and (first_brace == -1 or first_bracket <= first_brace):
-        # Array comes first (or only array) — extract from first [ to last ]
+    # Look for `[` that starts a JSON array of objects: `[\s*{`
+    _arr_match = re.search(r'\[\s*\{', raw_stripped)
+    _obj_match = re.search(r'\{', raw_stripped)
+
+    if _arr_match:
+        # Found a real JSON array start — extract from there to last ]
+        arr_start = _arr_match.start()
         last_bracket = raw_stripped.rfind("]")
-        if last_bracket > first_bracket:
-            raw_stripped = raw_stripped[first_bracket:last_bracket + 1]
+        if last_bracket > arr_start:
+            raw_stripped = raw_stripped[arr_start:last_bracket + 1]
         else:
-            raw_stripped = raw_stripped[first_bracket:]
-    else:
-        # Object comes first — try to unwrap {"findings":[...]} etc.
+            # Truncated array (no closing ]) — pass as-is to repair layer
+            raw_stripped = raw_stripped[arr_start:]
+        logger.debug("Extracted JSON array candidate starting at pos %d", arr_start)
+    elif _obj_match:
+        # No array but found an object — try to unwrap {"findings":[...]} etc.
+        obj_start = _obj_match.start()
         last_brace = raw_stripped.rfind("}")
-        if last_brace > first_brace:
-            obj_str = raw_stripped[first_brace:last_brace + 1]
-        else:
-            obj_str = raw_stripped[first_brace:]
+        obj_str = raw_stripped[obj_start:last_brace + 1] if last_brace > obj_start else raw_stripped[obj_start:]
         try:
             _tmp = json.loads(obj_str)
             for _v in _tmp.values():
@@ -563,6 +562,8 @@ async def compliance_check(
                 raw_stripped = obj_str
         except (json.JSONDecodeError, AttributeError):
             raw_stripped = obj_str
+    else:
+        logger.warning("No JSON structure found in LLM output (first 200): %s", raw_stripped[:200])
 
     findings_raw = raw_stripped
 
