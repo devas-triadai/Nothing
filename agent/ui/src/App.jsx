@@ -3,7 +3,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { getToken, setToken, getDashboardUrl } from './utils/auth';
 import Chat from './pages/Chat';
 import Generate from './pages/Generate';
-import Compare from './pages/Compare';
 import Drawing from './pages/Drawing';
 
 function ProtectedRoute({ children }) {
@@ -62,14 +61,6 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Generate />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/compare"
-        element={
-          <ProtectedRoute>
-            <Compare />
           </ProtectedRoute>
         }
       />

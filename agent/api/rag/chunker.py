@@ -149,8 +149,6 @@ def chunk_text(
     description: Optional[str] = None,
     source: Optional[str] = None,
     document_type: Optional[str] = None,
-    bidder_key: Optional[str] = None,
-    problem_statement: Optional[str] = None,
     content_hash: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -161,9 +159,7 @@ def chunk_text(
         doc_id:            Unique document identifier.
         filename:          Original filename.
         page_number:       Source page number (1-based).
-        document_type:     'subject' | 'standard' | 'bid' (for hierarchical RAG).
-        bidder_key:        Bidder identifier (only meaningful for 'bid' docs).
-        problem_statement: Tender/problem reference shared across competing bids.
+        document_type:     'subject' | 'standard' (for hierarchical RAG).
 
     Returns:
         List of chunk dicts:
@@ -220,13 +216,8 @@ def chunk_text(
                 "description": description,
                 "source": source or "admin_upload",
             }
-            # Hierarchical metadata (Phase C/D) — only set when explicit
             if document_type:
                 metadata["document_type"] = document_type
-            if bidder_key:
-                metadata["bidder_key"] = bidder_key
-            if problem_statement:
-                metadata["problem_statement"] = problem_statement
             if content_hash:
                 metadata["content_hash"] = content_hash
             chunks.append({
@@ -282,8 +273,6 @@ def chunk_pages(
     description: Optional[str] = None,
     source: Optional[str] = None,
     document_type: Optional[str] = None,
-    bidder_key: Optional[str] = None,
-    problem_statement: Optional[str] = None,
     content_hash: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -326,8 +315,6 @@ def chunk_pages(
             description=description,
             source=source,
             document_type=document_type,
-            bidder_key=bidder_key,
-            problem_statement=problem_statement,
             content_hash=content_hash,
         )
 

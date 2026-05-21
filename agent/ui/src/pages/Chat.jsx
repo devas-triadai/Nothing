@@ -18,7 +18,6 @@ import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
-import ComparisonCard from '../components/ComparisonCard';
 
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
@@ -805,147 +804,6 @@ export default function Chat() {
     return abort;
   };
 
-  // ── Branch-isolated bid comparison via SSE ──
-  const runBranchComparison = async (intentParams, question, sessId) => {
-    const { comparable_tenders, problem_statement: validatedPs, available } = intentParams;
-
-    if (!available || !comparable_tenders?.length) {
-      setMessages(prev => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          ...copy[copy.length - 1],
-          content: 'I could not find at least two bid documents sharing the same tender. Please upload bids with matching **problem_statement** metadata.',
-          streaming: false,
-        };
-        persistMessages(copy, sessId);
-        return copy;
-      });
-      return;
-    }
-
-    const tender = validatedPs
-      ? comparable_tenders.find(t => t.problem_statement === validatedPs)
-      : comparable_tenders[0];
-
-    if (!tender) {
-      setMessages(prev => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          ...copy[copy.length - 1],
-          content: 'Could not locate a comparable tender to evaluate.',
-          streaming: false,
-        };
-        persistMessages(copy, sessId);
-        return copy;
-      });
-      return;
-    }
-
-    const bidder_keys = tender.bidder_keys;
-    const problem_statement = tender.problem_statement;
-
-    setMessages(prev => {
-      const copy = [...prev];
-      copy[copy.length - 1] = {
-        ...copy[copy.length - 1],
-        content: `Starting branch-isolated comparison for **${problem_statement}**…\n\nBidders: ${bidder_keys.join(', ')}`,
-        streaming: true,
-      };
-      return copy;
-    });
-
-    try {
-      const resp = await fetch(getApiUrl('/api/agent/compare/bids/branch'), {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          bidder_keys,
-          problem_statement,
-          standards: ['ICG_TECH_SOTR', 'GENERIC_REQS', 'ISO_9001'],
-          focus: question,
-        }),
-      });
-      if (!resp.ok) throw new Error(`Branch comparison failed: ${resp.status}`);
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalData = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6).trim();
-            if (!dataStr) continue;
-            try {
-              const evt = JSON.parse(dataStr);
-              if (evt.stage === 'evaluating') {
-                setMessages(prev => {
-                  const copy = [...prev];
-                  copy[copy.length - 1] = {
-                    ...copy[copy.length - 1],
-                    content: `**Branch Comparison in progress…**\n\nEvaluating ${evt.bidder_key} against ${evt.standard_id} (${evt.progress}%)`,
-                    streaming: true,
-                  };
-                  return copy;
-                });
-              }
-              if (evt.stage === 'done') {
-                finalData = evt;
-              }
-            } catch (e) {
-              console.error('Branch SSE parse error', e, dataStr);
-            }
-          }
-        }
-      }
-
-      if (finalData) {
-        setMessages(prev => {
-          const copy = [...prev];
-          copy[copy.length - 1] = {
-            ...copy[copy.length - 1],
-            content: '',
-            streaming: false,
-            comparison: finalData,
-          };
-          persistMessages(copy, sessId);
-          return copy;
-        });
-      } else {
-        setMessages(prev => {
-          const copy = [...prev];
-          copy[copy.length - 1] = {
-            ...copy[copy.length - 1],
-            content: 'Comparison completed but no structured data was returned.',
-            streaming: false,
-          };
-          persistMessages(copy, sessId);
-          return copy;
-        });
-      }
-    } catch (err) {
-      setMessages(prev => {
-        const copy = [...prev];
-        copy[copy.length - 1] = {
-          ...copy[copy.length - 1],
-          content: `Branch comparison error: ${err.message}`,
-          streaming: false,
-          isError: true,
-        };
-        persistMessages(copy, sessId);
-        return copy;
-      });
-    }
-  };
 
   // Derive streaming state from current session's last message to allow multi-tasking
   const isSessionStreaming = messages.length > 0 && messages[messages.length - 1].streaming === true;
@@ -1297,12 +1155,6 @@ export default function Chat() {
             return;
           }
 
-          if (intentType === 'bid_compare') {
-            setIsStreaming(false);
-            await runBranchComparison(intentParams, question, sessId);
-            return;
-          }
-
           // Workstream K/M: Drawing analysis intent — auto-trigger VLM extraction from chat
           if (intentType === 'drawing_extract') {
             setIsStreaming(false);
@@ -1528,7 +1380,7 @@ export default function Chat() {
         filename: item.file.name,
         stage: 'uploading',
         progress: 0,
-        metadata: { document_type: item.document_type, bidder_key: item.bidder_key, problem_statement: item.problem_statement },
+        metadata: { document_type: item.document_type },
         error: null,
         doc_id: null,
       };
@@ -1537,8 +1389,6 @@ export default function Chat() {
       const formData = new FormData();
       formData.append('file', item.file);
       formData.append('document_type', item.document_type || '');
-      formData.append('bidder_key', item.bidder_key || '');
-      formData.append('problem_statement', item.problem_statement || '');
       formData.append('auto_extract', 'true');
 
       try {
@@ -1592,107 +1442,6 @@ export default function Chat() {
     setUploadQueue([]);
   };
 
-  const handleCompare = async () => {
-    if (selectedDocIds.length < 2) return;
-    setIsProcessingBg(true);
-    
-    const sessId = activeSessionIdRef.current || newSessionId();
-    if (!activeSessionId) {
-      switchSession(sessId);
-      setSessions(prev => [{ id: sessId, title: "Bid Comparison" }, ...prev]);
-    }
-
-    setMessages(prev => [...prev, {
-      role: 'user',
-      content: 'Please compare the selected bid documents. ' + input,
-      timestamp: new Date().toISOString()
-    }, {
-      role: 'assistant',
-      content: 'Starting comparative analysis...',
-      streaming: true,
-      timestamp: new Date().toISOString()
-    }]);
-
-    try {
-      const resp = await fetch(getApiUrl('/api/agent/compare/bids'), {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({
-          bid_doc_ids: selectedDocIds,
-          standard_doc_id: null,
-          check_scope: input
-        })
-      });
-
-      if (!resp.ok) throw new Error("Failed to start comparison");
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedContent = '### Cross-Document Comparative Analysis\n\n';
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.replace('data: ', '').trim();
-            if (!dataStr) continue;
-            try {
-              const data = JSON.parse(dataStr);
-              if (data.comparison) {
-                const comp = data.comparison;
-                accumulatedContent += `#### ${comp.parameter}\n`;
-                accumulatedContent += `- **Standard**: ${comp.standard_requirement}\n`;
-                for (const bid of comp.bids || []) {
-                  accumulatedContent += `- **${bid.bidder}**: ${bid.value} *(Compliant: ${bid.compliant})*\n`;
-                }
-                accumulatedContent += `\n**Analysis**: ${comp.analysis}\n`;
-                accumulatedContent += `**Winner**: ${comp.winner}\n\n`;
-                
-                setMessages(prev => {
-                  const copy = [...prev];
-                  copy[copy.length - 1] = { ...copy[copy.length - 1], content: accumulatedContent };
-                  return copy;
-                });
-              }
-              if (data.done) {
-                setMessages(prev => {
-                  const copy = [...prev];
-                  copy[copy.length - 1] = { 
-                    ...copy[copy.length - 1], 
-                    streaming: false,
-                    summary: data.download_url ? { downloadUrl: data.download_url } : null
-                  };
-                  return copy;
-                });
-                break;
-              }
-            } catch (e) {
-              console.error("Parse error", e);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      setMessages(prev => {
-        const copy = [...prev];
-        copy[copy.length - 1] = { ...copy[copy.length - 1], content: 'Error: ' + err.message, streaming: false, isError: true };
-        return copy;
-      });
-    } finally {
-      setIsProcessingBg(false);
-      setInput('');
-    }
-  };
 
   const handleDrawingExtract = async () => {
     if (selectedFiles.length === 0) return;
@@ -1981,11 +1730,6 @@ export default function Chat() {
                         />
                       )}
 
-                      {/* Branch-isolated Comparison Card */}
-                      {msg.comparison && !msg.streaming && (
-                        <ComparisonCard data={msg.comparison} />
-                      )}
-
                       {/* Workstream F: Inline Drawing Extraction Results */}
                       {msg.drawingResult && !msg.streaming && (
                         <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden' }}>
@@ -2122,32 +1866,6 @@ export default function Chat() {
                     <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</span>
                     <button onClick={() => removeFromQueue(idx)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <select
-                      value={item.document_type}
-                      onChange={e => updateUploadField(idx, 'document_type', e.target.value)}
-                      style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
-                    >
-                      <option value="">Auto-detect type</option>
-                      <option value="bid">Bid / Proposal</option>
-                      <option value="standard">Standard / SOTR</option>
-                      <option value="subject">Subject Document</option>
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="Bidder / Company"
-                      value={item.bidder_key}
-                      onChange={e => updateUploadField(idx, 'bidder_key', e.target.value)}
-                      style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Tender / Problem reference"
-                    value={item.problem_statement}
-                    onChange={e => updateUploadField(idx, 'problem_statement', e.target.value)}
-                    style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-page)', color: 'var(--text-secondary)', fontSize: '12px' }}
-                  />
                 </div>
               ))}
               <button

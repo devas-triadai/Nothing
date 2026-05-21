@@ -186,14 +186,13 @@ async def cors_middleware(request: Request, call_next):
 
 
 # ── Register Routers ──
-from api.routers import upload, chat, generate, vlm, drawing, compare, sessions
+from api.routers import upload, chat, generate, vlm, drawing, sessions
 
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
 app.include_router(generate.router,   prefix="/api/agent", tags=["Generation"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
 app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
-app.include_router(compare.router,    prefix="/api/agent", tags=["Compare"])
 app.include_router(sessions.router,   prefix="/api/agent", tags=["Sessions"])
 
 

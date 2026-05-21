@@ -1,8 +1,8 @@
 """
 AGRA Session Manager
 ─────────────────────
-Tracks long-running background jobs (PPT generation, compliance check,
-bid comparison, ingestion) per chat session so the UI can poll status,
+Tracks long-running background jobs (PPT generation, quiz, summary,
+ingestion) per chat session so the UI can poll status,
 switch tabs without aborting work, and reconnect if the SSE stream
 drops.
 
@@ -44,8 +44,6 @@ _TTL_SECONDS = 30 * 60  # purge terminal jobs after 30 min
 KIND_PPT = "ppt"
 KIND_QUIZ = "quiz"
 KIND_SUMMARY = "summary"
-KIND_COMPLIANCE = "compliance"
-KIND_BID_COMPARE = "bid_compare"
 KIND_INGEST = "ingest"
 
 
