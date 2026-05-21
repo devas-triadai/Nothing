@@ -227,6 +227,7 @@ def generate(
     stop: Optional[List[str]] = None,
     response_format: Optional[Dict[str, str]] = None,
     raw: bool = False,
+    budget_tokens: Optional[int] = None,
     **kwargs,
 ) -> str:
     """
@@ -251,6 +252,8 @@ def generate(
         payload["stop"] = stop
     if response_format:
         payload["response_format"] = response_format
+    if budget_tokens is not None:
+        payload["budget_tokens"] = budget_tokens
 
     logger.debug("generate() → POST %s (max_tokens=%d raw=%s)", _CHAT_ENDPOINT, max_tokens, raw)
     resp = requests.post(_CHAT_ENDPOINT, json=payload, timeout=300)

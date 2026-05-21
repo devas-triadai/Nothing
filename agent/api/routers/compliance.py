@@ -245,9 +245,8 @@ def _select_best_chunks(chunks: list, query_embedding: list, max_chars: int) -> 
     result_parts = []
     total = 0
     for _, c in scored:
-        fname = c.get("metadata", {}).get("filename", "")
         text = c.get("text", "")
-        part = f"[{fname}]: {text}" if fname else text
+        part = text
         if total + len(part) > max_chars:
             remaining = max_chars - total
             if remaining > 100:
@@ -474,10 +473,12 @@ async def compliance_check(
     scope_note = f"\nFocus specifically on: {body.check_scope}" if body.check_scope else ""
 
     # ── Select best chunks using cosine similarity ──
-    # Token budget: 3328 total slot - 200 prompt template - 1200 output = 1928 input tokens
-    # At ~4 chars/token: ~7700 chars. Split 55/45 subject/standard.
-    _MAX_SUBJECT_CHARS = 2000
-    _MAX_STANDARD_CHARS = 1800
+    # Token budget: context=16640, SWA=1024, thinking suppressed via budget_tokens=0
+    # Safe prompt budget: ~1000 tokens = ~4000 chars. Split 55/45.
+    # Keeping prompt small is critical — Gemma 4 thinking=1 server wastes tokens
+    # on reasoning even with /no_think unless budget_tokens=0 is sent.
+    _MAX_SUBJECT_CHARS = 1800
+    _MAX_STANDARD_CHARS = 1600
 
     subject_query = f"compliance requirements {body.check_scope or ''} {subject_filenames_str}"
     try:
@@ -487,9 +488,9 @@ async def compliance_check(
     except Exception as e:
         logger.warning("Embedding-based chunk selection failed (%s), falling back to first-N", e)
         subject_text = "\n\n".join(
-            c["text"] for c in subject_chunks[:8]
+            c["text"] for c in subject_chunks[:5]
         )[:_MAX_SUBJECT_CHARS]
-        standard_text = "\n\n".join(c["text"] for c in standard_chunks[:6])[:_MAX_STANDARD_CHARS]
+        standard_text = "\n\n".join(c["text"] for c in standard_chunks[:4])[:_MAX_STANDARD_CHARS]
 
     # ── Build prompt ──
     # ANTI-ECHO FIX: use system+user split (same pattern as upload.py / compare.py
@@ -519,9 +520,10 @@ async def compliance_check(
                 {"role": "system", "content": system_msg},
                 {"role": "user",   "content": user_msg},
             ],
-            max_tokens=2400,
+            max_tokens=1800,
             temperature=0.1,
-            raw=True,  # CRITICAL: bypass clean_llm_output() which strips JSON keys
+            raw=True,          # bypass clean_llm_output() which strips JSON keys
+            budget_tokens=0,   # suppress Gemma 4 thinking entirely at API level
         )
         logger.info("LLM compliance call completed, raw output length: %d", len(findings_raw))
         logger.debug("LLM raw output (first 300): %s", findings_raw[:300])
