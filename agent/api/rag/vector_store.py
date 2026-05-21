@@ -228,7 +228,7 @@ class VectorStore:
             must_conditions.append(FieldCondition(key="metadata.doc_id", match=MatchAny(any=doc_ids_filter)))
         if doc_type:
             from qdrant_client.models import MatchValue
-            must_conditions.append(FieldCondition(key="metadata.file_type", match=MatchValue(value=doc_type)))
+            must_conditions.append(FieldCondition(key="metadata.document_type", match=MatchValue(value=doc_type)))
         if version is not None:
             from qdrant_client.models import MatchValue
             must_conditions.append(FieldCondition(key="metadata.version", match=MatchValue(value=version)))
@@ -277,7 +277,7 @@ class VectorStore:
                 
                 # Apply rich metadata filters to BM25 results as well
                 if doc_ids_filter and meta.get("doc_id") not in doc_ids_filter: continue
-                if doc_type and meta.get("file_type") != doc_type: continue
+                if doc_type and meta.get("document_type") != doc_type: continue
                 if version is not None and meta.get("version") != version: continue
                 if category and meta.get("category") != category: continue
                 
