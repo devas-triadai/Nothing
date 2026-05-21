@@ -492,60 +492,64 @@ async def compliance_check(
         standard_text = "\n\n".join(c["text"] for c in standard_chunks[:6])[:_MAX_STANDARD_CHARS]
 
     # ── Build prompt ──
-    # ANTI-ECHO DESIGN:
-    # - Document content is wrapped in <subject> / <standards> XML tags so
-    #   Gemma sees it as data, not instructions to re-echo.
-    # - The word "Input:" / "Task:" never appears in the user turn.
-    # - response_format=json_object forces grammar-constrained JSON output.
-    # - We do NOT end the user message with `[` (that triggers markdown-list echo).
+    # ANTI-ECHO FIX: use system+user split (same pattern as upload.py / compare.py
+    # which work correctly on this llama-server build).
+    # - system: sets strict JSON-only persona — Gemma never echoes system content
+    # - user: contains ONLY the data and the specific task
+    # - NO trailing `[` in user message (triggers markdown-list echo)
+    # - response_format omitted (silently ignored by this llama-server build)
+    system_msg = (
+        "You are a strict maritime compliance checker. "
+        "Output ONLY a valid JSON array of finding objects. "
+        "No prose, no explanation, no markdown, no code fences. "
+        "Every response must start with [ and end with ]."
+    )
     user_msg = (
-        "You are a maritime compliance analyst. "
-        "Compare the subject document against the provided standards clause by clause.\n\n"
-        f"<subject name=\"{subject_filenames_str}\">\n{subject_text}\n</subject>\n\n"
-        f"<standards>\n{standard_text}\n</standards>"
+        f"SUBJECT DOCUMENT ({subject_filenames_str}):\n{subject_text}\n\n"
+        f"STANDARDS:\n{standard_text}"
         f"{scope_note}\n\n"
-        "Return a JSON object with a single key \"findings\" whose value is an array of 5-8 objects.\n"
-        "Each object must have exactly these keys: "
-        "topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation.\n"
-        "verdict values: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable\n"
-        "severity values: Critical | Major | Minor | None\n"
-        "No prose. No markdown. Output valid JSON only."
+        "Produce 5 to 8 compliance findings as a JSON array. "
+        "Each element must have these keys: "
+        "topic, clause_id, requirement, acceptance_criterion, verdict, severity, finding, recommendation, citation. "
+        "verdict: Compliant | Non-Compliant | Partial | Missing | Contradiction | Unverifiable. "
+        "severity: Critical | Major | Minor | None."
     )
 
-    # ── LLM call — json_object forces grammar-constrained output (no echo) ──
-    findings_raw = "{\"findings\": []}"
+    # ── LLM call ──
+    findings_raw = "[]"
     try:
         findings_raw = llm_engine.generate(
-            [{"role": "user", "content": user_msg}],
+            [
+                {"role": "system", "content": system_msg},
+                {"role": "user",   "content": user_msg},
+            ],
             max_tokens=1400,
             temperature=0.1,
             raw=True,  # CRITICAL: bypass clean_llm_output() which strips JSON keys
-            response_format={"type": "json_object"},  # grammar-constrained: forces valid JSON
         )
         logger.info("LLM compliance call completed, raw output length: %d", len(findings_raw))
+        logger.debug("LLM raw output (first 300): %s", findings_raw[:300])
     except Exception as e:
         logger.error("Compliance LLM call failed: %s", e)
 
-    # response_format=json_object returns {"findings": [...]} wrapper—unwrap it.
-    # Also handle the old `[...]` array format as fallback.
+    # Normalise: unwrap {"findings":[...]} dict if model returned that,
+    # otherwise ensure we have a bare JSON array string.
     raw_stripped = (findings_raw or "").strip()
     try:
-        _parsed_wrapper = json.loads(raw_stripped)
-        if isinstance(_parsed_wrapper, dict) and "findings" in _parsed_wrapper:
-            findings_raw = json.dumps(_parsed_wrapper["findings"])
-        elif isinstance(_parsed_wrapper, list):
-            findings_raw = raw_stripped  # already an array
-        else:
-            # Some other dict — try to find any list value
-            for _v in _parsed_wrapper.values():
+        _tmp = json.loads(raw_stripped)
+        if isinstance(_tmp, dict):
+            # Find the first list value (handles {"findings":[...]}, {"items":[...]}, etc.)
+            for _v in _tmp.values():
                 if isinstance(_v, list):
                     findings_raw = json.dumps(_v)
                     break
+            else:
+                findings_raw = "[]"  # dict but no list value — let fallback handle it
+        else:
+            findings_raw = raw_stripped  # already a list or primitive
     except (json.JSONDecodeError, AttributeError):
-        # Not valid JSON yet — pass to _parse_llm_json for repair
+        # Not valid JSON — pass to _parse_llm_json for repair
         findings_raw = raw_stripped
-        if not findings_raw.startswith("["):
-            findings_raw = "[" + findings_raw
 
     # ── Parse JSON (3 layers) ──
     findings = _parse_llm_json(findings_raw)
