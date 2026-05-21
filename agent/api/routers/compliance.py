@@ -165,37 +165,46 @@ def _sanitize_json_string(s: str) -> str:
 
 def _sanitize_json_content(s: str) -> str:
     """
-    Sanitize content inside JSON string values.
-    Escapes unescaped newlines, tabs, quotes, and backslashes that would break JSON parsing.
+    Fix raw (unescaped) control characters that appear INSIDE JSON string values.
+    Only modifies content inside quoted strings — leaves structural JSON intact.
+    Handles: raw newline -> \\n, raw tab -> \\t, raw carriage return -> \\r,
+             other raw control chars < 0x20 -> removed.
+    Does NOT touch quotes or backslashes (those are structural JSON).
     """
     result = []
+    in_string = False
     i = 0
     while i < len(s):
         c = s[i]
-        # Handle control characters that need escaping in JSON strings
-        if c == '\n':
-            result.append('\\n')
-        elif c == '\r':
-            result.append('\\r')
-        elif c == '\t':
-            result.append('\\t')
-        elif c == '"':
-            # Escape unescaped quotes
-            if i == 0 or s[i-1] != '\\':
-                result.append('\\"')
+        if in_string:
+            if c == '\\':
+                # Pass through the escape sequence as-is
+                result.append(c)
+                if i + 1 < len(s):
+                    i += 1
+                    result.append(s[i])
+            elif c == '"':
+                # End of string
+                in_string = False
+                result.append(c)
+            elif c == '\n':
+                # Raw newline inside string value — escape it
+                result.append('\\n')
+            elif c == '\r':
+                result.append('\\r')
+            elif c == '\t':
+                result.append('\\t')
+            elif ord(c) < 32:
+                # Other control chars inside string — remove
+                pass
             else:
-                result.append('"')
-        elif c == '\\':
-            # Check if this is already an escape sequence
-            if i + 1 < len(s) and s[i+1] in '"\\/bfnrt':
+                result.append(c)
+        else:
+            if c == '"':
+                in_string = True
                 result.append(c)
             else:
-                result.append('\\\\')
-        elif ord(c) < 32:
-            # Remove other control characters
-            pass
-        else:
-            result.append(c)
+                result.append(c)
         i += 1
     return ''.join(result)
 
