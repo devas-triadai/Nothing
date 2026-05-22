@@ -272,3 +272,186 @@ def export_report(
         "exported_at": datetime.utcnow().isoformat(),
         "data": data
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  COMPLIANCE REPORT OVERSIGHT (SOTR Module 3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from app.models.models import ComplianceReport, HistoricalFeedback
+
+
+@router.get("/compliance")
+def list_compliance_reports(
+    skip: int = 0,
+    limit: int = 50,
+    verdict: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all SOTR compliance evaluation reports for oversight"""
+    query = db.query(ComplianceReport)
+    
+    if verdict:
+        query = query.filter(ComplianceReport.verdict == verdict.upper())
+    if status:
+        query = query.filter(ComplianceReport.status == status.lower())
+    
+    total = query.count()
+    reports = query.order_by(ComplianceReport.created_at.desc()).offset(skip).limit(limit).all()
+    
+    return {
+        "total": total,
+        "reports": [
+            {
+                "id": r.id,
+                "report_name": r.report_name,
+                "sotr_doc": {
+                    "id": r.sotr_doc.id if r.sotr_doc else None,
+                    "filename": r.sotr_doc.original_filename if r.sotr_doc else None
+                },
+                "submission_doc": {
+                    "id": r.submission_doc.id if r.submission_doc else None,
+                    "filename": r.submission_doc.original_filename if r.submission_doc else None
+                },
+                "generated_by": r.generator.username if r.generator else "unknown",
+                "total_clauses": r.total_clauses,
+                "compliant_count": r.compliant_count,
+                "partial_count": r.partial_count,
+                "non_compliant_count": r.non_compliant_count,
+                "unverifiable_count": r.unverifiable_count,
+                "compliance_score": round(r.compliance_score, 1),
+                "verdict": r.verdict,
+                "status": r.status,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in reports
+        ]
+    }
+
+
+@router.get("/compliance/{report_id}")
+def get_compliance_report_detail(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed compliance report with clause breakdown"""
+    report = db.query(ComplianceReport).filter(ComplianceReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    # Get associated historical feedback
+    feedback = db.query(HistoricalFeedback).filter(
+        HistoricalFeedback.compliance_report_id == report_id
+    ).order_by(HistoricalFeedback.clause_id).all()
+    
+    return {
+        "id": report.id,
+        "report_name": report.report_name,
+        "sotr_doc": {
+            "id": report.sotr_doc.id if report.sotr_doc else None,
+            "filename": report.sotr_doc.original_filename if report.sotr_doc else None,
+            "category": report.sotr_doc.category if report.sotr_doc else None
+        },
+        "submission_doc": {
+            "id": report.submission_doc.id if report.submission_doc else None,
+            "filename": report.submission_doc.original_filename if report.submission_doc else None,
+            "category": report.submission_doc.category if report.submission_doc else None
+        },
+        "generated_by": report.generator.username if report.generator else "unknown",
+        "metrics": {
+            "total_clauses": report.total_clauses,
+            "compliant_count": report.compliant_count,
+            "partial_count": report.partial_count,
+            "non_compliant_count": report.non_compliant_count,
+            "unverifiable_count": report.unverifiable_count,
+            "compliance_score": round(report.compliance_score, 1)
+        },
+        "verdict": report.verdict,
+        "status": report.status,
+        "report_file_path": report.report_file_path,
+        "created_at": report.created_at.isoformat() if report.created_at else None,
+        "historical_feedback": [
+            {
+                "id": f.id,
+                "clause_id": f.clause_id,
+                "clause_reference": f.clause_reference,
+                "feedback_text": f.feedback_text,
+                "severity": f.severity,
+                "referenced_sotr": f.referenced_sotr.original_filename if f.referenced_sotr else None,
+                "created_at": f.created_at.isoformat() if f.created_at else None
+            }
+            for f in feedback
+        ]
+    }
+
+
+@router.get("/compliance/{report_id}/feedback")
+def get_historical_feedback(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get historical feedback audit trail for a compliance report"""
+    report = db.query(ComplianceReport).filter(ComplianceReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    feedback = db.query(HistoricalFeedback).filter(
+        HistoricalFeedback.compliance_report_id == report_id
+    ).order_by(HistoricalFeedback.created_at.desc()).all()
+    
+    return {
+        "report_id": report_id,
+        "report_name": report.report_name,
+        "total_feedback_entries": len(feedback),
+        "feedback": [
+            {
+                "id": f.id,
+                "clause_id": f.clause_id,
+                "clause_reference": f.clause_reference,
+                "feedback_text": f.feedback_text,
+                "severity": f.severity,
+                "referenced_sotr_id": f.referenced_sotr_id,
+                "referenced_sotr_filename": f.referenced_sotr.original_filename if f.referenced_sotr else None,
+                "created_at": f.created_at.isoformat() if f.created_at else None
+            }
+            for f in feedback
+        ]
+    }
+
+
+@router.get("/compliance/stats/overview")
+def get_compliance_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get compliance report statistics for dashboard"""
+    total_reports = db.query(ComplianceReport).count()
+    
+    # Verdict distribution
+    verdict_counts = db.query(
+        ComplianceReport.verdict,
+        func.count(ComplianceReport.id)
+    ).group_by(ComplianceReport.verdict).all()
+    
+    # Average compliance score
+    avg_score = db.query(func.avg(ComplianceReport.compliance_score)).scalar() or 0
+    
+    # Recent reports (last 30 days)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    recent_reports = db.query(ComplianceReport).filter(
+        ComplianceReport.created_at >= thirty_days_ago
+    ).count()
+    
+    return {
+        "total_reports": total_reports,
+        "recent_reports_30d": recent_reports,
+        "average_compliance_score": round(avg_score, 1),
+        "verdict_distribution": {
+            v: c for v, c in verdict_counts
+        },
+        "generated_at": datetime.utcnow().isoformat()
+    }

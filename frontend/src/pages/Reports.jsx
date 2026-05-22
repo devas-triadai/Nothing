@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../utils/api';
 import Spinner from '../components/Spinner';
-import { BarChart2, Download, RefreshCw, TrendingUp, Users, FileText, Activity, Bot, Calendar, Clock } from 'lucide-react';
+import { BarChart2, Download, RefreshCw, TrendingUp, Users, FileText, Activity, Bot, Calendar, Clock, Shield, CheckCircle, AlertTriangle, XCircle, HelpCircle, Eye, MessageSquare } from 'lucide-react';
 
 const StatCard = ({ icon: Icon, label, value, change, color }) => (
   <div style={{
@@ -55,6 +55,14 @@ export default function Reports() {
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [topUsers, setTopUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  
+  // Compliance oversight data
+  const [complianceStats, setComplianceStats] = useState(null);
+  const [complianceReports, setComplianceReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [feedbackData, setFeedbackData] = useState([]);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [complianceFilter, setComplianceFilter] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -65,6 +73,7 @@ export default function Reports() {
     if (activeTab === 'usage' && usageData.length === 0) fetchUsageData();
     if (activeTab === 'agents' && agentsData.length === 0) fetchAgentsData();
     if (activeTab === 'users' && topUsers.length === 0) fetchTopUsers();
+    if (activeTab === 'compliance' && complianceReports.length === 0) fetchComplianceData();
   }, [activeTab]);
 
   const fetchData = async () => {
@@ -174,7 +183,60 @@ export default function Reports() {
     }
   };
 
-  const tabs = ['overview', 'usage', 'agents', 'users'];
+  const tabs = ['overview', 'usage', 'agents', 'users', 'compliance'];
+
+  /* ═══════════════════════════════════════════
+     COMPLIANCE OVERSIGHT FUNCTIONS
+  ═══════════════════════════════════════════ */
+
+  const fetchComplianceData = async () => {
+    setComplianceLoading(true);
+    try {
+      const [statsData, reportsData] = await Promise.all([
+        apiFetch('/reports/compliance/stats/overview'),
+        apiFetch('/reports/compliance?limit=50')
+      ]);
+      if (statsData) setComplianceStats(statsData);
+      if (reportsData?.reports) setComplianceReports(reportsData.reports);
+    } catch (err) {
+      console.error('Compliance data fetch error:', err);
+    } finally {
+      setComplianceLoading(false);
+    }
+  };
+
+  const fetchReportDetail = async (reportId) => {
+    try {
+      const [detailData, feedbackData] = await Promise.all([
+        apiFetch(`/reports/compliance/${reportId}`),
+        apiFetch(`/reports/compliance/${reportId}/feedback`)
+      ]);
+      if (detailData) setSelectedReport(detailData);
+      if (feedbackData?.feedback) setFeedbackData(feedbackData.feedback);
+    } catch (err) {
+      console.error('Report detail fetch error:', err);
+    }
+  };
+
+  const getVerdictIcon = (verdict) => {
+    switch (verdict) {
+      case 'APPROVE': return <CheckCircle size={16} color="#00c853" />;
+      case 'APPROVE_WITH_CONDITIONS': return <CheckCircle size={16} color="#f0b429" />;
+      case 'REVISE_AND_RESUBMIT': return <AlertTriangle size={16} color="#ff6d00" />;
+      case 'REJECT': return <XCircle size={16} color="#d50000" />;
+      default: return <HelpCircle size={16} color="#94a3b8" />;
+    }
+  };
+
+  const getVerdictColor = (verdict) => {
+    switch (verdict) {
+      case 'APPROVE': return '#00c853';
+      case 'APPROVE_WITH_CONDITIONS': return '#f0b429';
+      case 'REVISE_AND_RESUBMIT': return '#ff6d00';
+      case 'REJECT': return '#d50000';
+      default: return '#94a3b8';
+    }
+  };
 
   /* ═══════════════════════════════════════════
      TAB CONTENT RENDERERS
@@ -429,6 +491,174 @@ export default function Reports() {
     </div>
   );
 
+  const renderComplianceTab = () => (
+    <div>
+      {/* Compliance Stats */}
+      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <StatCard icon={Shield} label="Total Evaluations" value={complianceStats?.total_reports || 0} color="#8b5cf6" />
+        <StatCard icon={CheckCircle} label="Avg Compliance Score" value={complianceStats?.average_compliance_score ? `${complianceStats.average_compliance_score}%` : '-'} color="#00c853" />
+        <StatCard icon={FileText} label="Reports (30d)" value={complianceStats?.recent_reports_30d || 0} color="#3b82f6" />
+      </div>
+
+      {/* Two Column Layout: Reports List | Detail View */}
+      <div style={{ display: 'flex', gap: '24px' }}>
+        {/* Left: Reports List */}
+        <div style={{ flex: 1 }}>
+          <TableCard title="SOTR Compliance Reports" subtitle={`${complianceReports.length} evaluations`}>
+            {complianceLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}><Spinner size={28} /></div>
+            ) : complianceReports.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                <Shield size={48} style={{ marginBottom: '16px', opacity: 0.3 }} />
+                <p>No compliance reports available. Reports are generated when SOTR compliance checks are performed.</p>
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface-hover)' }}>
+                    {['Report', 'SOTR', 'Submission', 'Score', 'Verdict', 'Generated', 'Actions'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {complianceReports.map((report) => (
+                    <tr 
+                      key={report.id} 
+                      style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selectedReport?.id === report.id ? 'var(--surface-hover)' : '' }}
+                      onClick={() => fetchReportDetail(report.id)}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = selectedReport?.id === report.id ? 'var(--surface-hover)' : ''}
+                    >
+                      <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>
+                        {report.report_name}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {report.sotr_doc?.filename?.slice(0, 30) || '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {report.submission_doc?.filename?.slice(0, 30) || '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ fontWeight: 700, color: report.compliance_score >= 80 ? '#00c853' : report.compliance_score >= 50 ? '#f0b429' : '#d50000', fontSize: '14px' }}>
+                          {report.compliance_score}%
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {getVerdictIcon(report.verdict)}
+                          <span style={{ 
+                            display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                            background: `${getVerdictColor(report.verdict)}20`,
+                            color: getVerdictColor(report.verdict)
+                          }}>{report.verdict?.replace(/_/g, ' ')}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {report.created_at ? new Date(report.created_at).toLocaleDateString() : '-'}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <button style={{ background: 'none', border: 'none', color: '#1e6bff', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>
+                          <Eye size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </TableCard>
+        </div>
+
+        {/* Right: Detail Panel */}
+        {selectedReport && (
+          <div style={{ width: '420px', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface-hover)' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Report Details</h3>
+            </div>
+            
+            <div style={{ padding: '20px', maxHeight: '600px', overflow: 'auto' }}>
+              {/* Metrics */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '20px' }}>
+                <div style={{ padding: '12px', background: 'rgba(0,200,83,0.1)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#00c853' }}>{selectedReport.metrics?.compliant_count || 0}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>COMPLIANT</div>
+                </div>
+                <div style={{ padding: '12px', background: 'rgba(240,180,41,0.1)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#f0b429' }}>{selectedReport.metrics?.partial_count || 0}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>PARTIAL</div>
+                </div>
+                <div style={{ padding: '12px', background: 'rgba(213,0,0,0.1)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#d50000' }}>{selectedReport.metrics?.non_compliant_count || 0}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>NON-COMPLIANT</div>
+                </div>
+                <div style={{ padding: '12px', background: 'rgba(148,163,184,0.1)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#94a3b8' }}>{selectedReport.metrics?.unverifiable_count || 0}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>UNVERIFIABLE</div>
+                </div>
+              </div>
+
+              {/* Documents */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase' }}>Documents</div>
+                <div style={{ padding: '12px', background: 'var(--surface-hover)', borderRadius: '8px', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>SOTR Reference</div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{selectedReport.sotr_doc?.filename || '-'}</div>
+                </div>
+                <div style={{ padding: '12px', background: 'var(--surface-hover)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Submission Document</div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{selectedReport.submission_doc?.filename || '-'}</div>
+                </div>
+              </div>
+
+              {/* Generated By */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase' }}>Generated By</div>
+                <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{selectedReport.generated_by}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  {selectedReport.created_at ? new Date(selectedReport.created_at).toLocaleString() : '-'}
+                </div>
+              </div>
+
+              {/* Historical Feedback */}
+              {feedbackData.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <MessageSquare size={14} /> Historical Feedback ({feedbackData.length} entries)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {feedbackData.map((feedback) => (
+                      <div key={feedback.id} style={{ padding: '12px', background: 'var(--surface-hover)', borderRadius: '8px', borderLeft: `3px solid ${feedback.severity === 'CRITICAL' ? '#d50000' : feedback.severity === 'WARNING' ? '#f0b429' : '#3b82f6'}` }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                          Clause {feedback.clause_id}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '8px' }}>
+                          {feedback.feedback_text}
+                        </div>
+                        {feedback.referenced_sotr_filename && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            Referenced: {feedback.referenced_sotr_filename}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button 
+                onClick={() => setSelectedReport(null)}
+                style={{ width: '100%', marginTop: '20px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '13px' }}
+              >
+                Close Details
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   /* ═══════════════════════════════════════════
      MAIN RENDER
   ═══════════════════════════════════════════ */
@@ -447,7 +677,7 @@ export default function Reports() {
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
-            onClick={() => { fetchData(); if (activeTab === 'usage') fetchUsageData(); if (activeTab === 'agents') fetchAgentsData(); if (activeTab === 'users') fetchTopUsers(); }}
+            onClick={() => { fetchData(); if (activeTab === 'usage') fetchUsageData(); if (activeTab === 'agents') fetchAgentsData(); if (activeTab === 'users') fetchTopUsers(); if (activeTab === 'compliance') fetchComplianceData(); }}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px', cursor: 'pointer', fontWeight: 500 }}
           >
             <RefreshCw size={14} /> Refresh
@@ -492,6 +722,7 @@ export default function Reports() {
           {activeTab === 'usage' && renderUsageTab()}
           {activeTab === 'agents' && renderAgentsTab()}
           {activeTab === 'users' && renderUsersTab()}
+          {activeTab === 'compliance' && renderComplianceTab()}
         </>
       )}
     </div>

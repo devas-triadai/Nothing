@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch } from '../utils/api'
-import { Network, Search, Filter, Maximize2, GitBranch, ArrowLeft, RefreshCw, ZoomIn, ZoomOut } from 'lucide-react'
+import { Network, Search, Filter, Maximize2, GitBranch, ArrowLeft, RefreshCw, ZoomIn, ZoomOut, Download, Link2, Calendar, FileText, GitCompare, X, ChevronDown, Check } from 'lucide-react'
 import * as d3 from 'd3'
 
 // ── Theme / Colors ──
@@ -18,11 +18,36 @@ const CAT_COLORS = {
   'General': '#6b7280',
 }
 
+const EDGE_TYPES = [
+  { key: 'supersedes', label: 'SUPERSEDES', color: '#ef4444', desc: 'Replaces previous version' },
+  { key: 'derived_from', label: 'DERIVED FROM', color: '#3b82f6', desc: 'Substantially based on' },
+  { key: 'informed_by', label: 'INFORMED BY', color: '#8b5cf6', desc: 'Influenced by' },
+  { key: 'references', label: 'REFERENCES', color: '#f59e0b', desc: 'Cites or cites normatively' },
+  { key: 'amends', label: 'AMENDS', color: '#10b981', desc: 'Formal amendment to' },
+]
+
 export default function Genealogy() {
   const [nodes, setNodes] = useState([])
   const [edges, setEdges] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedNode, setSelectedNode] = useState(null)
+  
+  // View mode
+  const [viewMode, setViewMode] = useState('graph') // 'graph' | 'timeline'
+  
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategories, setSelectedCategories] = useState([])
+  const [selectedEdgeTypes, setSelectedEdgeTypes] = useState([])
+  const [showFilters, setShowFilters] = useState(false)
+  
+  // Modals
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [showDiffModal, setShowDiffModal] = useState(false)
+  const [linkTargetId, setLinkTargetId] = useState('')
+  const [linkEdgeType, setLinkEdgeType] = useState('references')
+  const [linkConfidence, setLinkConfidence] = useState(1.0)
+  const [allDocs, setAllDocs] = useState([])
   
   const svgRef = useRef(null)
   const containerRef = useRef(null)
@@ -36,11 +61,16 @@ export default function Genealogy() {
   async function fetchGraphData() {
     setLoading(true)
     try {
-      // Fetch all docs for the global graph
-      const data = await apiFetch('/documents/lineage/all')
-      if (data && data.nodes) {
-        setNodes(data.nodes)
-        setEdges(data.edges)
+      const [lineageData, docsData] = await Promise.all([
+        apiFetch('/documents/lineage/all'),
+        apiFetch('/documents/?limit=1000')
+      ])
+      if (lineageData && lineageData.nodes) {
+        setNodes(lineageData.nodes)
+        setEdges(lineageData.edges)
+      }
+      if (docsData && docsData.documents) {
+        setAllDocs(docsData.documents)
       }
     } catch (e) {
       console.error(e)
@@ -49,9 +79,25 @@ export default function Genealogy() {
     }
   }
 
+  // Filtered data based on search and filters
+  const filteredNodes = nodes.filter(n => {
+    const matchesSearch = !searchQuery || 
+      (n.filename && n.filename.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (n.category && n.category.toLowerCase().includes(searchQuery.toLowerCase()))
+    const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(n.category)
+    return matchesSearch && matchesCategory
+  })
+
+  const filteredEdges = edges.filter(e => {
+    const sourceInNodes = filteredNodes.some(n => n.id === e.source || n.id === e.source?.id)
+    const targetInNodes = filteredNodes.some(n => n.id === e.target || n.id === e.target?.id)
+    const matchesType = selectedEdgeTypes.length === 0 || selectedEdgeTypes.includes(e.type)
+    return sourceInNodes && targetInNodes && matchesType
+  })
+
   // ── D3 Force-Directed Graph ──
   useEffect(() => {
-    if (loading || !nodes.length || !svgRef.current) return
+    if (loading || !nodes.length || !svgRef.current || viewMode !== 'graph') return
 
     const width = containerRef.current.clientWidth
     const height = containerRef.current.clientHeight
@@ -59,18 +105,36 @@ export default function Genealogy() {
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
 
-    // Add a defs section for arrowheads
+    if (filteredNodes.length === 0) return
+
+    // Add defs section for arrowheads with different colors
     const defs = svg.append('defs')
+    
+    EDGE_TYPES.forEach(edgeType => {
+      defs.append('marker')
+        .attr('id', `arrow-${edgeType.key}`)
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 22)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('fill', edgeType.color)
+        .attr('d', 'M0,-5L10,0L0,5')
+    })
+    
+    // Default arrow
     defs.append('marker')
-      .attr('id', 'arrow')
+      .attr('id', 'arrow-default')
       .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 22) // shift arrow so it doesn't overlap node
+      .attr('refX', 22)
       .attr('refY', 0)
       .attr('markerWidth', 6)
       .attr('markerHeight', 6)
       .attr('orient', 'auto')
       .append('path')
-      .attr('fill', 'var(--text-muted)')
+      .attr('fill', '#94a3b8')
       .attr('d', 'M0,-5L10,0L0,5')
 
     const g = svg.append('g')
@@ -84,32 +148,43 @@ export default function Genealogy() {
     zoomRef.current = zoom
 
     // Prepare data for D3
-    const graphNodes = nodes.map(n => ({ ...n, radius: 16 }))
+    const graphNodes = filteredNodes.map(n => ({ ...n, radius: 16 }))
     
     // Edges need direct references to nodes array
-    const graphEdges = edges.map(e => ({
-      source: graphNodes.find(n => n.id === e.from) || e.from,
-      target: graphNodes.find(n => n.id === e.to) || e.to,
-      type: 'derived'
-    })).filter(e => e.source && e.target && typeof e.source === 'object' && typeof e.target === 'object')
+    const graphEdges = filteredEdges.map(e => {
+      const sourceNode = graphNodes.find(n => n.id === (e.source?.id || e.source))
+      const targetNode = graphNodes.find(n => n.id === (e.target?.id || e.target))
+      return {
+        source: sourceNode || e.source,
+        target: targetNode || e.target,
+        type: e.type || 'references'
+      }
+    }).filter(e => e.source && e.target && typeof e.source === 'object' && typeof e.target === 'object')
 
     // Simulation
     const simulation = d3.forceSimulation(graphNodes)
-      .force('link', d3.forceLink(graphEdges).id(d => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(graphEdges).id(d => d.id).distance(120))
+      .force('charge', d3.forceManyBody().strength(-400))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide().radius(30))
+      .force('collide', d3.forceCollide().radius(35))
 
     simulationRef.current = simulation
 
-    // Draw Links
+    // Draw Links with edge type colors
     const link = g.append('g')
       .selectAll('line')
       .data(graphEdges)
       .join('line')
-      .attr('stroke', 'var(--border)')
+      .attr('stroke', d => {
+        const edgeType = EDGE_TYPES.find(et => et.key === d.type)
+        return edgeType ? edgeType.color : '#94a3b8'
+      })
       .attr('stroke-width', 2)
-      .attr('marker-end', 'url(#arrow)')
+      .attr('stroke-opacity', 0.7)
+      .attr('marker-end', d => {
+        const edgeType = EDGE_TYPES.find(et => et.key === d.type)
+        return `url(#arrow-${edgeType ? edgeType.key : 'default'})`
+      })
 
     // Draw Nodes
     const node = g.append('g')
@@ -164,7 +239,57 @@ export default function Genealogy() {
     })
 
     return () => simulation.stop()
-  }, [nodes, edges, loading])
+  }, [filteredNodes, filteredEdges, loading, viewMode])
+
+  // ── Export Functions ──
+  const handleExport = async (format) => {
+    try {
+      const data = await apiFetch(`/documents/lineage/export?format=${format}`)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `agra-lineage.${format === 'json-ld' ? 'json' : 'graphml'}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Export failed:', e)
+      alert('Export failed. Please try again.')
+    }
+  }
+
+  // ── Create Manual Link ──
+  const handleCreateLink = async () => {
+    if (!selectedNode || !linkTargetId) return
+    try {
+      await apiFetch(`/documents/${selectedNode.id}/link`, {
+        method: 'POST',
+        body: JSON.stringify({
+          target_id: parseInt(linkTargetId),
+          edge_type: linkEdgeType,
+          confidence: linkConfidence
+        })
+      })
+      setShowLinkModal(false)
+      setLinkTargetId('')
+      setLinkEdgeType('references')
+      setLinkConfidence(1.0)
+      fetchGraphData()
+    } catch (e) {
+      console.error('Link creation failed:', e)
+      alert('Failed to create link. Please try again.')
+    }
+  }
+
+  // ── Timeline View Data ──
+  const timelineData = filteredNodes
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .reduce((acc, doc) => {
+      const group = doc.group || doc.id
+      if (!acc[group]) acc[group] = []
+      acc[group].push(doc)
+      return acc
+    }, {})
 
   // Drag utility for D3
   function drag(simulation) {
@@ -195,38 +320,154 @@ export default function Genealogy() {
 
   const handleResetZoom = () => {
     if (!svgRef.current || !zoomRef.current) return
-    const width = containerRef.current.clientWidth
-    const height = containerRef.current.clientHeight
     d3.select(svgRef.current).transition().duration(500)
       .call(zoomRef.current.transform, d3.zoomIdentity)
   }
 
+  const toggleCategory = (cat) => {
+    setSelectedCategories(prev => 
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    )
+  }
+
+  const toggleEdgeType = (type) => {
+    setSelectedEdgeTypes(prev => 
+      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+    )
+  }
+
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1600, margin: '0 auto', height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-heading)', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Network size={24} color="#8b5cf6" />
-            Document Genealogy
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-            Interactive force-directed graph of document lineage and versions
-          </p>
+      {/* Header with Toolbar */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+        {/* Title Row */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-heading)', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Network size={24} color="#8b5cf6" />
+              Document Genealogy
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+              Interactive DAG visualization with lineage tracking and version control
+            </p>
+          </div>
+          
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => handleExport('json-ld')} title="Export JSON-LD"
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Download size={14} /> JSON-LD
+            </button>
+            <button onClick={() => handleExport('graphml')} title="Export GraphML"
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Download size={14} /> GraphML
+            </button>
+            <button onClick={fetchGraphData} title="Refresh"
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <RefreshCw size={14} />
+            </button>
+          </div>
         </div>
-        
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={fetchGraphData} title="Refresh Graph"
-            style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw size={14} /> Refresh
+
+        {/* Toolbar Row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {/* Search */}
+          <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 300 }}>
+            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input 
+              type="text" 
+              placeholder="Search documents..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: 14 }}
+            />
+          </div>
+
+          {/* View Mode Toggle */}
+          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+            <button 
+              onClick={() => setViewMode('graph')}
+              style={{ padding: '10px 16px', background: viewMode === 'graph' ? 'var(--primary)' : 'var(--card-bg)', color: viewMode === 'graph' ? 'white' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Network size={16} /> Graph
+            </button>
+            <button 
+              onClick={() => setViewMode('timeline')}
+              style={{ padding: '10px 16px', background: viewMode === 'timeline' ? 'var(--primary)' : 'var(--card-bg)', color: viewMode === 'timeline' ? 'white' : 'var(--text-secondary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Calendar size={16} /> Timeline
+            </button>
+          </div>
+
+          {/* Filter Toggle */}
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: showFilters ? 'var(--primary)' : 'var(--card-bg)', color: showFilters ? 'white' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Filter size={16} /> Filters
+            {(selectedCategories.length > 0 || selectedEdgeTypes.length > 0) && (
+              <span style={{ background: 'rgba(255,255,255,0.3)', padding: '2px 6px', borderRadius: 10, fontSize: 11 }}>
+                {selectedCategories.length + selectedEdgeTypes.length}
+              </span>
+            )}
           </button>
         </div>
+
+        {/* Filter Panel */}
+        {showFilters && (
+          <div style={{ display: 'flex', gap: 24, padding: 16, background: 'var(--card-bg)', borderRadius: 12, border: '1px solid var(--border)' }}>
+            {/* Category Filter */}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 10 }}>Categories</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Object.keys(CAT_COLORS).map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => toggleCategory(cat)}
+                    style={{ 
+                      padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: selectedCategories.includes(cat) ? `${CAT_COLORS[cat]}20` : 'var(--bg-surface)',
+                      color: selectedCategories.includes(cat) ? CAT_COLORS[cat] : 'var(--text-secondary)',
+                      cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: CAT_COLORS[cat] }} />
+                    {cat}
+                    {selectedCategories.includes(cat) && <Check size={12} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Edge Type Filter */}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 10 }}>Relationship Types</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {EDGE_TYPES.map(et => (
+                  <button
+                    key={et.key}
+                    onClick={() => toggleEdgeType(et.key)}
+                    style={{ 
+                      padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: selectedEdgeTypes.includes(et.key) ? `${et.color}20` : 'var(--bg-surface)',
+                      color: selectedEdgeTypes.includes(et.key) ? et.color : 'var(--text-secondary)',
+                      cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: et.color }} />
+                    {et.label}
+                    {selectedEdgeTypes.includes(et.key) && <Check size={12} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Content Area */}
       <div style={{ display: 'flex', gap: 20, flex: 1, minHeight: 0 }}>
         
-        {/* Graph Container */}
+        {/* Graph/Timeline Container */}
         <div 
           ref={containerRef}
           style={{ 
@@ -236,31 +477,113 @@ export default function Genealogy() {
         >
           {loading && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.05)', zIndex: 10 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Loading genealogy map...</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Loading genealogy data...</span>
             </div>
           )}
-          
-          {/* Zoom Controls */}
-          <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 10 }}>
-            <button onClick={() => handleZoom(1.2)} style={zoomBtnStyle}><ZoomIn size={16} /></button>
-            <button onClick={() => handleResetZoom()} style={zoomBtnStyle}><Maximize2 size={16} /></button>
-            <button onClick={() => handleZoom(0.8)} style={zoomBtnStyle}><ZoomOut size={16} /></button>
-          </div>
 
-          {/* Legend */}
-          <div style={{ position: 'absolute', top: 20, left: 20, background: 'var(--card-bg)', padding: 12, borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', zIndex: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>Categories</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {Object.entries(CAT_COLORS).slice(0, 5).map(([cat, color]) => (
-                <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cat}</span>
+          {/* GRAPH VIEW */}
+          {viewMode === 'graph' && (
+            <>
+              {/* Zoom Controls */}
+              <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 10 }}>
+                <button onClick={() => handleZoom(1.2)} style={zoomBtnStyle}><ZoomIn size={16} /></button>
+                <button onClick={() => handleResetZoom()} style={zoomBtnStyle}><Maximize2 size={16} /></button>
+                <button onClick={() => handleZoom(0.8)} style={zoomBtnStyle}><ZoomOut size={16} /></button>
+              </div>
+
+              {/* Legend */}
+              <div style={{ position: 'absolute', top: 20, left: 20, background: 'var(--card-bg)', padding: 16, borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', zIndex: 10, maxHeight: '60%', overflowY: 'auto' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12 }}>Categories</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                  {Object.entries(CAT_COLORS).map(([cat, color]) => (
+                    <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cat}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+                
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>Relationships</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {EDGE_TYPES.map(et => (
+                    <div key={et.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 20, height: 2, background: et.color, borderRadius: 1 }} />
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{et.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-          <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+              <svg ref={svgRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+            </>
+          )}
+
+          {/* TIMELINE VIEW */}
+          {viewMode === 'timeline' && (
+            <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: 24 }}>
+              {Object.keys(timelineData).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+                  No documents to display. Try adjusting filters.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+                  {Object.entries(timelineData).map(([groupId, docs]) => (
+                    <div key={groupId} style={{ borderLeft: '3px solid var(--border)', paddingLeft: 24 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                        <GitBranch size={20} color="var(--text-muted)" />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-heading)' }}>
+                          {docs[0]?.filename?.split('.')[0] || 'Document Group'}
+                        </span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: 6 }}>
+                          {docs.length} version{docs.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {docs.map((doc, idx) => (
+                          <div 
+                            key={doc.id}
+                            onClick={() => setSelectedNode(doc)}
+                            style={{ 
+                              display: 'flex', alignItems: 'center', gap: 16, padding: 16, 
+                              background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)',
+                              cursor: 'pointer', transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ 
+                              width: 40, height: 40, borderRadius: '50%', 
+                              background: `${CAT_COLORS[doc.category] || CAT_COLORS['General']}20`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              border: `2px solid ${CAT_COLORS[doc.category] || CAT_COLORS['General']}`
+                            }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: CAT_COLORS[doc.category] || CAT_COLORS['General'] }}>
+                                v{doc.version}
+                              </span>
+                            </div>
+                            
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                                {doc.filename}
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                {doc.category} • {new Date(doc.created_at).toLocaleDateString()} • {doc.status}
+                              </div>
+                            </div>
+                            
+                            {doc.version_notes && (
+                              <div style={{ maxWidth: 300, fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                                "{doc.version_notes}"
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Info Panel */}
@@ -273,7 +596,12 @@ export default function Genealogy() {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: `${CAT_COLORS[selectedNode.category] || CAT_COLORS['General']}20`, color: CAT_COLORS[selectedNode.category] || CAT_COLORS['General'] }}>
                 {selectedNode.category || 'General'}
               </div>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>v{selectedNode.version || 1}</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>v{selectedNode.version || 1}</span>
+                <button onClick={() => setSelectedNode(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}>
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             
             <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', margin: '0 0 16px 0', wordBreak: 'break-word' }}>
@@ -295,6 +623,22 @@ export default function Genealogy() {
               </div>
             )}
 
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              <button 
+                onClick={() => setShowLinkModal(true)}
+                style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 13 }}
+              >
+                <Link2 size={16} /> Create Relationship
+              </button>
+              <button 
+                onClick={() => setShowDiffModal(true)}
+                style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 13 }}
+              >
+                <GitCompare size={16} /> Compare with Previous
+              </button>
+            </div>
+
             <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12 }}>Lineage Info</div>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -306,6 +650,138 @@ export default function Genealogy() {
           </div>
         )}
       </div>
+
+      {/* Create Relationship Modal */}
+      {showLinkModal && selectedNode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ width: 480, background: 'var(--card-bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>Create Relationship</h3>
+              <button onClick={() => setShowLinkModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Source Document</label>
+                <div style={{ padding: 12, background: 'var(--bg-surface)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14 }}>
+                  {selectedNode.filename} (v{selectedNode.version})
+                </div>
+              </div>
+              
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Target Document *</label>
+                <select 
+                  value={linkTargetId} 
+                  onChange={(e) => setLinkTargetId(e.target.value)}
+                  style={{ width: '100%', padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: 14 }}
+                >
+                  <option value="">Select document...</option>
+                  {allDocs.filter(d => d.id !== selectedNode.id).map(d => (
+                    <option key={d.id} value={d.id}>{d.original_filename || d.filename} (v{d.version})</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Relationship Type *</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {EDGE_TYPES.map(et => (
+                    <button
+                      key={et.key}
+                      onClick={() => setLinkEdgeType(et.key)}
+                      style={{ 
+                        padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)',
+                        background: linkEdgeType === et.key ? `${et.color}20` : 'var(--bg-surface)',
+                        color: linkEdgeType === et.key ? et.color : 'var(--text-secondary)',
+                        cursor: 'pointer', fontSize: 12
+                      }}
+                    >
+                      {et.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, display: 'block' }}>Confidence: {linkConfidence.toFixed(1)}</label>
+                <input 
+                  type="range" 
+                  min="0" max="1" step="0.1"
+                  value={linkConfidence}
+                  onChange={(e) => setLinkConfidence(parseFloat(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+              <button 
+                onClick={() => setShowLinkModal(false)}
+                style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14 }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleCreateLink}
+                disabled={!linkTargetId}
+                style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: !linkTargetId ? 'var(--text-muted)' : 'var(--primary)', color: 'white', cursor: !linkTargetId ? 'not-allowed' : 'pointer', fontSize: 14 }}
+              >
+                Create Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Diff Modal */}
+      {showDiffModal && selectedNode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ width: 800, maxHeight: '80vh', background: 'var(--card-bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 24, overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>Version Comparison</h3>
+              <button onClick={() => setShowDiffModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            {selectedNode.parent_doc_id ? (
+              <div style={{ display: 'flex', gap: 20 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12 }}>Previous Version</div>
+                  <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                      Parent document content would be displayed here.<br/>
+                      (Requires document content fetch from backend)
+                    </div>
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12 }}>Current Version (v{selectedNode.version})</div>
+                  <div style={{ padding: 16, background: 'rgba(16,185,129,0.1)', borderRadius: 8, border: '1px solid var(--primary)' }}>
+                    <div style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                      Current document content would be displayed here.<br/>
+                      (Requires document content fetch from backend)
+                    </div>
+                    {selectedNode.version_notes && (
+                      <div style={{ marginTop: 16, padding: 12, background: 'var(--card-bg)', borderRadius: 6 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Changes:</div>
+                        <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>{selectedNode.version_notes}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                <GitCompare size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
+                <p>This is the root document (v1.0). No previous version exists for comparison.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -128,6 +128,7 @@ class Document(Base):
 class DocEdgeType(str, enum.Enum):
     SUPERSEDES = "supersedes"
     DERIVED_FROM = "derived_from"
+    INFORMED_BY = "informed_by"
     REFERENCES = "references"
     AMENDS = "amends"
 
@@ -167,3 +168,62 @@ class SystemSetting(Base):
     key = Column(String(100), unique=True, nullable=False, index=True)
     value = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ComplianceReport(Base):
+    """SOTR Compliance evaluation reports for audit oversight"""
+    __tablename__ = "compliance_reports"
+    id = Column(Integer, primary_key=True, index=True)
+    report_name = Column(String(255), nullable=False)
+    sotr_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    submission_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+    generated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Compliance metrics
+    total_clauses = Column(Integer, default=0)
+    compliant_count = Column(Integer, default=0)
+    partial_count = Column(Integer, default=0)
+    non_compliant_count = Column(Integer, default=0)
+    unverifiable_count = Column(Integer, default=0)
+    compliance_score = Column(Float, default=0.0)  # 0-100%
+    
+    # Overall verdict
+    verdict = Column(String(50), default="PENDING")  # APPROVE, APPROVE_WITH_CONDITIONS, REVISE_AND_RESUBMIT, REJECT
+    
+    # Report file path
+    report_file_path = Column(String(500), nullable=True)
+    
+    status = Column(String(20), default="completed")  # pending, processing, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    sotr_doc = relationship("Document", foreign_keys=[sotr_doc_id])
+    submission_doc = relationship("Document", foreign_keys=[submission_doc_id])
+    generator = relationship("User", foreign_keys=[generated_by])
+
+
+class HistoricalFeedback(Base):
+    """Historical feedback entries for SOTR compliance audit trail"""
+    __tablename__ = "historical_feedback"
+    id = Column(Integer, primary_key=True, index=True)
+    compliance_report_id = Column(Integer, ForeignKey("compliance_reports.id"), nullable=False)
+    
+    # Clause reference
+    clause_id = Column(String(100), nullable=False)  # e.g., SOTR-7.4.1
+    clause_reference = Column(Text, nullable=True)  # Full clause text
+    
+    # Feedback content
+    feedback_text = Column(Text, nullable=False)  # The historical narrative
+    
+    # Referenced past documents
+    referenced_sotr_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    referenced_evaluation_id = Column(Integer, ForeignKey("compliance_reports.id"), nullable=True)
+    
+    # Severity of the finding
+    severity = Column(String(20), default="INFO")  # INFO, WARNING, CRITICAL
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    report = relationship("ComplianceReport", foreign_keys=[compliance_report_id], backref="feedback_entries")
+    referenced_sotr = relationship("Document", foreign_keys=[referenced_sotr_id])
