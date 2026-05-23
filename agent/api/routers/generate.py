@@ -865,7 +865,8 @@ Use real content from the context above. Return ONLY the JSON array:""",
     else:
         safe_topic = re.sub(r'[^\w\s-]', '', body.topic)[:30].replace(' ', '_')
     safe_topic = safe_topic or "Presentation"
-    output_filename = f"{job_id}.pptx"
+    version_label = f"_v{body.version}" if body.version > 1 else "_v1"
+    output_filename = f"{safe_topic}{version_label}.pptx"
     output_path = _OUTPUTS_DIR / output_filename
 
     # Patch the title slide with the resolved presentation_title
@@ -899,7 +900,7 @@ Use real content from the context above. Return ONLY the JSON array:""",
     _ppt_jobs[job_id] = {
         "status": "done",
         "filename": output_filename,
-        "pretty_filename": f"AGRA_{safe_topic}{version_label}.pptx",
+        "pretty_filename": output_filename,
         "slides_json": json.dumps(slides_data),
         "version": body.version,
     }
@@ -1009,6 +1010,10 @@ async def generate_summary(
         full_text = full_text[:8000] + "\n[Content truncated for summary generation]"
 
     filename_label = ", ".join(filenames) if len(filenames) <= 3 else f"{len(filenames)} Documents"
+    
+    # Generate safe topic for filename
+    first_filename = filenames[0] if filenames else "document"
+    safe_topic = re.sub(r'[^\w\s-]', '', Path(first_filename).stem)[:30].replace(' ', '_') or "document"
 
     type_label = "Executive Summary" if body.summary_type == "executive" else "Technical Summary"
     
@@ -1063,7 +1068,8 @@ CITE using format: [Document Name, p.X] or [Document Name, Section Y]."""
             yield f"data: {json.dumps({'token': tok})}\n\n"
 
         # Build DOCX
-        docx_path = _OUTPUTS_DIR / f"{job_id}_summary.docx"
+        summary_filename = f"{safe_topic}_summary_v1.docx"
+        docx_path = _OUTPUTS_DIR / summary_filename
         doc = DocxDocument()
         doc.add_heading(f"{type_label}: {filename_label}", level=1)
         
@@ -1123,7 +1129,7 @@ CITE using format: [Document Name, p.X] or [Document Name, Section Y]."""
 
         doc.save(str(docx_path))
 
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_summary.docx'})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{summary_filename}'})}\n\n"
 
         # Log usage
         elapsed_ms = (time.time() - summary_start) * 1000
@@ -1295,7 +1301,9 @@ Return ONLY valid JSON in this exact format:
 
     # Build DOCX
     job_id = str(uuid.uuid4())
-    docx_path = _OUTPUTS_DIR / f"{job_id}_quiz.docx"
+    quiz_topic = re.sub(r'[^\w\s-]', '', Path(filename).stem)[:30].replace(' ', '_') or "quiz"
+    quiz_filename = f"{quiz_topic}_quiz_v1.docx"
+    docx_path = _OUTPUTS_DIR / quiz_filename
     doc = DocxDocument()
     doc.add_heading(quiz_data.get("title", f"Quiz: {filename}"), level=1)
     
@@ -1348,7 +1356,7 @@ Return ONLY valid JSON in this exact format:
 
     return {
         "quiz": quiz_data,
-        "download_url": f"/api/agent/download/{job_id}_quiz.docx",
+        "download_url": f"/api/agent/download/{quiz_filename}",
     }
 
 
@@ -1437,7 +1445,9 @@ Use formal, objective military specification language (e.g., 'The system shall..
             collected_text.append(tok)
             yield f"data: {json.dumps({'token': tok})}\n\n"
 
-        docx_path = _OUTPUTS_DIR / f"{job_id}_sotr.docx"
+        sotr_topic = re.sub(r'[^\w\s-]', '', Path(filename).stem)[:30].replace(' ', '_') or "sotr"
+        sotr_filename = f"{sotr_topic}_sotr_v1.docx"
+        docx_path = _OUTPUTS_DIR / sotr_filename
         doc = DocxDocument()
         doc.add_heading(f"Draft SOTR: {filename}", level=1)
         doc.add_paragraph("".join(collected_text))
@@ -1451,7 +1461,7 @@ Use formal, objective military specification language (e.g., 'The system shall..
             logger.warning(f"Could not add watermark: {e}")
 
         doc.save(str(docx_path))
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_sotr.docx'})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{sotr_filename}'})}\n\n"
 
         log_usage(action_type="draft_sotr", module="generate", token=auth_tok, response_time_ms=(time.time() - sotr_start) * 1000)
 
@@ -1538,7 +1548,9 @@ Keep the tone professional, objective, and analytical."""
             collected_text.append(tok)
             yield f"data: {json.dumps({'token': tok})}\n\n"
 
-        docx_path = _OUTPUTS_DIR / f"{job_id}_tech_review.docx"
+        review_topic = re.sub(r'[^\w\s-]', '', Path(filename).stem)[:30].replace(' ', '_') or "review"
+        review_filename = f"{review_topic}_tech_review_v1.docx"
+        docx_path = _OUTPUTS_DIR / review_filename
         doc = DocxDocument()
         doc.add_heading(f"Technical Review: {filename}", level=1)
         doc.add_paragraph("".join(collected_text))
@@ -1552,7 +1564,7 @@ Keep the tone professional, objective, and analytical."""
             logger.warning(f"Could not add watermark: {e}")
 
         doc.save(str(docx_path))
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{job_id}_tech_review.docx'})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{review_filename}'})}\n\n"
         log_usage(action_type="tech_review", module="generate", token=auth_tok, response_time_ms=(time.time() - review_start) * 1000)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
