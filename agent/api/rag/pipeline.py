@@ -343,21 +343,36 @@ async def query_pipeline(
     # ── 0. Intent detection — check for PPT/quiz/summary requests ──
     intent = _detect_intent(question)
     if intent:
-        # Require user to have selected/uploaded a document for summary/quiz.
-        # Using _get_all_doc_ids() here picks a non-deterministic builtin standard
-        # which is wrong — the user must explicitly attach or select the target doc.
+        # If explicit doc_ids provided, use them. Otherwise auto-search knowledge base.
         if doc_ids_filter:
             doc_ids = doc_ids_filter
         else:
-            intent_type = intent.get("type", "content")
-            yield {
-                "token": (
-                    f"To generate a {intent_type.replace('_', ' ')}, please select or upload the target document first. "
-                    "Click the 📎 attachment button or choose a document from the document list, then ask again."
-                )
-            }
-            yield {"done": True, "sources": []}
-            return
+            # Auto-search knowledge base for relevant documents based on intent topic
+            intent_topic = intent.get("topic", question)
+            logger.info("Intent detected without explicit docs. Auto-searching for: %s", intent_topic)
+            
+            # Embed the topic and search
+            topic_emb = await _loop.run_in_executor(None, embedder.embed_query, intent_topic)
+            search_results = await _loop.run_in_executor(
+                None, store.hybrid_search, intent_topic, topic_emb, 40
+            )
+            
+            # Extract unique doc_ids from search results (prefer non-builtin)
+            seen_doc_ids = set()
+            doc_ids = []
+            for chunk in search_results:
+                doc_id = chunk.get("metadata", {}).get("doc_id")
+                if doc_id and doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
+                    doc_ids.append(doc_id)
+            
+            # Limit to top 5 most relevant docs
+            doc_ids = doc_ids[:5]
+            
+            if doc_ids:
+                logger.info("Auto-selected %d documents for intent: %s", len(doc_ids), doc_ids)
+            else:
+                logger.warning("No documents found in knowledge base for topic: %s", intent_topic)
 
         if not doc_ids:
             yield {"token": "No documents are indexed yet. Please upload documents first."}
