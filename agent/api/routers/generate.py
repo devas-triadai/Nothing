@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 
 from api.utils.auth_check import get_current_user
 from api.utils.usage_logger import log_usage
+from api.utils.genealogy_client import (
+    check_superseded_status,
+    get_document_lineage,
+    format_superseded_warning,
+    should_include_genealogy,
+)
 from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
 from api.rag.reranker import rerank
@@ -747,6 +753,66 @@ Use real content from the context above. Return ONLY the JSON array:""",
         # Replace second-to-last slide (before thank_you) with sources
         slides_data[-2] = {"layout": "sources", "title": "Sources & References", "sources": source_names[:20]}
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # MODULE 5 & 10: Check for superseded documents and add genealogy info
+    # ═══════════════════════════════════════════════════════════════════════
+    superseded_warnings = []
+    genealogy_data = []
+    
+    try:
+        # Get doc_ids from context
+        doc_ids_for_genealogy = body.doc_ids if body.doc_ids else list({
+            c.get("metadata", {}).get("doc_id", "") for c in context_chunks if c.get("metadata", {}).get("doc_id")
+        })
+        
+        if doc_ids_for_genealogy and should_include_genealogy(doc_ids_for_genealogy):
+            # Check superseded status
+            superseded_status = await check_superseded_status(doc_ids_for_genealogy, auth_header_token)
+            
+            if superseded_status:
+                # Build warnings list
+                for doc_id, info in superseded_status.items():
+                    superseded_warnings.append({
+                        "old_doc": info.get("superseded_by_name", "Unknown"),
+                        "new_doc": info.get("superseded_by_name", "Newer Version"),
+                        "date": info.get("date", ""),
+                    })
+                
+                logger.info("PPT: Found %d superseded documents, adding warning slide", len(superseded_warnings))
+            
+            # Get genealogy for each doc
+            for doc_id in doc_ids_for_genealogy[:5]:  # Limit to first 5 docs
+                lineage = await get_document_lineage(doc_id, auth_header_token)
+                if lineage:
+                    genealogy_data.append(lineage)
+            
+            if genealogy_data:
+                logger.info("PPT: Retrieved genealogy for %d documents", len(genealogy_data))
+    except Exception as e:
+        logger.warning("PPT: Failed to fetch genealogy info: %s", e)
+    
+    # Insert superseded warning slide as slide 2 (after title) if warnings exist
+    if superseded_warnings and len(slides_data) >= 2:
+        warning_slide = {
+            "layout": "superseded_warning",
+            "title": "Document Status Warning",
+            "warnings": superseded_warnings,
+        }
+        slides_data.insert(1, warning_slide)  # Insert after title slide
+        logger.info("PPT: Inserted superseded warning slide at position 1")
+    
+    # Insert genealogy slide before sources slide (if genealogy data exists)
+    if genealogy_data and len(slides_data) >= 3:
+        genealogy_slide = {
+            "layout": "genealogy",
+            "title": "Document Genealogy & Provenance",
+            "genealogy_data": genealogy_data,
+        }
+        # Insert before the last two slides (sources + thank_you)
+        insert_pos = len(slides_data) - 2 if len(slides_data) >= 4 else len(slides_data) - 1
+        slides_data.insert(insert_pos, genealogy_slide)
+        logger.info("PPT: Inserted genealogy slide at position %d", insert_pos)
+
     # ── Post-process: clean slide content ──
     # Remove footer text, source trace bullets, and other artifacts
     _FOOTER_PATTERNS = [
@@ -894,16 +960,50 @@ async def generate_summary(
 
     chunks = []
     filenames = []
+    doc_chunks_map = {}  # Map doc_id to its chunks
+    
     for did in target_doc_ids:
         doc_chunks = store.get_chunks_by_doc(did)
         if doc_chunks:
             chunks.extend(doc_chunks)
+            doc_chunks_map[did] = doc_chunks
             if doc_chunks[0]["metadata"].get("filename") not in filenames:
                 filenames.append(doc_chunks[0]["metadata"].get("filename", "document"))
 
     if not chunks:
         raise HTTPException(status_code=404, detail="Documents not found in knowledge base.")
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # MODULE 5 & 10: Check for superseded documents and get genealogy
+    # ═══════════════════════════════════════════════════════════════════════
+    superseded_warning_text = ""
+    genealogy_data = []
+    
+    try:
+        if should_include_genealogy(target_doc_ids):
+            # Check superseded status
+            superseded_status = await check_superseded_status(target_doc_ids, auth_tok)
+            if superseded_status:
+                superseded_warning_text = format_superseded_warning(superseded_status)
+                logger.info("Summary: Found %d superseded documents", len(superseded_status))
+            
+            # Get genealogy for each doc
+            for doc_id in target_doc_ids[:5]:
+                lineage = await get_document_lineage(doc_id, auth_tok)
+                if lineage:
+                    genealogy_data.append(lineage)
+    except Exception as e:
+        logger.warning("Summary: Failed to fetch genealogy info: %s", e)
+
+    # Build hierarchical context (Module 5: Multi-document hierarchical summarization)
+    # Level 1: Per-document summaries
+    doc_contexts = []
+    for doc_id, doc_chunks in doc_chunks_map.items():
+        doc_text = "\n\n".join(c["text"] for c in doc_chunks[:5])
+        doc_filename = doc_chunks[0]["metadata"].get("filename", doc_id)
+        doc_contexts.append(f"--- {doc_filename} ---\n{doc_text[:2000]}")
+    
+    # Combine with full text for comprehensive summary
     full_text = "\n\n".join(c["text"] for c in chunks[:10])
     if len(full_text) > 8000:
         full_text = full_text[:8000] + "\n[Content truncated for summary generation]"
@@ -911,20 +1011,27 @@ async def generate_summary(
     filename_label = ", ".join(filenames) if len(filenames) <= 3 else f"{len(filenames)} Documents"
 
     type_label = "Executive Summary" if body.summary_type == "executive" else "Technical Summary"
+    
+    # Include superseded warning in prompt if applicable
+    superseded_note = ""
+    if superseded_warning_text:
+        superseded_note = f"\n\nIMPORTANT - DOCUMENT STATUS:\n{superseded_warning_text}\n\n"
+    
     prompt = f"""Generate a comprehensive {type_label} of the following document(s).
-
+{superseded_note}
 DOCUMENTS: {filename_label}
 
 CONTENT:
 {full_text}
 
 FORMAT:
-1. **Overview** — 2-3 sentences describing the document's purpose
-2. **Key Points** — bullet list of the most important findings/topics
-3. **Detailed Analysis** — paragraph-form analysis of major sections
-4. **Conclusions & Recommendations** — actionable takeaways
+1. **Overview** — 2-3 sentences describing the document's purpose and scope
+2. **Document Status** — Note any superseded documents and their replacements
+3. **Key Points by Document** — Bullet list of most important findings per document
+4. **Cross-Document Analysis** — Compare and synthesize information across sources
+5. **Conclusions & Recommendations** — Actionable takeaways with citations
 
-Cite specific sections where relevant using [Page X] notation."""
+CITE using format: [Document Name, p.X] or [Document Name, Section Y]."""
 
     messages = [
         {"role": "user", "content": f"You are a senior analyst creating professional document summaries for Indian Coast Guard leadership.\n\n{prompt}"},
@@ -959,7 +1066,51 @@ Cite specific sections where relevant using [Page X] notation."""
         docx_path = _OUTPUTS_DIR / f"{job_id}_summary.docx"
         doc = DocxDocument()
         doc.add_heading(f"{type_label}: {filename_label}", level=1)
+        
+        # Add superseded warning if applicable (Module 10)
+        if superseded_warning_text:
+            warning_para = doc.add_paragraph()
+            warning_run = warning_para.add_run(superseded_warning_text)
+            warning_run.font.color.rgb = None  # Use default (usually red via markdown)
+            warning_run.bold = True
+            doc.add_paragraph()  # Spacing
+        
         doc.add_paragraph("".join(collected_text))
+        
+        # Add Document Genealogy section (Module 5 & 10)
+        if genealogy_data:
+            doc.add_page_break()
+            doc.add_heading("Document Genealogy & Provenance", level=2)
+            
+            # Create table for genealogy info
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Light Grid Accent 1'
+            
+            # Header row
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Document'
+            hdr_cells[1].text = 'Version'
+            hdr_cells[2].text = 'Status'
+            hdr_cells[3].text = 'Relationships'
+            
+            # Data rows
+            for lineage in genealogy_data:
+                row_cells = table.add_row().cells
+                row_cells[0].text = lineage.get('filename', 'Unknown')
+                row_cells[1].text = f"v{lineage.get('version', '?')}"
+                row_cells[2].text = lineage.get('status', 'unknown')
+                
+                # Build relationship text
+                rel_parts = []
+                if lineage.get('superseded_by_name'):
+                    rel_parts.append(f"Superseded by: {lineage['superseded_by_name']}")
+                if lineage.get('supersedes'):
+                    supersedes_list = ", ".join(s.get('filename', '?') for s in lineage['supersedes'])
+                    rel_parts.append(f"Supersedes: {supersedes_list}")
+                
+                row_cells[3].text = "; ".join(rel_parts) if rel_parts else "None"
+            
+            doc.add_paragraph()
         
         # Add Watermark (FR-GEN-006)
         try:
@@ -1129,11 +1280,32 @@ Return ONLY valid JSON in this exact format:
     if "short_answer" not in quiz_data:
         quiz_data["short_answer"] = []
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # MODULE 10: Check for superseded document status
+    # ═══════════════════════════════════════════════════════════════════════
+    superseded_warning_text = ""
+    try:
+        if should_include_genealogy([body.doc_id]):
+            superseded_status = await check_superseded_status([body.doc_id], auth_tok)
+            if superseded_status:
+                superseded_warning_text = format_superseded_warning(superseded_status)
+                logger.info("Quiz: Source document is superseded, adding warning")
+    except Exception as e:
+        logger.warning("Quiz: Failed to check superseded status: %s", e)
+
     # Build DOCX
     job_id = str(uuid.uuid4())
     docx_path = _OUTPUTS_DIR / f"{job_id}_quiz.docx"
     doc = DocxDocument()
     doc.add_heading(quiz_data.get("title", f"Quiz: {filename}"), level=1)
+    
+    # Add superseded warning banner if applicable (Module 10)
+    if superseded_warning_text:
+        warning_para = doc.add_paragraph()
+        warning_run = warning_para.add_run("⚠️ " + superseded_warning_text.replace("⚠️ DOCUMENT STATUS WARNING:\n", ""))
+        warning_run.bold = True
+        warning_run.font.size = None  # Default size
+        doc.add_paragraph()
 
     doc.add_heading("Multiple Choice Questions", level=2)
     for i, q in enumerate(quiz_data.get("mcq", []), 1):

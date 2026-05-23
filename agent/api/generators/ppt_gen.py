@@ -574,6 +574,160 @@ def _build_sources_slide(prs, sources: List[str], title: str = "Sources & Refere
     _add_footer(slide)
 
 
+def _build_superseded_warning_slide(prs, warnings: List[Dict[str, str]]):
+    """
+    Layout: Superseded document warning slide.
+    Inserted as slide 2 when source docs are superseded.
+    """
+    from pptx.enum.text import PP_ALIGN
+    from pptx.dml.color import RGBColor
+    
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, _DARK_BLUE)
+    
+    # Warning title with icon-like styling
+    _add_title_bar(slide, "⚠️ Document Status Warning")
+    
+    # Warning message box
+    txBox = slide.shapes.add_textbox(
+        Inches(0.7), Inches(1.5), Inches(8.5), Inches(2.0),
+    )
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    
+    p = tf.paragraphs[0]
+    p.text = "The following source documents have been superseded and may contain outdated information:"
+    p.font.size = Pt(14)
+    p.font.color.rgb = _LIGHT_GRAY
+    p.space_after = Pt(16)
+    
+    # List of superseded docs
+    list_box = slide.shapes.add_textbox(
+        Inches(1.0), Inches(3.0), Inches(8.0), Inches(3.0),
+    )
+    list_tf = list_box.text_frame
+    list_tf.word_wrap = True
+    
+    for i, warning in enumerate(warnings[:6]):  # Cap at 6 warnings
+        if i == 0:
+            p = list_tf.paragraphs[0]
+        else:
+            p = list_tf.add_paragraph()
+        
+        old_doc = warning.get("old_doc", "Unknown Document")
+        new_doc = warning.get("new_doc", "Newer Version")
+        p.text = f"• \"{old_doc}\" → Superseded by \"{new_doc}\""
+        p.font.size = Pt(13)
+        p.font.color.rgb = _GOLD  # Use gold/amber color for warnings
+        p.font.bold = True
+        p.space_after = Pt(12)
+    
+    # Caution note at bottom
+    caution_box = slide.shapes.add_textbox(
+        Inches(0.7), Inches(6.2), Inches(8.5), Inches(0.8),
+    )
+    caution_tf = caution_box.text_frame
+    caution_tf.word_wrap = True
+    
+    p = caution_tf.paragraphs[0]
+    p.text = "Exercise caution when using information from outdated documents. Consider referencing the newer versions for current requirements."
+    p.font.size = Pt(11)
+    p.font.color.rgb = _MED_GRAY
+    p.font.italic = True
+    
+    _add_footer(slide)
+
+
+def _build_genealogy_slide(prs, genealogy_data: List[Dict[str, Any]]):
+    """
+    Layout: Document Genealogy & Provenance slide.
+    Shows document versions, relationships, and status.
+    """
+    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.shapes import MSO_SHAPE
+    
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, _NAVY)
+    _add_title_bar(slide, "Document Genealogy & Provenance")
+    
+    if not genealogy_data:
+        # Empty state
+        txBox = slide.shapes.add_textbox(
+            Inches(1.0), Inches(3.0), Inches(8.0), Inches(1.0),
+        )
+        tf = txBox.text_frame
+        p = tf.paragraphs[0]
+        p.text = "No genealogy information available for source documents."
+        p.font.size = Pt(14)
+        p.font.color.rgb = _MED_GRAY
+        p.font.italic = True
+        _add_footer(slide)
+        return
+    
+    # Create table-like structure
+    y_pos = 1.5
+    row_height = 0.6
+    
+    # Header
+    header_box = slide.shapes.add_textbox(
+        Inches(0.5), Inches(y_pos), Inches(9.0), Inches(0.4),
+    )
+    header_tf = header_box.text_frame
+    header_p = header_tf.paragraphs[0]
+    header_p.text = f"{'Document':<25} {'Version':<10} {'Status':<12} {'Relationships':<30}"
+    header_p.font.size = Pt(11)
+    header_p.font.color.rgb = _GOLD
+    header_p.font.bold = True
+    
+    y_pos += 0.5
+    
+    # Add horizontal line under header
+    line = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.5), Inches(y_pos - 0.1),
+        Inches(9.0), Inches(0.02)
+    )
+    line.fill.solid()
+    line.fill.fore_color.rgb = _GOLD
+    line.line.fill.background()
+    
+    # Document rows
+    for doc_info in genealogy_data[:8]:  # Cap at 8 docs
+        filename = doc_info.get("filename", "Unknown")[:23]
+        version = f"v{doc_info.get('version', '?')}"
+        status = doc_info.get("status", "unknown")
+        
+        # Build relationship text
+        rel_parts = []
+        if doc_info.get("superseded_by_name"):
+            rel_parts.append(f"→ {doc_info['superseded_by_name'][:15]}")
+        if doc_info.get("supersedes"):
+            supersedes_count = len(doc_info["supersedes"])
+            rel_parts.append(f"supersedes {supersedes_count}")
+        
+        rel_text = ", ".join(rel_parts) if rel_parts else "None"
+        
+        # Status color
+        status_color = _WHITE
+        if status == "superseded":
+            status_color = RGBColor(239, 68, 68)  # Red
+        elif status == "current":
+            status_color = RGBColor(34, 197, 94)  # Green
+        
+        row_box = slide.shapes.add_textbox(
+            Inches(0.5), Inches(y_pos), Inches(9.0), Inches(0.5),
+        )
+        row_tf = row_box.text_frame
+        row_p = row_tf.paragraphs[0]
+        row_p.text = f"{filename:<25} {version:<10} {status:<12} {rel_text:<30}"
+        row_p.font.size = Pt(10)
+        row_p.font.color.rgb = _LIGHT_GRAY
+        
+        y_pos += row_height
+    
+    _add_footer(slide)
+
+
 def _build_thank_you_slide(prs, title: str = "Thank You", subtitle: str = ""):
     """Layout 9: Closing slide."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -698,6 +852,15 @@ def build_pptx(
             elif layout == "sources":
                 sources = sd.get("sources", [])
                 _build_sources_slide(prs, sources, slide_title)
+
+            elif layout == "superseded_warning":
+                warnings = sd.get("warnings", [])
+                if warnings:  # Only build if there are warnings
+                    _build_superseded_warning_slide(prs, warnings)
+
+            elif layout == "genealogy":
+                genealogy_data = sd.get("genealogy_data", [])
+                _build_genealogy_slide(prs, genealogy_data)
 
             elif layout == "thank_you":
                 subtitle = sd.get("subtitle", "")
