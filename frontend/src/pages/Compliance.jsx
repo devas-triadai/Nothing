@@ -441,6 +441,19 @@ function EvalDetailPanel({ detail, onRun, onReport, onRefresh, onClose }) {
         </div>
       </div>
 
+      {/* Missing clauses warning */}
+      {detail.clause_scores?.filter(s => s.is_missing).length > 0 && (
+        <div style={{ padding: '8px 20px', borderBottom: '1px solid var(--border)', background: '#fef2f2', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertTriangle size={14} color="#dc2626" />
+          <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>
+            {detail.clause_scores.filter(s => s.is_missing).length} clause(s) missing from vendor submission
+          </span>
+          <span style={{ fontSize: 11, color: '#7f1d1d' }}>
+            — Vendor has silently skipped these requirements
+          </span>
+        </div>
+      )}
+
       {/* Category filter */}
       {categories.length > 0 && (
         <div style={{ padding: '8px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -479,6 +492,11 @@ function EvalDetailPanel({ detail, onRun, onReport, onRefresh, onClose }) {
                 {score.clause?.clause_title || score.clause?.clause_text?.slice(0, 60) || 'Untitled'}
               </span>
               <StatusBadge status={score.status} />
+              {score.is_missing && (
+                <span style={{ padding: '2px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, background: '#dc262622', color: '#dc2626', border: '1px solid #dc262644' }}>
+                  MISSING
+                </span>
+              )}
               <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 40, textAlign: 'right' }}>
                 {(score.confidence * 100).toFixed(0)}%
               </span>
@@ -487,6 +505,17 @@ function EvalDetailPanel({ detail, onRun, onReport, onRefresh, onClose }) {
             {/* Expanded detail */}
             {expandedClause === score.id && (
               <div style={{ padding: '0 20px 14px 54px', fontSize: 12, lineHeight: 1.6 }}>
+                {score.is_missing && (
+                  <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <AlertTriangle size={14} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                    <div>
+                      <strong style={{ color: '#dc2626', fontSize: 12 }}>Vendor Skipped This Clause</strong>
+                      <p style={{ margin: '2px 0 0', color: '#7f1d1d', fontSize: 11 }}>
+                        The vendor submission contains no text addressing this {score.clause?.is_critical ? 'CRITICAL ' : ''}{score.clause?.is_mandatory ? 'mandatory ' : ''}requirement. This may indicate the vendor has silently omitted compliance with this clause.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {score.clause?.clause_text && (
                   <div style={{ marginBottom: 8 }}>
                     <strong style={{ color: 'var(--text-secondary)' }}>Requirement:</strong>

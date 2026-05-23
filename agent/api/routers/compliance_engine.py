@@ -71,6 +71,7 @@ class ScoreClauseResponse(BaseModel):
     evidence_text: str = ""
     gaps_identified: Optional[str] = None
     recommendation: str = "review"
+    is_missing: bool = Field(default=False, description="True if vendor submission has no text addressing this clause")
 
 
 class ScoreAllRequest(BaseModel):
@@ -245,6 +246,7 @@ async def score_clause(
         evidence_text=score.evidence_text or "",
         gaps_identified=score.gaps_identified,
         recommendation=score.deviation_notes or "review",
+        is_missing=getattr(score, 'is_missing', False),
     )
 
 
@@ -309,6 +311,7 @@ async def score_all_clauses_endpoint(
             evidence_text=score.evidence_text or "",
             gaps_identified=score.gaps_identified,
             recommendation=score.deviation_notes or "review",
+            is_missing=getattr(score, 'is_missing', False),
         ))
 
     # Generate summary

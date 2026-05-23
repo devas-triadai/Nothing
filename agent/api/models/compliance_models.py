@@ -162,6 +162,7 @@ class ClauseScoreBase(BaseModel):
     evidence_text: Optional[str] = None
     gaps_identified: Optional[str] = None
     deviation_notes: Optional[str] = None
+    is_missing: bool = Field(default=False, description="True if vendor submission has no text addressing this clause")
 
 
 class ClauseScoreResponse(ClauseScoreBase):

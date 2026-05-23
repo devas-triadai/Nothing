@@ -481,6 +481,9 @@ class ClauseScore(Base):
     gaps_identified = Column(Text, nullable=True)
     deviation_notes = Column(Text, nullable=True)
     
+    # Missing clause detection — vendor silently skipped this requirement
+    is_missing = Column(Boolean, default=False)
+    
     # Manual review
     manually_reviewed = Column(Boolean, default=False)
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)

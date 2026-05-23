@@ -106,6 +106,7 @@ class ClauseScoreResponse(BaseModel):
     vendor_response_summary: Optional[str]
     evidence_text: Optional[str]
     gaps_identified: Optional[str]
+    is_missing: bool = False
     manually_reviewed: bool
     reviewer_notes: Optional[str]
     created_at: datetime
@@ -292,6 +293,7 @@ async def get_evaluation(
                 vendor_response_summary=score.vendor_response_summary,
                 evidence_text=score.evidence_text,
                 gaps_identified=score.gaps_identified,
+                is_missing=score.is_missing or False,
                 manually_reviewed=score.manually_reviewed,
                 reviewer_notes=score.reviewer_notes,
                 created_at=score.created_at
@@ -519,6 +521,8 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
             status_value = score_item.get("status", "pending")
             confidence_value = score_item.get("confidence", 0.0)
             
+            is_missing = score_item.get("is_missing", False)
+            
             if not existing_score:
                 existing_score = ClauseScore(
                     evaluation_id=evaluation_id,
@@ -529,6 +533,7 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
                     evidence_text=score_item.get("evidence_text", ""),
                     gaps_identified=score_item.get("gaps_identified"),
                     deviation_notes=score_item.get("recommendation", ""),
+                    is_missing=is_missing,
                     llm_raw_response=None,
                 )
                 db.add(existing_score)
@@ -539,6 +544,7 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
                 existing_score.evidence_text = score_item.get("evidence_text", "")
                 existing_score.gaps_identified = score_item.get("gaps_identified")
                 existing_score.deviation_notes = score_item.get("recommendation", "")
+                existing_score.is_missing = is_missing
         
         db.commit()
         
@@ -550,9 +556,12 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
         ).all()
         
         counts = {"compliant": 0, "partial": 0, "non_compliant": 0, "not_applicable": 0}
+        missing_count = 0
         for score in all_scores:
             if score.status in counts:
                 counts[score.status] += 1
+            if score.is_missing:
+                missing_count += 1
         
         evaluation.compliant_count = counts["compliant"]
         evaluation.partial_count = counts["partial"]
@@ -587,7 +596,8 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
             f"[Eval {evaluation_id}] COMPLETED — score={evaluation.overall_score:.2%}, "
             f"recommendation={evaluation.recommendation}, "
             f"clauses={evaluation.total_clauses} "
-            f"(C:{counts['compliant']}/P:{counts['partial']}/NC:{counts['non_compliant']}/NA:{counts['not_applicable']})"
+            f"(C:{counts['compliant']}/P:{counts['partial']}/NC:{counts['non_compliant']}/NA:{counts['not_applicable']}), "
+            f"missing_clauses={missing_count}"
         )
         
     except Exception as e:

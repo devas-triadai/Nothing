@@ -551,6 +551,40 @@ def score_clause_against_vendor(
     # Find relevant vendor text
     vendor_text, chunk_ids = find_relevant_vendor_text(clause, vendor_doc_id)
     
+    # ── Missing Clause Detection ──
+    # If no vendor text found and clause is mandatory/critical, flag immediately
+    if not vendor_text.strip():
+        if clause.is_mandatory or clause.is_critical:
+            logger.warning(
+                "MISSING CLAUSE DETECTED: %s (%s) — vendor submission has no relevant text",
+                clause.clause_number, clause.clause_title or "Untitled"
+            )
+            return ClauseScoreBase(
+                status=ClauseStatus.NON_COMPLIANT,
+                confidence=0.95,
+                vendor_response_summary="MISSING: Vendor submission does not address this requirement.",
+                evidence_text="",
+                gaps_identified=(
+                    f"Clause {clause.clause_number} ('{clause.clause_title or 'Untitled'}') "
+                    f"is {'CRITICAL and ' if clause.is_critical else ''}mandatory but the vendor "
+                    f"submission contains no text addressing this requirement. "
+                    f"This clause has been silently skipped by the vendor."
+                ),
+                deviation_notes="reject",
+                is_missing=True,
+            )
+        else:
+            # Non-mandatory clause with no vendor text — NOT_APPLICABLE
+            return ClauseScoreBase(
+                status=ClauseStatus.NOT_APPLICABLE,
+                confidence=0.80,
+                vendor_response_summary="No relevant vendor text found; clause may not apply to this scope.",
+                evidence_text="",
+                gaps_identified=None,
+                deviation_notes=None,
+                is_missing=True,
+            )
+    
     # Score with LLM
     result = score_single_clause(clause, vendor_text)
     
@@ -564,7 +598,8 @@ def score_clause_against_vendor(
         vendor_response_summary=result.vendor_response_summary,
         evidence_text=result.evidence_text,
         gaps_identified=result.gaps_identified,
-        deviation_notes=result.recommendation if result.recommendation != "review" else None
+        deviation_notes=result.recommendation if result.recommendation != "review" else None,
+        is_missing=False,
     )
 
 
@@ -590,27 +625,87 @@ def score_all_clauses(
     total = len(clauses)
     
     if use_batch and total > 3:
-        # Use batch scoring
-        batch_results = score_clauses_batch(clauses, vendor_doc_id)
-        for clause, result in zip(clauses, batch_results):
-            confidence_factors = calculate_confidence_factors(result, clause)
-            final_confidence = confidence_factors["final_confidence"]
-            
-            score = ClauseScoreBase(
-                status=result.status,
-                confidence=final_confidence,
-                vendor_response_summary=result.vendor_response_summary,
-                evidence_text=result.evidence_text,
-                gaps_identified=result.gaps_identified,
-                deviation_notes=result.recommendation if result.recommendation != "review" else None
-            )
-            results.append((clause, score))
+        # ── Pre-check: Detect missing clauses before batch scoring ──
+        # For each clause, check if vendor has relevant text. If not, flag as missing.
+        clauses_to_batch = []
+        missing_indices = {}  # index -> ClauseScoreBase for missing clauses
+        
+        for i, clause in enumerate(clauses):
+            vendor_text, _ = find_relevant_vendor_text(clause, vendor_doc_id)
+            if not vendor_text.strip():
+                # Missing clause — handle without LLM
+                if clause.is_mandatory or clause.is_critical:
+                    score = ClauseScoreBase(
+                        status=ClauseStatus.NON_COMPLIANT,
+                        confidence=0.95,
+                        vendor_response_summary="MISSING: Vendor submission does not address this requirement.",
+                        evidence_text="",
+                        gaps_identified=(
+                            f"Clause {clause.clause_number} ('{clause.clause_title or 'Untitled'}') "
+                            f"is {'CRITICAL and ' if clause.is_critical else ''}mandatory but the vendor "
+                            f"submission contains no text addressing this requirement. "
+                            f"This clause has been silently skipped by the vendor."
+                        ),
+                        deviation_notes="reject",
+                        is_missing=True,
+                    )
+                else:
+                    score = ClauseScoreBase(
+                        status=ClauseStatus.NOT_APPLICABLE,
+                        confidence=0.80,
+                        vendor_response_summary="No relevant vendor text found; clause may not apply to this scope.",
+                        evidence_text="",
+                        gaps_identified=None,
+                        deviation_notes=None,
+                        is_missing=True,
+                    )
+                missing_indices[i] = score
+                logger.warning(
+                    "MISSING CLAUSE (batch): %s (%s)",
+                    clause.clause_number, clause.clause_title or "Untitled"
+                )
+            else:
+                clauses_to_batch.append(clause)
+        
+        # Batch-score only clauses that have vendor text
+        if clauses_to_batch:
+            batch_results = score_clauses_batch(clauses_to_batch, vendor_doc_id)
+        else:
+            batch_results = []
+        
+        # Merge results in original order
+        batch_idx = 0
+        for i, clause in enumerate(clauses):
+            if i in missing_indices:
+                results.append((clause, missing_indices[i]))
+            else:
+                result = batch_results[batch_idx]
+                batch_idx += 1
+                confidence_factors = calculate_confidence_factors(result, clause)
+                final_confidence = confidence_factors["final_confidence"]
+                
+                score = ClauseScoreBase(
+                    status=result.status,
+                    confidence=final_confidence,
+                    vendor_response_summary=result.vendor_response_summary,
+                    evidence_text=result.evidence_text,
+                    gaps_identified=result.gaps_identified,
+                    deviation_notes=result.recommendation if result.recommendation != "review" else None,
+                    is_missing=False,
+                )
+                results.append((clause, score))
             
             if progress_callback:
                 progress_percent = int(len(results) / total * 100)
-                progress_callback(clause.clause_number, result.status.value, progress_percent)
+                progress_callback(clause.clause_number, results[-1][1].status.value if hasattr(results[-1][1].status, 'value') else str(results[-1][1].status), progress_percent)
+        
+        if missing_indices:
+            logger.info(
+                "Missing clause detection (batch): %d/%d clauses have no vendor coverage",
+                len(missing_indices), total
+            )
     else:
-        # Individual scoring
+        # Individual scoring (already has missing clause detection via score_clause_against_vendor)
         for i, clause in enumerate(clauses):
             score = score_clause_against_vendor(clause, vendor_doc_id)
             results.append((clause, score))
@@ -629,7 +724,7 @@ def generate_evaluation_summary(
     Generate summary statistics from scored clauses.
     
     Returns:
-        Dict with counts, percentages, and recommendation
+        Dict with counts, percentages, recommendation, and missing clause alerts
     """
     total = len(scored_clauses)
     
@@ -643,10 +738,21 @@ def generate_evaluation_summary(
     
     category_breakdown = {}
     total_confidence = 0.0
+    missing_clauses = []  # Track clauses vendor silently skipped
     
     for clause, score in scored_clauses:
         counts[score.status.value] += 1
         total_confidence += score.confidence
+        
+        # Track missing clauses
+        if getattr(score, 'is_missing', False):
+            missing_clauses.append({
+                "clause_number": clause.clause_number,
+                "clause_title": clause.clause_title or "Untitled",
+                "is_mandatory": clause.is_mandatory,
+                "is_critical": clause.is_critical,
+                "category": clause.category.value,
+            })
         
         cat = clause.category.value
         if cat not in category_breakdown:
@@ -666,8 +772,13 @@ def generate_evaluation_summary(
     else:
         compliance_percentage = 0.0
     
-    # Determine recommendation
-    if counts["non_compliant"] == 0 and counts["compliant"] >= counts["partial"]:
+    # Determine recommendation — missing critical clauses automatically trigger reject
+    critical_missing = [m for m in missing_clauses if m["is_critical"]]
+    mandatory_missing = [m for m in missing_clauses if m["is_mandatory"]]
+    
+    if critical_missing:
+        recommendation = "reject"
+    elif counts["non_compliant"] == 0 and counts["compliant"] >= counts["partial"]:
         recommendation = "accept"
     elif counts["non_compliant"] <= 2 and counts["compliant"] > counts["non_compliant"]:
         recommendation = "conditional"
@@ -681,6 +792,10 @@ def generate_evaluation_summary(
         "average_confidence": round(total_confidence / total, 2) if total > 0 else 0.0,
         "category_breakdown": category_breakdown,
         "recommendation": recommendation,
+        "missing_clauses": missing_clauses,
+        "missing_clause_count": len(missing_clauses),
+        "critical_missing_count": len(critical_missing),
+        "mandatory_missing_count": len(mandatory_missing),
     }
 
 

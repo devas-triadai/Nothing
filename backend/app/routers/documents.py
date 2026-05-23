@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 import hashlib
 import logging
@@ -12,7 +13,7 @@ import re
 import httpx
 
 from app.database import get_db
-from app.models.models import User, Document, AuditLog, DocEdge
+from app.models.models import User, Document, AuditLog, DocEdge, DocEdgeType, DocumentChangeSummary, DocumentEntity
 from app.routers.auth import require_superadmin, require_admin, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -888,36 +889,55 @@ def export_lineage(
 def get_document_diff(
     id1: int,
     id2: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Generate a text diff between two documents."""
+    """Generate a text diff between two documents with LLM change summary."""
     import difflib
+    import httpx
     
     doc1 = db.query(Document).filter(Document.id == id1).first()
     doc2 = db.query(Document).filter(Document.id == id2).first()
     
     if not doc1 or not doc2:
         raise HTTPException(status_code=404, detail="One or both documents not found")
-        
-    path1 = os.path.join(UPLOAD_DIR, doc1.filename)
-    path2 = os.path.join(UPLOAD_DIR, doc2.filename)
     
-    # Simple extraction for diff (assuming text or extracting via a basic util if needed)
-    # In a full production system this would use the Agent's OCR pipeline or cached text
-    text1 = ""
-    text2 = ""
+    _AGENT_BASE = os.environ.get("AGRA_AGENT_URL", "http://localhost:8005")
     
-    try:
-        if doc1.file_type == "txt":
-            with open(path1, "r", encoding="utf-8", errors="ignore") as f:
-                text1 = f.read()
-        if doc2.file_type == "txt":
-            with open(path2, "r", encoding="utf-8", errors="ignore") as f:
-                text2 = f.read()
-    except Exception as e:
-        pass
+    def _get_doc_text(doc) -> str:
+        """Get document text — try local .txt first, then agent vector store."""
+        # Try local file for txt
+        if doc.file_type == "txt":
+            path = os.path.join(UPLOAD_DIR, doc.filename)
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    return f.read()
+            except Exception:
+                pass
         
-    diff = list(difflib.unified_diff(
+        # Fetch from agent vector store (works for all file types)
+        qdrant_id = doc.qdrant_doc_id or str(doc.id)
+        try:
+            with httpx.Client(base_url=_AGENT_BASE, timeout=30.0) as client:
+                resp = client.get(f"/api/compliance/doc-text/{qdrant_id}")
+                if resp.status_code == 200:
+                    return resp.json().get("full_text", "")
+        except Exception as e:
+            logger.warning(f"Failed to fetch text from agent for doc {doc.id}: {e}")
+        
+        return ""
+    
+    text1 = _get_doc_text(doc1)
+    text2 = _get_doc_text(doc2)
+    
+    if not text1 and not text2:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot extract text from either document. Documents may not be indexed yet."
+        )
+    
+    # Generate unified diff
+    diff_lines = list(difflib.unified_diff(
         text1.splitlines(),
         text2.splitlines(),
         fromfile=doc1.original_filename,
@@ -925,7 +945,47 @@ def get_document_diff(
         lineterm=""
     ))
     
-    return {"diff": diff}
+    # Get LLM change summary if available
+    change_summary = None
+    summary_record = db.query(DocumentChangeSummary).filter(
+        ((DocumentChangeSummary.from_doc_id == id1) & (DocumentChangeSummary.to_doc_id == id2)) |
+        ((DocumentChangeSummary.from_doc_id == id2) & (DocumentChangeSummary.to_doc_id == id1))
+    ).first()
+    
+    if summary_record:
+        change_summary = {
+            "summary_text": summary_record.summary_text,
+            "major_changes": summary_record.major_changes or [],
+            "minor_changes": summary_record.minor_changes or [],
+            "impact_assessment": summary_record.impact_assessment,
+            "action_required": summary_record.action_required,
+        }
+    
+    # Compute stats
+    additions = sum(1 for l in diff_lines if l.startswith('+') and not l.startswith('+++'))
+    deletions = sum(1 for l in diff_lines if l.startswith('-') and not l.startswith('---'))
+    
+    return {
+        "doc1": {
+            "id": doc1.id,
+            "filename": doc1.original_filename,
+            "version": doc1.version,
+            "file_type": doc1.file_type,
+        },
+        "doc2": {
+            "id": doc2.id,
+            "filename": doc2.original_filename,
+            "version": doc2.version,
+            "file_type": doc2.file_type,
+        },
+        "diff": diff_lines,
+        "stats": {
+            "additions": additions,
+            "deletions": deletions,
+            "total_changes": additions + deletions,
+        },
+        "change_summary": change_summary,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

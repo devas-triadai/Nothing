@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch } from '../utils/api'
-import { Network, Search, Filter, Maximize2, GitBranch, ArrowLeft, RefreshCw, ZoomIn, ZoomOut, Download, Link2, Calendar, FileText, GitCompare, X, ChevronDown, Check } from 'lucide-react'
+import { Network, Search, Filter, Maximize2, GitBranch, ArrowLeft, RefreshCw, ZoomIn, ZoomOut, Download, Link2, Calendar, FileText, GitCompare, X, ChevronDown, Check, CheckCircle } from 'lucide-react'
 import * as d3 from 'd3'
 
 // ── Theme / Colors ──
@@ -737,50 +737,10 @@ export default function Genealogy() {
 
       {/* Diff Modal */}
       {showDiffModal && selectedNode && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ width: 800, maxHeight: '80vh', background: 'var(--card-bg)', borderRadius: 16, border: '1px solid var(--border)', padding: 24, overflow: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>Version Comparison</h3>
-              <button onClick={() => setShowDiffModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                <X size={20} />
-              </button>
-            </div>
-            
-            {selectedNode.parent_doc_id ? (
-              <div style={{ display: 'flex', gap: 20 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12 }}>Previous Version</div>
-                  <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>
-                      Parent document content would be displayed here.<br/>
-                      (Requires document content fetch from backend)
-                    </div>
-                  </div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 12 }}>Current Version (v{selectedNode.version})</div>
-                  <div style={{ padding: 16, background: 'rgba(16,185,129,0.1)', borderRadius: 8, border: '1px solid var(--primary)' }}>
-                    <div style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>
-                      Current document content would be displayed here.<br/>
-                      (Requires document content fetch from backend)
-                    </div>
-                    {selectedNode.version_notes && (
-                      <div style={{ marginTop: 16, padding: 12, background: 'var(--card-bg)', borderRadius: 6 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Changes:</div>
-                        <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>{selectedNode.version_notes}</div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                <GitCompare size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
-                <p>This is the root document (v1.0). No previous version exists for comparison.</p>
-              </div>
-            )}
-          </div>
-        </div>
+        <DiffModal
+          node={selectedNode}
+          onClose={() => setShowDiffModal(false)}
+        />
       )}
     </div>
   )
@@ -793,6 +753,175 @@ function DetailRow({ label, value, capitalize }) {
       <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', textTransform: capitalize ? 'capitalize' : 'none' }}>
         {value}
       </span>
+    </div>
+  )
+}
+
+function DiffModal({ node, onClose }) {
+  const [diffData, setDiffData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (node.parent_doc_id) {
+      fetchDiff()
+    }
+  }, [node])
+
+  async function fetchDiff() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await apiFetch(`/api/documents/${node.parent_doc_id}/diff/${node.id}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `HTTP ${res.status}`)
+      }
+      setDiffData(await res.json())
+    } catch (e) {
+      setError(e.message || 'Failed to load diff')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function renderDiffLine(line, idx) {
+    let bg = 'transparent'
+    let color = 'var(--text-primary)'
+    let prefix = ' '
+
+    if (line.startsWith('+++') || line.startsWith('---')) {
+      bg = 'var(--bg-surface)'
+      color = 'var(--text-muted)'
+      prefix = ''
+    } else if (line.startsWith('+')) {
+      bg = '#22c55e18'
+      color = '#16a34a'
+      prefix = '+'
+    } else if (line.startsWith('-')) {
+      bg = '#ef444418'
+      color = '#dc2626'
+      prefix = '-'
+    } else if (line.startsWith('@@')) {
+      bg = '#3b82f612'
+      color = '#3b82f6'
+      prefix = ''
+    }
+
+    return (
+      <div key={idx} style={{ background: bg, padding: '1px 12px', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7, color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {line}
+      </div>
+    )
+  }
+
+  const impactColors = { High: '#ef4444', Medium: '#f59e0b', Low: '#22c55e' }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 900, maxHeight: '85vh', background: 'var(--card-bg)', borderRadius: 16, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', margin: 0 }}>Version Comparison</h3>
+            {diffData && (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                v{diffData.doc1?.version || '?'} → v{diffData.doc2?.version || '?'}
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflow: 'auto', padding: 0 }}>
+          {!node.parent_doc_id ? (
+            <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+              <GitCompare size={48} style={{ marginBottom: 16, opacity: 0.5 }} />
+              <p style={{ margin: 0, fontSize: 14 }}>This is the root document (v1). No previous version exists for comparison.</p>
+            </div>
+          ) : loading ? (
+            <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)', fontSize: 14 }}>
+              <RefreshCw size={24} style={{ marginBottom: 12, animation: 'spin 1s linear infinite' }} />
+              <p style={{ margin: 0 }}>Loading diff…</p>
+            </div>
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: 60, color: '#ef4444', fontSize: 13 }}>
+              <p style={{ margin: 0 }}>⚠ {error}</p>
+              <button onClick={fetchDiff} style={{ marginTop: 12, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 12 }}>
+                Retry
+              </button>
+            </div>
+          ) : diffData ? (
+            <>
+              {/* Stats bar */}
+              <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>{diffData.doc1?.filename}</strong> → <strong style={{ color: 'var(--text-primary)' }}>{diffData.doc2?.filename}</strong>
+                </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
+                  <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>+{diffData.stats?.additions || 0}</span>
+                  <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>-{diffData.stats?.deletions || 0}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{diffData.stats?.total_changes || 0} changes</span>
+                </div>
+              </div>
+
+              {/* LLM Change Summary */}
+              {diffData.change_summary && (
+                <div style={{ padding: '12px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>AI Change Summary</div>
+                  <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {diffData.change_summary.summary_text}
+                  </p>
+                  {diffData.change_summary.impact_assessment && (
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                      background: (impactColors[diffData.change_summary.impact_assessment] || '#6b7280') + '22',
+                      color: impactColors[diffData.change_summary.impact_assessment] || '#6b7280',
+                    }}>
+                      Impact: {diffData.change_summary.impact_assessment}
+                    </span>
+                  )}
+                  {diffData.change_summary.major_changes?.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 600, marginBottom: 4 }}>Major Changes:</div>
+                      {diffData.change_summary.major_changes.map((c, i) => (
+                        <div key={i} style={{ fontSize: 12, color: 'var(--text-primary)', paddingLeft: 12, position: 'relative', marginBottom: 2 }}>
+                          <span style={{ position: 'absolute', left: 0 }}>•</span> {c}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {diffData.change_summary.action_required && (
+                    <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 4, background: '#f59e0b18', border: '1px solid #f59e0b44', fontSize: 12, color: '#92400e' }}>
+                      <strong>Action Required:</strong> {diffData.change_summary.action_required}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Diff lines */}
+              {diffData.diff?.length > 0 ? (
+                <div style={{ borderTop: '1px solid var(--border)' }}>
+                  {diffData.diff.map((line, idx) => renderDiffLine(line, idx))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: 13 }}>
+                  <CheckCircle size={32} style={{ marginBottom: 12, color: '#22c55e' }} />
+                  <p style={{ margin: 0 }}>No textual differences detected between versions.</p>
+                  {node.version_notes && (
+                    <p style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+                      Version notes: {node.version_notes}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }
