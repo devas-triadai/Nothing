@@ -188,11 +188,15 @@ async def cors_middleware(request: Request, call_next):
 # ── Register Routers ──
 from api.routers import upload, chat, generate, vlm, drawing, sessions, evaluation
 
+# Phase 3: Enhanced Drawing Pipeline
+from api.routers import drawing_enhanced
+
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
 app.include_router(generate.router,   prefix="/api/agent", tags=["Generation"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
 app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
+app.include_router(drawing_enhanced.router, prefix="/api/agent", tags=["Drawing Enhanced"])
 app.include_router(sessions.router,   prefix="/api/agent", tags=["Sessions"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
 
