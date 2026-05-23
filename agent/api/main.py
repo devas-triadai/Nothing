@@ -191,8 +191,12 @@ from api.routers import upload, chat, generate, vlm, drawing, sessions, evaluati
 # Phase 3: Enhanced Drawing Pipeline
 from api.routers import drawing_enhanced
 
+# Phase 1: Chat Drawing Query (Chat Enhancement)
+from api.routers import chat_drawing_query
+
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
+app.include_router(chat_drawing_query.router, prefix="/api/agent", tags=["Chat Drawing Query"])
 app.include_router(generate.router,   prefix="/api/agent", tags=["Generation"])
 app.include_router(vlm.router,        prefix="/api/agent", tags=["VLM"])
 app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])

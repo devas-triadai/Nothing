@@ -59,6 +59,54 @@ from .clause_scorer import (
     ScoringResult,
 )
 
+# Chat Enhancement Phase 2: Drawing Query Router exports
+from .drawing_query_router import (
+    classify_intent_fast,
+    classify_intent,
+    classify_intent_llm,
+    get_query_plan,
+    route_query,
+    QueryIntent,
+    QueryPlan,
+    ProcessingStep,
+    QueryMetricsCollector,
+)
+
+# Chat Enhancement Phase 3: Drawing Context Search exports
+from .drawing_context_search import (
+    DrawingSearchTerms,
+    SearchResult,
+    ContextAssembly,
+    SearchMetrics,
+    extract_search_terms,
+    build_vessel_queries,
+    build_drawing_queries,
+    build_equipment_queries,
+    build_compliance_queries,
+    calculate_relevance_boost,
+    search_drawing_context,
+    quick_vessel_search,
+    quick_drawing_search,
+    quick_equipment_search,
+)
+
+# Chat Enhancement Phase 4: Drawing Suggestion Engine exports
+from .drawing_suggestion_engine import (
+    SuggestionType,
+    Suggestion,
+    SuggestionSet,
+    SuggestionMetrics,
+    generate_suggestions,
+    generate_vessel_match_suggestions,
+    generate_upgrade_suggestions,
+    generate_advancement_suggestions,
+    generate_quality_suggestions,
+    generate_standardization_suggestions,
+    generate_compliance_suggestions,
+    quick_quality_suggestion,
+    quick_vessel_suggestion,
+)
+
 __all__ = [
     # Drawing Classifier
     "classify_drawing",
@@ -104,4 +152,43 @@ __all__ = [
     "score_all_clauses",
     "generate_evaluation_summary",
     "ScoringResult",
+    # Chat Drawing Query Router (Phase 2)
+    "classify_intent_fast",
+    "classify_intent",
+    "classify_intent_llm",
+    "get_query_plan",
+    "route_query",
+    "QueryIntent",
+    "QueryPlan",
+    "ProcessingStep",
+    "QueryMetricsCollector",
+    # Chat Drawing Context Search (Phase 3)
+    "DrawingSearchTerms",
+    "SearchResult",
+    "ContextAssembly",
+    "SearchMetrics",
+    "extract_search_terms",
+    "build_vessel_queries",
+    "build_drawing_queries",
+    "build_equipment_queries",
+    "build_compliance_queries",
+    "calculate_relevance_boost",
+    "search_drawing_context",
+    "quick_vessel_search",
+    "quick_drawing_search",
+    "quick_equipment_search",
+    # Chat Drawing Suggestion Engine (Phase 4)
+    "SuggestionType",
+    "Suggestion",
+    "SuggestionSet",
+    "SuggestionMetrics",
+    "generate_suggestions",
+    "generate_vessel_match_suggestions",
+    "generate_upgrade_suggestions",
+    "generate_advancement_suggestions",
+    "generate_quality_suggestions",
+    "generate_standardization_suggestions",
+    "generate_compliance_suggestions",
+    "quick_quality_suggestion",
+    "quick_vessel_suggestion",
 ]

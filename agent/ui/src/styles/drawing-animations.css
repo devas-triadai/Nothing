@@ -1,0 +1,213 @@
+/**
+ * AGRA Chat Enhancement Phase 6 — Drawing Animations
+ * CSS animations for confidence bars, loading states, and transitions.
+ */
+
+/* Confidence bar animation */
+@keyframes confidenceGrow {
+  from {
+    width: 0%;
+  }
+}
+
+.confidence-bar-fill {
+  animation: confidenceGrow 0.6s ease-out forwards;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Pulse animation for loading states */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Slide in from bottom */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-in-up {
+  animation: slideInUp 0.4s ease-out forwards;
+}
+
+/* Stagger animation for suggestions */
+@keyframes staggerIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.suggestion-item {
+  animation: staggerIn 0.3s ease-out forwards;
+  animation-delay: calc(var(--index) * 0.1s);
+  opacity: 0;
+}
+
+/* Drop zone pulse when dragging */
+@keyframes dropZonePulse {
+  0%, 100% {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+}
+
+.drop-zone-active {
+  animation: dropZonePulse 1.5s ease-in-out infinite;
+}
+
+/* Shimmer effect for loading */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Bounce animation for notifications */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.bounce {
+  animation: bounce 0.5s ease-in-out;
+}
+
+/* Scale animation for buttons */
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+/* Progress bar animation */
+@keyframes progressGrow {
+  from {
+    width: 0%;
+  }
+}
+
+.progress-bar-animated {
+  animation: progressGrow 0.5s ease-out forwards;
+}
+
+/* Source item hover effect */
+.source-item {
+  transition: all 0.2s ease;
+}
+
+.source-item:hover {
+  transform: translateX(4px);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* Suggestion card hover */
+.suggestion-card {
+  transition: all 0.2s ease;
+}
+
+.suggestion-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Attachment preview hover */
+.attachment-preview {
+  transition: all 0.2s ease;
+}
+
+.attachment-preview:hover {
+  transform: scale(1.02);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+  }
+}

@@ -20,6 +20,12 @@ import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 
+// Phase 5: Drawing Query Components
+import DrawingDropZone from '../components/DrawingDropZone';
+import DrawingAttachment from '../components/DrawingAttachment';
+import DrawingAnswerBubble from '../components/DrawingAnswerBubble';
+import ConfidencePanel from '../components/ConfidencePanel';
+
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
   if (!ts) return '';
@@ -394,6 +400,11 @@ export default function Chat() {
   const [selectedFiles, setSelectedFiles] = useState([]); // VLM image attachments
   const [attachedDocs, setAttachedDocs] = useState([]);   // Document attachments for chat
   const [isPollingDrawing, setIsPollingDrawing] = useState(false);
+
+  // Phase 5: Drawing Query State
+  const [drawingQueryJob, setDrawingQueryJob] = useState(null); // Active drawing query job
+  const [isQueryingDrawing, setIsQueryingDrawing] = useState(false); // Polling state
+  const [showDrawingDropZone, setShowDrawingDropZone] = useState(false); // Toggle drop zone
 
   // ── Workstream A: Persistent Draft State ──
   // Unified draft model: text + all file attachments + upload-in-progress flag.
@@ -1518,6 +1529,158 @@ export default function Chat() {
     }
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  //  PHASE 5: DRAWING QUERY HANDLER
+  // ═══════════════════════════════════════════════════════════════
+
+  const handleDrawingQuery = async (queryText, imageFile) => {
+    // Submit a drawing with natural language query to the backend
+    if (!imageFile || !queryText.trim()) return;
+
+    setIsQueryingDrawing(true);
+    setShowDrawingDropZone(false);
+
+    const token = getToken();
+    const tempUrl = URL.createObjectURL(imageFile);
+
+    // Add user message with image
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: queryText,
+      image: tempUrl,
+      timestamp: Date.now(),
+    }]);
+
+    // Add loading message
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: '🔍 Analyzing drawing and searching database...',
+      isLoading: true,
+      timestamp: Date.now(),
+    }]);
+
+    try {
+      // Submit drawing query
+      const formData = new FormData();
+      formData.append('image', imageFile);
+      formData.append('query', queryText);
+      formData.append('session_id', activeSessionId || 'default');
+
+      const resp = await fetch(getApiUrl('/api/agent/chat/drawing_query'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      }
+
+      const { job_id } = await resp.json();
+      setDrawingQueryJob(job_id);
+
+      // Poll for results
+      let attempts = 0;
+      const maxAttempts = 60; // 3 minutes max (3s intervals)
+
+      const pollInterval = setInterval(async () => {
+        attempts++;
+
+        try {
+          const statusResp = await fetch(getApiUrl(`/api/agent/chat/drawing_query/${job_id}`), {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          const statusData = await statusResp.json();
+
+          if (statusData.status === 'completed' && statusData.result) {
+            clearInterval(pollInterval);
+            setIsQueryingDrawing(false);
+            setDrawingQueryJob(null);
+
+            const result = statusData.result;
+
+            // Replace loading message with result
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.isLoading);
+              return [...filtered, {
+                role: 'assistant',
+                content: result.answer || 'Analysis complete.',
+                drawingResult: result,
+                timestamp: Date.now(),
+              }];
+            });
+
+            showNotification('Drawing analysis complete', 'success');
+
+          } else if (statusData.status === 'failed') {
+            clearInterval(pollInterval);
+            setIsQueryingDrawing(false);
+            setDrawingQueryJob(null);
+
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.isLoading);
+              return [...filtered, {
+                role: 'assistant',
+                content: `❌ Analysis failed: ${statusData.error_message || 'Unknown error'}`,
+                isError: true,
+                timestamp: Date.now(),
+              }];
+            });
+          }
+
+          // Timeout check
+          if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setIsQueryingDrawing(false);
+            setDrawingQueryJob(null);
+
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.isLoading);
+              return [...filtered, {
+                role: 'assistant',
+                content: '⏱️ Analysis timed out. The drawing may be too complex or the system is busy.',
+                isError: true,
+                timestamp: Date.now(),
+              }];
+            });
+          }
+
+        } catch (pollErr) {
+          console.error('Polling error:', pollErr);
+        }
+
+      }, 3000);
+
+    } catch (err) {
+      console.error('Drawing query error:', err);
+      setIsQueryingDrawing(false);
+      setDrawingQueryJob(null);
+
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.isLoading);
+        return [...filtered, {
+          role: 'assistant',
+          content: `❌ Failed to analyze drawing: ${err.message}`,
+          isError: true,
+          timestamp: Date.now(),
+        }];
+      });
+
+      showNotification('Drawing analysis failed', 'error');
+    }
+  };
+
+  const handleDrawingDrop = (files) => {
+    // Handle files dropped in the drawing drop zone
+    if (files.length > 0) {
+      // Add to selected files
+      setSelectedFiles(prev => [...prev, ...files]);
+      // Hide drop zone
+      setShowDrawingDropZone(false);
+    }
+  };
+
   // Citation click handler — attach to document, read data-cite attr
   useEffect(() => {
     const handler = (e) => {
@@ -1738,8 +1901,33 @@ export default function Chat() {
                         />
                       )}
 
-                      {/* Workstream F: Inline Drawing Extraction Results */}
-                      {msg.drawingResult && !msg.streaming && (
+                      {/* Phase 5: Drawing Query Results (New Format) */}
+                      {msg.drawingResult && msg.drawingResult.answer && !msg.streaming && (
+                        <div style={{ marginTop: '12px' }}>
+                          <DrawingAnswerBubble
+                            answer={msg.drawingResult.answer}
+                            drawingSummary={msg.drawingResult.drawing_summary}
+                            ragSources={msg.drawingResult.rag_sources}
+                            confidence={msg.drawingResult.confidence}
+                            suggestions={msg.drawingResult.suggestions}
+                            isDark={theme === 'dark'}
+                          />
+                          
+                          {/* Confidence Panel (compact) */}
+                          {msg.drawingResult.confidence && (
+                            <div style={{ marginTop: '8px' }}>
+                              <ConfidencePanel
+                                confidence={msg.drawingResult.confidence}
+                                isDark={theme === 'dark'}
+                                compact={true}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Workstream F: Legacy Drawing Extraction Results */}
+                      {msg.drawingResult && !msg.drawingResult.answer && !msg.streaming && (
                         <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg, 12px)', overflow: 'hidden' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                             📐 Drawing Parameters
@@ -1890,25 +2078,62 @@ export default function Chat() {
             </div>
           )}
 
+          {/* Phase 5: Drawing Drop Zone */}
+          {showDrawingDropZone && (
+            <div style={{ marginBottom: '12px' }}>
+              <DrawingDropZone
+                onFilesDrop={handleDrawingDrop}
+                disabled={isQueryingDrawing}
+                isDark={theme === 'dark'}
+              />
+            </div>
+          )}
+
+          {/* Phase 5: Drawing Attachments with Query Support */}
           {selectedFiles.length > 0 && (
-            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-              {selectedFiles.map((file, idx) => (
-                <div key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px' }}>
-                  {file.type.startsWith('image/') && <img src={URL.createObjectURL(file)} alt="" style={{ height: '22px', borderRadius: '3px' }} />}
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{file.name}</span>
-                  <button onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
-                </div>
-              ))}
-              <button onClick={() => setSelectedFiles([])} style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear all</button>
-              {selectedFiles.length === 1 && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                {selectedFiles.map((file, idx) => (
+                  <DrawingAttachment
+                    key={idx}
+                    file={file}
+                    onRemove={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
+                    isUploading={isQueryingDrawing}
+                    isDark={theme === 'dark'}
+                  />
+                ))}
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <button
-                  onClick={handleDrawingExtract}
-                  style={{ padding: '4px 8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', marginLeft: 'auto', opacity: isPollingDrawing ? 0.6 : 1 }}
-                  disabled={isPollingDrawing}
+                  onClick={() => setSelectedFiles([])}
+                  style={{ padding: '6px 12px', fontSize: '12px', color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer' }}
                 >
-                  {isPollingDrawing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Extract'}
+                  Clear
                 </button>
-              )}
+                
+                {selectedFiles.length === 1 && (
+                  <>
+                    {/* Legacy extract button */}
+                    <button
+                      onClick={handleDrawingExtract}
+                      disabled={isPollingDrawing || isQueryingDrawing}
+                      style={{ padding: '6px 12px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', opacity: (isPollingDrawing || isQueryingDrawing) ? 0.6 : 1 }}
+                    >
+                      {isPollingDrawing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : 'Extract Parameters'}
+                    </button>
+                    
+                    {/* Phase 5: Query button */}
+                    <button
+                      onClick={() => handleDrawingQuery(input.trim() || "Analyze this drawing", selectedFiles[0])}
+                      disabled={isQueryingDrawing || isPollingDrawing}
+                      style={{ padding: '6px 12px', background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', opacity: (isQueryingDrawing || isPollingDrawing) ? 0.6 : 1 }}
+                    >
+                      {isQueryingDrawing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : '🔍 Smart Analyze'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -1928,6 +2153,24 @@ export default function Chat() {
             <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
               <Paperclip size={17} />
             </button>
+            
+            {/* Phase 5: Drawing Drop Zone Toggle */}
+            <button 
+              onClick={() => setShowDrawingDropZone(!showDrawingDropZone)}
+              style={{
+                ...styles.attachBtn,
+                background: showDrawingDropZone ? 'rgba(139, 92, 246, 0.2)' : undefined,
+                borderColor: showDrawingDropZone ? '#8b5cf6' : undefined,
+              }}
+              title="Drawing analysis"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: showDrawingDropZone ? '#8b5cf6' : 'inherit' }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </button>
+            
             <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf,.docx,.doc,.txt" onChange={handleFileAttach} />
             <textarea
               ref={inputRef}
