@@ -926,3 +926,499 @@ def get_document_diff(
     ))
     
     return {"diff": diff}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MODULE 7: AUTOMATED METADATA EXTRACTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExtractedMetadataRequest(BaseModel):
+    """Request body for storing LLM-extracted document metadata."""
+    version_refs: Optional[List[str]] = Field(default_factory=list, max_length=50)
+    cross_references: Optional[List[Dict[str, str]]] = Field(default_factory=list, max_length=100)
+    amendment_dates: Optional[List[str]] = Field(default_factory=list, max_length=20)
+    effective_date: Optional[str] = None
+    supersession_info: Optional[Dict[str, str]] = Field(default_factory=dict)
+    equipment_types: Optional[List[str]] = Field(default_factory=list, max_length=100)
+    ship_types: Optional[List[str]] = Field(default_factory=list, max_length=50)
+    regulation_categories: Optional[List[str]] = Field(default_factory=list, max_length=20)
+    extraction_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    extraction_metadata: Optional[Dict[str, Any]] = None
+
+
+class ExtractedMetadataResponse(BaseModel):
+    """Response model for extracted metadata."""
+    document_id: int
+    version_refs: List[str]
+    cross_references: List[Dict[str, str]]
+    amendment_dates: List[str]
+    effective_date: Optional[str]
+    supersession_info: Dict[str, str]
+    equipment_types: List[str]
+    ship_types: List[str]
+    regulation_categories: List[str]
+    extraction_confidence: float
+    extracted_at: str
+
+
+@router.post("/{doc_id}/metadata/extracted")
+def store_extracted_metadata(
+    doc_id: int,
+    metadata: ExtractedMetadataRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Store LLM-extracted metadata for a document.
+    Called by the Agent after metadata extraction.
+    """
+    # Check if document exists
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Check for existing metadata
+    existing = db.query(ExtractedDocumentMetadata).filter(
+        ExtractedDocumentMetadata.document_id == doc_id
+    ).first()
+    
+    if existing:
+        # Update existing record
+        existing.version_refs = metadata.version_refs if metadata.version_refs else []
+        existing.cross_references = metadata.cross_references if metadata.cross_references else []
+        existing.amendment_dates = metadata.amendment_dates if metadata.amendment_dates else []
+        existing.effective_date = _parse_date(metadata.effective_date) if metadata.effective_date else None
+        existing.supersession_info = metadata.supersession_info if metadata.supersession_info else {}
+        existing.equipment_types = metadata.equipment_types if metadata.equipment_types else []
+        existing.ship_types = metadata.ship_types if metadata.ship_types else []
+        existing.regulation_categories = metadata.regulation_categories if metadata.regulation_categories else []
+        existing.extraction_confidence = metadata.extraction_confidence
+        existing.extraction_metadata = metadata.extraction_metadata
+        existing.extracted_at = datetime.utcnow()
+    else:
+        # Create new record
+        new_metadata = ExtractedDocumentMetadata(
+            document_id=doc_id,
+            version_refs=metadata.version_refs if metadata.version_refs else [],
+            cross_references=metadata.cross_references if metadata.cross_references else [],
+            amendment_dates=metadata.amendment_dates if metadata.amendment_dates else [],
+            effective_date=_parse_date(metadata.effective_date) if metadata.effective_date else None,
+            supersession_info=metadata.supersession_info if metadata.supersession_info else {},
+            equipment_types=metadata.equipment_types if metadata.equipment_types else [],
+            ship_types=metadata.ship_types if metadata.ship_types else [],
+            regulation_categories=metadata.regulation_categories if metadata.regulation_categories else [],
+            extraction_confidence=metadata.extraction_confidence,
+            extraction_metadata=metadata.extraction_metadata
+        )
+        db.add(new_metadata)
+    
+    # Also update document fields if confidence is high enough
+    if metadata.extraction_confidence >= 0.7:
+        # Update supersession info in version_notes if available
+        if metadata.supersession_info:
+            supersession_text = []
+            if metadata.supersession_info.get("supersedes"):
+                supersession_text.append(f"Supersedes: {metadata.supersession_info['supersedes']}")
+            if metadata.supersession_info.get("superseded_by"):
+                supersession_text.append(f"Superseded by: {metadata.supersession_info['superseded_by']}")
+            if supersession_text:
+                current_notes = doc.version_notes or ""
+                doc.version_notes = current_notes + "\n" + "; ".join(supersession_text)
+        
+        # Update category if regulation_categories found and document has no category
+        if metadata.regulation_categories and not doc.category:
+            doc.category = metadata.regulation_categories[0]
+    
+    db.commit()
+    
+    logger.info("Stored extracted metadata for document %s (confidence: %.2f)", 
+                doc_id, metadata.extraction_confidence)
+    
+    return {
+        "message": "Metadata stored successfully",
+        "document_id": doc_id,
+        "extraction_confidence": metadata.extraction_confidence
+    }
+
+
+@router.get("/{doc_id}/metadata/extracted", response_model=ExtractedMetadataResponse)
+def get_extracted_metadata(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Retrieve LLM-extracted metadata for a document.
+    Admin/superadmin only.
+    """
+    # Check if document exists
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get extracted metadata
+    metadata = db.query(ExtractedDocumentMetadata).filter(
+        ExtractedDocumentMetadata.document_id == doc_id
+    ).first()
+    
+    if not metadata:
+        raise HTTPException(status_code=404, detail="No extracted metadata found for this document")
+    
+    return ExtractedMetadataResponse(
+        document_id=metadata.document_id,
+        version_refs=metadata.version_refs or [],
+        cross_references=metadata.cross_references or [],
+        amendment_dates=metadata.amendment_dates or [],
+        effective_date=metadata.effective_date.isoformat() if metadata.effective_date else None,
+        supersession_info=metadata.supersession_info or {},
+        equipment_types=metadata.equipment_types or [],
+        ship_types=metadata.ship_types or [],
+        regulation_categories=metadata.regulation_categories or [],
+        extraction_confidence=metadata.extraction_confidence,
+        extracted_at=metadata.extracted_at.isoformat() if metadata.extracted_at else None
+    )
+
+
+def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
+    """Parse date string to datetime object."""
+    if not date_str:
+        return None
+    
+    try:
+        # Try ISO format first (YYYY-MM-DD)
+        return datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        try:
+            # Try with time component
+            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+
+
+@router.post("/{doc_id}/lineage/detected")
+def accept_detected_lineage(
+    doc_id: int,
+    candidates: List[Dict[str, Any]],
+    auto_accept: bool = Query(False, description="Auto-accept high-confidence candidates"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Accept or review auto-detected lineage candidates from agent.
+    Creates DocEdge records for confirmed relationships.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    created_edges = []
+    pending_review = []
+    
+    for candidate in candidates:
+        candidate_id = candidate.get("doc_id")
+        similarity = candidate.get("similarity", 0.0)
+        suggested_rel = candidate.get("suggested_relationship", "related")
+        
+        # Auto-accept if similarity very high and auto_accept enabled
+        if auto_accept and similarity >= 0.92:
+            # Check for existing edge
+            existing = db.query(DocEdge).filter(
+                DocEdge.source_id == doc_id,
+                DocEdge.target_id == candidate_id
+            ).first()
+            
+            if not existing:
+                edge = DocEdge(
+                    source_id=doc_id,
+                    target_id=candidate_id,
+                    edge_type=suggested_rel if suggested_rel in [e.value for e in DocEdgeType] else DocEdgeType.REFERENCES.value,
+                    confidence=similarity
+                )
+                db.add(edge)
+                created_edges.append({
+                    "target_id": candidate_id,
+                    "relationship": suggested_rel,
+                    "similarity": similarity,
+                    "status": "auto_accepted"
+                })
+        else:
+            # Flag for manual review
+            pending_review.append({
+                "target_id": candidate_id,
+                "target_filename": candidate.get("filename", "Unknown"),
+                "suggested_relationship": suggested_rel,
+                "similarity": similarity,
+                "confidence": candidate.get("confidence", similarity)
+            })
+    
+    db.commit()
+    
+    return {
+        "message": "Lineage candidates processed",
+        "document_id": doc_id,
+        "auto_accepted": len(created_edges),
+        "pending_review": len(pending_review),
+        "created_edges": created_edges,
+        "review_queue": pending_review
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MODULE 7 PHASE 4: ENTITY STORAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from typing import List as TypingList
+
+class EntityItem(BaseModel):
+    """Single extracted entity for storage."""
+    entity_type: str
+    name: str
+    normalized_name: str
+    context: Optional[str] = None
+    chunk_index: Optional[int] = None
+    page_number: Optional[int] = None
+    extraction_confidence: float = Field(ge=0.0, le=1.0, default=0.7)
+
+
+@router.post("/{doc_id}/entities")
+def store_document_entities(
+    doc_id: int,
+    entities: TypingList[EntityItem],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Store extracted entities for a document.
+    Called by the Agent after entity extraction.
+    """
+    # Check document exists
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    stored_count = 0
+    
+    for entity_data in entities:
+        try:
+            # Check for existing duplicate
+            existing = db.query(DocumentEntity).filter(
+                DocumentEntity.document_id == doc_id,
+                DocumentEntity.entity_type == entity_data.entity_type,
+                DocumentEntity.entity_normalized == entity_data.normalized_name
+            ).first()
+            
+            if existing:
+                # Update context if new one is more detailed
+                if entity_data.context and len(entity_data.context) > len(existing.context or ""):
+                    existing.context = entity_data.context
+                    existing.extraction_confidence = max(
+                        existing.extraction_confidence, 
+                        entity_data.extraction_confidence
+                    )
+            else:
+                # Create new entity
+                new_entity = DocumentEntity(
+                    document_id=doc_id,
+                    entity_type=entity_data.entity_type,
+                    entity_name=entity_data.name,
+                    entity_normalized=entity_data.normalized_name,
+                    context=entity_data.context,
+                    chunk_index=entity_data.chunk_index,
+                    page_number=entity_data.page_number,
+                    extraction_confidence=entity_data.extraction_confidence,
+                    extracted_by="llm",
+                    first_seen_in_version=doc.version
+                )
+                db.add(new_entity)
+                stored_count += 1
+                
+        except Exception as e:
+            logger.warning("Failed to store entity %s: %s", entity_data.name, e)
+            continue
+    
+    db.commit()
+    
+    logger.info("Stored %d new entities for document %s", stored_count, doc_id)
+    
+    return {
+        "message": "Entities stored successfully",
+        "document_id": doc_id,
+        "entities_stored": stored_count,
+        "total_received": len(entities)
+    }
+
+
+@router.get("/lineage/export/docx")
+def export_lineage_docx(
+    doc_id: int = Query(..., description="Document ID to export"),
+    include_entities: bool = Query(True, description="Include entity summary"),
+    include_changes: bool = Query(True, description="Include change summaries"),
+    classification: str = Query("UNCLASSIFIED", description="Classification level"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export document genealogy as Word document with tables.
+    """
+    from app.utils.genealogy_docx_export import generate_genealogy_docx
+    
+    # Check document exists and user has access
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Generate DOCX
+    try:
+        output_path = generate_genealogy_docx(
+            doc_id=doc_id,
+            db=db,
+            include_entities=include_entities,
+            include_changes=include_changes,
+            classification=classification
+        )
+        
+        return FileResponse(
+            output_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=f"genealogy_{doc.original_filename}_{datetime.now().strftime('%Y%m%d')}.docx"
+        )
+    except Exception as e:
+        logger.error("Failed to generate genealogy DOCX: %s", e)
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/{doc_id}/changes")
+def store_change_summary(
+    doc_id: int,
+    from_doc_id: int = Query(..., description="Previous version document ID"),
+    summary_data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Store LLM-generated change summary between document versions.
+    """
+    # Validate documents exist
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    from_doc = db.query(Document).filter(Document.id == from_doc_id).first()
+    if not from_doc:
+        raise HTTPException(status_code=404, detail="From document not found")
+    
+    # Check for existing summary
+    existing = db.query(DocumentChangeSummary).filter(
+        DocumentChangeSummary.from_doc_id == from_doc_id,
+        DocumentChangeSummary.to_doc_id == doc_id
+    ).first()
+    
+    if existing:
+        # Update existing
+        existing.summary_text = summary_data.get("summary_text", existing.summary_text)
+        existing.major_changes = summary_data.get("major_changes", [])
+        existing.minor_changes = summary_data.get("minor_changes", [])
+        existing.impact_assessment = summary_data.get("impact_assessment", "Medium")
+        existing.action_required = summary_data.get("action_required", "")
+        existing.generated_at = datetime.utcnow()
+    else:
+        # Create new
+        new_summary = DocumentChangeSummary(
+            from_doc_id=from_doc_id,
+            to_doc_id=doc_id,
+            summary_text=summary_data.get("summary_text", ""),
+            major_changes=summary_data.get("major_changes", []),
+            minor_changes=summary_data.get("minor_changes", []),
+            impact_assessment=summary_data.get("impact_assessment", "Medium"),
+            action_required=summary_data.get("action_required", ""),
+            generated_by_llm=True,
+            generated_at=datetime.utcnow()
+        )
+        db.add(new_summary)
+    
+    db.commit()
+    
+    return {
+        "message": "Change summary stored successfully",
+        "from_doc_id": from_doc_id,
+        "to_doc_id": doc_id,
+        "impact": summary_data.get("impact_assessment", "Medium")
+    }
+
+
+@router.get("/{doc_id}/changes")
+def get_change_summaries(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all change summaries for a document.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get summaries where this doc is source or target
+    summaries = db.query(DocumentChangeSummary).filter(
+        (DocumentChangeSummary.from_doc_id == doc_id) |
+        (DocumentChangeSummary.to_doc_id == doc_id)
+    ).order_by(DocumentChangeSummary.generated_at.desc()).all()
+    
+    result = []
+    for summary in summaries:
+        other_id = summary.to_doc_id if summary.from_doc_id == doc_id else summary.from_doc_id
+        other_doc = db.query(Document).filter(Document.id == other_id).first()
+        
+        result.append({
+            "id": summary.id,
+            "direction": "outgoing" if summary.from_doc_id == doc_id else "incoming",
+            "other_version": other_doc.version if other_doc else '?',
+            "other_filename": other_doc.original_filename if other_doc else 'Unknown',
+            "summary": summary.summary_text,
+            "impact": summary.impact_assessment,
+            "action_required": summary.action_required,
+            "major_changes": summary.major_changes,
+            "generated_at": summary.generated_at.isoformat() if summary.generated_at else None
+        })
+    
+    return {
+        "document_id": doc_id,
+        "total_summaries": len(result),
+        "summaries": result
+    }
+
+
+@router.get("/{doc_id}/entities/stats")
+def get_document_entity_stats(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get entity statistics for a document.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Aggregate stats
+    stats = db.query(
+        DocumentEntity.entity_type,
+        func.count(DocumentEntity.id).label("count")
+    ).filter(
+        DocumentEntity.document_id == doc_id
+    ).group_by(DocumentEntity.entity_type).all()
+    
+    total_entities = db.query(DocumentEntity).filter(
+        DocumentEntity.document_id == doc_id
+    ).count()
+    
+    return {
+        "document_id": doc_id,
+        "document_filename": doc.original_filename,
+        "total_entities": total_entities,
+        "by_type": [{"type": t, "count": c} for t, c in stats]
+    }

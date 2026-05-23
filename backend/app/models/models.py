@@ -144,6 +144,57 @@ class DocEdge(Base):
     source_doc = relationship("Document", foreign_keys=[source_id], backref="outgoing_edges")
     target_doc = relationship("Document", foreign_keys=[target_id], backref="incoming_edges")
 
+
+class ExtractedDocumentMetadata(Base):
+    """Module 7: LLM-extracted metadata from document content."""
+    __tablename__ = "extracted_document_metadata"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Core extracted fields (JSONB for flexibility)
+    version_refs = Column(JSON, nullable=True)        # ["v1.0", "Rev 2", "Version 3.5"]
+    cross_references = Column(JSON, nullable=True)    # [{"doc": "IMO SOLAS", "ref": "Ch II-2"}]
+    amendment_dates = Column(JSON, nullable=True)   # ["2024-01-15", "2023-06-01"]
+    effective_date = Column(Date, nullable=True)      # When this version takes effect
+    supersession_info = Column(JSON, nullable=True)   # {"supersedes": "Doc A", "superseded_by": "Doc B"}
+    
+    # Technical entity extraction
+    equipment_types = Column(JSON, nullable=True)     # ["fire pump", "smoke detector", "EPIRB"]
+    ship_types = Column(JSON, nullable=True)          # ["cargo", "passenger", "tanker"]
+    regulation_categories = Column(JSON, nullable=True) # ["safety", "environmental", "navigation"]
+    
+    # Extraction metadata
+    extraction_confidence = Column(Float, default=0.0)  # 0.0-1.0 overall confidence
+    extraction_metadata = Column(JSON, nullable=True)   # Extra extraction info (model version, etc.)
+    extracted_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    document = relationship("Document", backref="extracted_metadata")
+
+
+class DocumentChangeSummary(Base):
+    """Module 7: LLM-generated change summary between document versions."""
+    __tablename__ = "document_change_summaries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    from_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    to_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    
+    summary_text = Column(Text, nullable=False)       # One-paragraph executive summary
+    major_changes = Column(JSON, nullable=True)       # ["Added Section 4.2", "Modified Table 3"]
+    minor_changes = Column(JSON, nullable=True)       # ["Fixed typos in Section 1"]
+    impact_assessment = Column(String(20), nullable=True)  # High, Medium, Low
+    action_required = Column(Text, nullable=True)     # "Review new requirements before..."
+    
+    generated_by_llm = Column(Boolean, default=True)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    
+    # For manual review/override
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+
 class AgentConfig(Base):
     __tablename__ = "agent_configs"
     id = Column(Integer, primary_key=True, index=True)
@@ -227,3 +278,64 @@ class HistoricalFeedback(Base):
     # Relationships
     report = relationship("ComplianceReport", foreign_keys=[compliance_report_id], backref="feedback_entries")
     referenced_sotr = relationship("Document", foreign_keys=[referenced_sotr_id])
+
+
+class DocumentEntity(Base):
+    """Module 7 Phase 4: Extracted entities from documents for lineage tracking."""
+    __tablename__ = "document_entities"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Entity classification
+    entity_type = Column(String(50), nullable=False, index=True)  # equipment, ship_type, regulation, requirement, standard
+    entity_name = Column(String(200), nullable=False)  # Original extracted name
+    entity_normalized = Column(String(200), nullable=False, index=True)  # Normalized for matching
+    
+    # Context and location
+    context = Column(Text, nullable=True)  # Surrounding text snippet
+    chunk_index = Column(Integer, nullable=True)  # Which chunk this was found in
+    page_number = Column(Integer, nullable=True)  # Page number if available
+    
+    # Extraction metadata
+    extraction_confidence = Column(Float, default=0.0)  # 0.0-1.0
+    extracted_by = Column(String(50), default="llm")  # llm, rule_based, manual
+    extracted_at = Column(DateTime, default=datetime.utcnow)
+    
+    # For lineage tracking
+    first_seen_in_version = Column(Integer, nullable=True)  # Document version where first seen
+    evolves_from_entity_id = Column(Integer, ForeignKey("document_entities.id"), nullable=True)
+    evolution_type = Column(String(50), nullable=True)  # renamed, redefined, deprecated, added
+    
+    # Semantic embedding for similarity search (optional, for advanced matching)
+    embedding_vector = Column(JSON, nullable=True)  # Stored as JSON array
+    
+    # Relationships
+    document = relationship("Document", backref="entities")
+    evolves_from = relationship("DocumentEntity", remote_side=[id])
+    
+    def __repr__(self):
+        return f"<DocumentEntity({self.entity_type}: {self.entity_name})>"
+
+
+class EntitySearchLog(Base):
+    """Module 7 Phase 4: Audit log for entity searches (security/compliance)."""
+    __tablename__ = "entity_search_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    search_query = Column(String(200), nullable=False)
+    entity_type_filter = Column(String(50), nullable=True)
+    results_count = Column(Integer, default=0)
+    
+    # Search context
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    ip_address = Column(String(45), nullable=True)  # IPv6 compatible
+    user_agent = Column(String(200), nullable=True)
+    
+    # For compliance
+    cleared_entities = Column(JSON, nullable=True)  # List of entity IDs user had clearance to see
+
+
+# Create GIN index for trigram search on entity_normalized
+# Note: This is created via Alembic migration, not here directly

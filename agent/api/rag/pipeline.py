@@ -22,6 +22,7 @@ from api.rag.cache import semantic_cache
 from api.rag.evaluation_store import get_store as get_eval_store
 from api.rag.citation_validator import validate_citations_against_sources, format_validation_report
 from api.rag.hallucination_detector import detect_hallucinations, format_hallucination_report
+from api.rag.delta_indexer import delta_index_document
 
 logger = logging.getLogger("agra.pipeline")
 
@@ -300,8 +301,49 @@ def ingest_document(
 
     # ── Stage 4: Store in Qdrant ──
     yield {"stage": "storing", "progress": 0, "message": "Storing in vector database…"}
-    count = store.upsert_chunks(chunks, all_embeddings)
-    yield {"stage": "storing", "progress": 100, "message": f"Stored {count} chunks in Qdrant."}
+    
+    # Module 7: Use delta indexing for version updates (when parent_doc_id provided)
+    if parent_doc_id:
+        # This is a version update — use delta indexing
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        # Attach embeddings to chunks for delta indexer
+        for chunk, emb in zip(chunks, all_embeddings):
+            chunk["embedding"] = emb
+        
+        # Run delta indexing
+        delta_result = loop.run_until_complete(
+            delta_index_document(doc_id, chunks, store)
+        )
+        
+        if delta_result["success"]:
+            ops = delta_result["operations"]
+            method = delta_result["method"]
+            unchanged = delta_result.get("unchanged", 0)
+            
+            if method == "delta":
+                yield {
+                    "stage": "storing", 
+                    "progress": 100, 
+                    "message": f"Delta indexed: {ops['added']} added, {ops['updated']} updated, {ops['deleted']} deleted, {unchanged} unchanged."
+                }
+                count = ops["added"] + ops["updated"] + unchanged
+            else:
+                yield {
+                    "stage": "storing", 
+                    "progress": 100, 
+                    "message": f"Full indexed {ops['added']} chunks (delta too complex)."
+                }
+                count = ops["added"]
+        else:
+            # Fall back to standard upsert
+            count = store.upsert_chunks(chunks, all_embeddings)
+            yield {"stage": "storing", "progress": 100, "message": f"Stored {count} chunks in Qdrant (delta failed)."}
+    else:
+        # New document — standard full indexing
+        count = store.upsert_chunks(chunks, all_embeddings)
+        yield {"stage": "storing", "progress": 100, "message": f"Stored {count} chunks in Qdrant."}
 
     yield {
         "stage": "done",

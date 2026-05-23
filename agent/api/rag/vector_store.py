@@ -361,6 +361,93 @@ class VectorStore:
 
         return len(ids_to_delete)
 
+    def delete_chunk(self, chunk_id: str) -> bool:
+        """
+        Delete a single chunk by its point ID.
+        Returns True if deleted, False if not found.
+        """
+        try:
+            self.client.delete(
+                collection_name=_COLLECTION,
+                points_selector=[chunk_id],
+            )
+            self._remove_from_bm25([chunk_id])
+            logger.debug("Deleted chunk %s", chunk_id)
+            return True
+        except Exception as e:
+            logger.warning("Failed to delete chunk %s: %s", chunk_id, e)
+            return False
+
+    def update_chunk(self, chunk_id: str, chunk_data: Dict[str, Any]) -> bool:
+        """
+        Update a chunk's payload (text and metadata) while preserving embedding.
+        Note: If text changes significantly, embedding should be recomputed by caller.
+        
+        Args:
+            chunk_id: Point ID of chunk to update
+            chunk_data: New chunk data with 'text' and 'metadata'
+        
+        Returns:
+            True if updated successfully
+        """
+        try:
+            from qdrant_client.models import PointStruct
+            
+            # Get existing point to preserve vector
+            existing = self.client.retrieve(
+                collection_name=_COLLECTION,
+                ids=[chunk_id],
+                with_vectors=True
+            )
+            
+            if not existing:
+                logger.warning("Chunk %s not found for update", chunk_id)
+                return False
+            
+            existing_point = existing[0]
+            vector = existing_point.vector
+            
+            # Build new payload
+            payload = {
+                "text": encrypt_text(chunk_data.get("text", "")),
+                "metadata": chunk_data.get("metadata", {})
+            }
+            
+            # Upsert with same ID and vector, new payload
+            self.client.upsert(
+                collection_name=_COLLECTION,
+                points=[PointStruct(id=chunk_id, vector=vector, payload=payload)]
+            )
+            
+            # Update BM25 index
+            text = chunk_data.get("text", "")
+            metadata = chunk_data.get("metadata", {})
+            self._chunk_texts[chunk_id] = text
+            self._chunk_meta[chunk_id] = metadata
+            
+            # Rebuild BM25 index (inefficient but necessary for correctness)
+            self._rebuild_bm25_from_memory()
+            
+            logger.debug("Updated chunk %s", chunk_id)
+            return True
+            
+        except Exception as e:
+            logger.error("Failed to update chunk %s: %s", chunk_id, e)
+            return False
+
+    def _rebuild_bm25_from_memory(self):
+        """Rebuild BM25 index from in-memory cache."""
+        self._bm25_corpus = []
+        self._bm25_ids = []
+        
+        for pid, text in self._chunk_texts.items():
+            tokens = self._tokenise(text)
+            self._bm25_corpus.append(tokens)
+            self._bm25_ids.append(pid)
+        
+        if self._bm25_corpus:
+            self._bm25_index = BM25Okapi(self._bm25_corpus)
+
     def get_chunks_by_doc(self, doc_id: str) -> List[Dict[str, Any]]:
         """Retrieve all chunks for a given document."""
         all_chunks: List[Dict[str, Any]] = []

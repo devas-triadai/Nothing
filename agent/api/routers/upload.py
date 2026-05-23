@@ -24,9 +24,13 @@ from pydantic import BaseModel
 
 from api.rag.pipeline import ingest_document
 from api.rag import llm as llm_engine
+from api.rag.metadata_extractor import extract_document_metadata, format_metadata_for_storage
 from api.utils.auth_check import get_current_user
 
 logger = logging.getLogger("agra.upload")
+
+# Backend API base URL for storing metadata
+_ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", "http://localhost:8000")
 
 router = APIRouter()
 
@@ -55,6 +59,179 @@ class AdminIngestRequest(BaseModel):
     description: Optional[str] = None
     parent_doc_id: Optional[str] = None
     version_notes: Optional[str] = None
+
+
+async def _extract_and_store_metadata(
+    doc_id: str,
+    file_path: str,
+    filename: str,
+    auth_token: str = "",
+    parent_doc_id: Optional[str] = None
+):
+    """
+    Background task: Extract metadata, entities, detect lineage, 
+    generate change summaries, and store in backend.
+    Fire-and-forget pattern — doesn't block upload completion.
+    """
+    try:
+        import asyncio
+        import httpx
+        from api.rag import ocr
+        from api.rag.vector_store import get_store
+        from api.rag.lineage_detector import detect_document_lineage
+        from api.rag.chunker import chunk_pages
+        from api.rag.entity_extractor import extract_entities_from_chunks
+        from api.rag.change_analyzer import generate_and_store_change_summary
+        
+        logger.info("[Metadata+Lineage+Entities+Changes] Starting for doc_id=%s", doc_id)
+        
+        # Step 1: Extract text from document (reuse OCR)
+        pages = ocr.extract_document(file_path)
+        if not pages:
+            logger.warning("[Metadata+Lineage] No text extracted from %s", filename)
+            return
+        
+        # Combine text (first 10 pages for speed)
+        full_text = "\n\n".join(pages[:10])
+        
+        # Step 2: Run LLM metadata extraction
+        metadata = await extract_document_metadata(full_text, filename)
+        
+        # Step 3: Check confidence threshold and store metadata
+        if metadata.get("confidence", 0.0) >= 0.6:
+            storage_data = format_metadata_for_storage(metadata)
+            if storage_data:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{_ADMIN_BASE}/api/documents/{doc_id}/metadata/extracted",
+                        json=storage_data,
+                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+                    )
+                    if response.status_code == 200:
+                        logger.info("[Metadata+Lineage] Metadata stored for doc_id=%s", doc_id)
+                    else:
+                        logger.warning("[Metadata+Lineage] Metadata backend returned %s", response.status_code)
+        else:
+            logger.info("[Metadata+Lineage] Low metadata confidence (%.2f) for %s",
+                       metadata.get("confidence", 0.0), doc_id)
+        
+        # Step 4: Module 7 - Semantic Similarity Lineage Detection
+        # Create chunks for lineage detection (reuse chunker)
+        store = get_store()
+        chunks = chunk_pages(
+            pages, doc_id, filename,
+            source="lineage_detection",
+            document_type="unknown"
+        )
+        
+        if chunks:
+            logger.info("[Metadata+Lineage] Running lineage detection for %s (%d chunks)",
+                       doc_id, len(chunks))
+            
+            # Run lineage detection
+            lineage_result = await detect_document_lineage(
+                doc_id=doc_id,
+                chunks=chunks,
+                filename=filename,
+                metadata=metadata if metadata.get("confidence", 0.0) >= 0.6 else None,
+                store=store
+            )
+            
+            candidates = lineage_result.get("candidates", [])
+            
+            if candidates:
+                logger.info("[Metadata+Lineage] Found %d lineage candidates for %s (top: %.3f)",
+                           len(candidates), doc_id, candidates[0].get("similarity", 0.0))
+                
+                # Send candidates to backend
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{_ADMIN_BASE}/api/documents/{doc_id}/lineage/detected",
+                        json=candidates,
+                        params={"auto_accept": "false"},  # Manual review for safety
+                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        logger.info("[Metadata+Lineage] Lineage stored for %s: %d auto, %d pending",
+                                   doc_id, result.get("auto_accepted", 0), result.get("pending_review", 0))
+                    else:
+                        logger.warning("[Metadata+Lineage] Lineage backend returned %s: %s",
+                                     response.status_code, response.text[:200])
+            else:
+                logger.info("[Metadata+Lineage] No lineage candidates found for %s", doc_id)
+        else:
+            logger.warning("[Metadata+Lineage] No chunks for lineage detection: %s", doc_id)
+        
+        # Step 5: Module 7 Phase 4 - Entity Extraction
+        if chunks:
+            logger.info("[Metadata+Lineage] Running entity extraction for %s", doc_id)
+            
+            entities = await extract_entities_from_chunks(chunks, max_chunks=5)
+            
+            if entities:
+                logger.info("[Metadata+Lineage] Extracted %d entities for %s", len(entities), doc_id)
+                
+                # Format entities for storage
+                entity_data = [
+                    {
+                        "entity_type": e.entity_type,
+                        "name": e.name,
+                        "normalized_name": e.normalized_name,
+                        "context": e.context,
+                        "chunk_index": e.chunk_index,
+                        "page_number": e.page_number,
+                        "extraction_confidence": e.confidence
+                    }
+                    for e in entities
+                ]
+                
+                # Send to backend
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{_ADMIN_BASE}/api/documents/{doc_id}/entities",
+                        json=entity_data,
+                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        logger.info("[Metadata+Lineage] Entities stored for %s: %d new",
+                                   doc_id, result.get("entities_stored", 0))
+                    else:
+                        logger.warning("[Metadata+Lineage] Entities backend returned %s", response.status_code)
+            else:
+                logger.info("[Metadata+Lineage] No entities extracted for %s", doc_id)
+        
+        # Step 6: Module 7 Phase 6 - Generate Change Summary for version updates
+        if parent_doc_id and chunks:
+            logger.info("[Metadata+Lineage] Generating change summary: %s -> %s", 
+                       parent_doc_id, doc_id)
+            
+            try:
+                store = get_store()
+                change_result = await generate_and_store_change_summary(
+                    old_doc_id=parent_doc_id,
+                    new_doc_id=doc_id,
+                    store=store,
+                    backend_api_url=_ADMIN_BASE,
+                    auth_token=auth_token
+                )
+                
+                if change_result:
+                    logger.info("[Metadata+Lineage] Change summary generated for %s -> %s (impact: %s)",
+                               parent_doc_id, doc_id, change_result.get("impact", "Unknown"))
+                else:
+                    logger.warning("[Metadata+Lineage] Failed to generate change summary for %s -> %s",
+                                  parent_doc_id, doc_id)
+            except Exception as change_e:
+                logger.error("[Metadata+Lineage] Change summary generation failed: %s", change_e)
+                # Non-fatal, continue
+    
+    except Exception as e:
+        logger.error("[Metadata+Lineage] Failed for doc_id=%s: %s", doc_id, e, exc_info=True)
+        # Don't re-raise — this is fire-and-forget
 
 
 def _run_ingestion_sync(req: AdminIngestRequest):
@@ -115,6 +292,10 @@ async def admin_ingest(
 
     # Use FastAPI BackgroundTasks for proper async background execution
     background_tasks.add_task(_run_ingestion_sync, req)
+    
+    # Module 7: Queue metadata extraction as fire-and-forget background task
+    # This runs after ingestion and doesn't block the response
+    background_tasks.add_task(_extract_and_store_metadata, doc_id, file_path, filename, "", parent_doc_id)
 
     logger.info("[Admin Ingest] Queued doc_id=%s via BackgroundTasks", doc_id)
     return {
@@ -274,6 +455,13 @@ async def chat_upload(
                 "filename": safe_name,
                 "document_type": eff_doc_type,
             }) + "\n\n"
+        )
+        
+        # Module 7: Fire metadata extraction as background task
+        # This runs after successful upload without blocking the response
+        import asyncio
+        asyncio.create_task(
+            _extract_and_store_metadata(doc_id, str(saved_path), safe_name, token, None)
         )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
