@@ -12,6 +12,7 @@ import AuditLogs from './pages/AuditLogs';
 import Documents from './pages/Documents';
 import Genealogy from './pages/Genealogy';
 import Agents from './pages/Agents';
+import Compliance from './pages/Compliance';
 
 export const AuthContext = createContext(null);
 
@@ -76,6 +77,7 @@ function App() {
               <Route path="documents" element={<Documents />} />
               <Route path="genealogy" element={<Genealogy />} />
               <Route path="agents" element={<Agents />} />
+              <Route path="compliance" element={<Compliance />} />
               <Route path="reports" element={<Reports />} />
               <Route path="settings" element={<Settings />} />
             </Route>

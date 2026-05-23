@@ -194,6 +194,9 @@ from api.routers import drawing_enhanced
 # Phase 1: Chat Drawing Query (Chat Enhancement)
 from api.routers import chat_drawing_query
 
+# Compliance Module: Agent-side scoring engine
+from api.routers import compliance_engine
+
 app.include_router(upload.router,     prefix="/api/agent", tags=["Documents"])
 app.include_router(chat.router,       prefix="/api/agent", tags=["Chat / Q&A"])
 app.include_router(chat_drawing_query.router, prefix="/api/agent", tags=["Chat Drawing Query"])
@@ -203,6 +206,7 @@ app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
 app.include_router(drawing_enhanced.router, prefix="/api/agent", tags=["Drawing Enhanced"])
 app.include_router(sessions.router,   prefix="/api/agent", tags=["Sessions"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
+app.include_router(compliance_engine.router, prefix="/api/compliance", tags=["Compliance Engine"])
 
 
 # ── Health & Root ──

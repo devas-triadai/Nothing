@@ -520,6 +520,42 @@ class VectorStore:
                 }
         return None
 
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        doc_filter: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Convenience text search: embeds query internally, calls hybrid_search.
+        Returns simplified results compatible with clause_scorer expectations.
+        
+        Args:
+            query: Natural language search query
+            top_k: Number of results to return
+            doc_filter: Optional list of doc_ids to restrict search to
+            
+        Returns:
+            List of dicts with keys: text, chunk_id, metadata
+        """
+        from api.rag.embedder import embed_query as _embed_query
+        
+        query_embedding = _embed_query(query)
+        results = self.hybrid_search(
+            query_text=query,
+            query_embedding=query_embedding,
+            top_k=top_k,
+            doc_ids_filter=doc_filter,
+        )
+        return [
+            {
+                "text": r.get("text", ""),
+                "chunk_id": r.get("pid", ""),
+                "metadata": r.get("metadata", {}),
+            }
+            for r in results
+        ]
+
     def collection_count(self) -> int:
         """Total number of points in the collection."""
         info = self.client.get_collection(collection_name=_COLLECTION)

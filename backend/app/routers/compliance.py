@@ -25,7 +25,8 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models.models import (
     User, Document, ComplianceEvaluation, ComplianceClause, 
-    ClauseScore, ComplianceReport, ComplianceStatus, ClauseStatus
+    ClauseScore, ComplianceReport, ComplianceStatus, ClauseStatus,
+    AuditLog, DocEdge, DocEdgeType
 )
 from app.routers.auth import get_current_user
 from app.utils.compliance_pdf_export import (
@@ -115,6 +116,7 @@ class ClauseScoreResponse(BaseModel):
 
 class DetailedEvaluationResponse(EvaluationResponse):
     clause_scores: List[ClauseScoreResponse]
+    warnings: Optional[List[str]] = None
 
 
 class ReportResponse(BaseModel):
@@ -170,6 +172,18 @@ async def create_evaluation(
     db.commit()
     db.refresh(evaluation)
     
+    # Audit log
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="COMPLIANCE_EVALUATION_CREATED",
+        resource_type="compliance_evaluation",
+        resource_id=str(evaluation.id),
+        new_value=f"SOTR:{request.sotr_doc_id}, Vendor:{request.vendor_doc_id}, Project:{request.project_name or 'N/A'}",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+    
     logger.info(f"Created compliance evaluation {evaluation.id} by user {current_user.id}")
     
     # Auto-start if requested
@@ -177,7 +191,6 @@ async def create_evaluation(
         background_tasks.add_task(
             _run_evaluation_background,
             evaluation.id,
-            db
         )
         evaluation.status = ComplianceStatus.PARSING_SOTR
         db.commit()
@@ -206,6 +219,30 @@ async def get_evaluation(
     if not evaluation:
         raise HTTPException(status_code=404, detail="Evaluation not found")
     
+    # Check for superseded documents (genealogy warnings)
+    warnings = []
+    sotr_doc = db.query(Document).filter(Document.id == evaluation.sotr_doc_id).first()
+    if sotr_doc:
+        # Check if SOTR has been superseded by a newer version
+        child = db.query(Document).filter(Document.parent_doc_id == sotr_doc.id).first()
+        if child:
+            warnings.append(
+                f"WARNING: SOTR document '{sotr_doc.original_filename}' has been superseded "
+                f"by '{child.original_filename}'. Consider re-evaluating against the latest version."
+            )
+        else:
+            edge = db.query(DocEdge).filter(
+                DocEdge.source_id == sotr_doc.id,
+                DocEdge.edge_type == DocEdgeType.SUPERSEDES
+            ).first()
+            if edge:
+                target = db.query(Document).filter(Document.id == edge.target_id).first()
+                if target:
+                    warnings.append(
+                        f"WARNING: SOTR document '{sotr_doc.original_filename}' has been superseded "
+                        f"by '{target.original_filename}'. Consider re-evaluating against the latest version."
+                    )
+    
     # Build response
     response = DetailedEvaluationResponse(
         id=evaluation.id,
@@ -224,7 +261,8 @@ async def get_evaluation(
         not_applicable_count=evaluation.not_applicable_count,
         created_at=evaluation.created_at,
         completed_at=evaluation.completed_at,
-        clause_scores=[]
+        clause_scores=[],
+        warnings=warnings if warnings else None
     )
     
     # Include clause scores if requested
@@ -310,22 +348,23 @@ async def run_evaluation(
     }
 
 
-def _run_evaluation_background(evaluation_id: int):
+def _run_evaluation_background(evaluation_id: int, db_session=None):
     """
     Background task to run full compliance evaluation.
-    This runs in a separate worker context.
+    Calls the agent's compliance engine endpoints via HTTP for SOTR parsing
+    and clause scoring, then persists results to PostgreSQL.
     """
+    import httpx
     from sqlalchemy.orm import sessionmaker
     from app.database import engine
     
-    # Create new session for background task
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    # Create new session for background task (don't reuse request-scoped session)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    
+    _AGENT_BASE = os.environ.get("AGRA_AGENT_URL", "http://localhost:8005")
     
     try:
-        from api.rag.sotr_parser import parse_sotr_document, extract_clauses_to_models
-        from api.rag.clause_scorer import score_all_clauses, generate_evaluation_summary
-        
         # Get evaluation
         evaluation = db.query(ComplianceEvaluation).filter(
             ComplianceEvaluation.id == evaluation_id
@@ -335,64 +374,181 @@ def _run_evaluation_background(evaluation_id: int):
             logger.error(f"Evaluation {evaluation_id} not found for background processing")
             return
         
-        # Step 1: Parse SOTR
-        logger.info(f"Parsing SOTR for evaluation {evaluation_id}")
+        # Get document records for qdrant_doc_id mapping
+        sotr_doc = db.query(Document).filter(
+            Document.id == evaluation.sotr_doc_id
+        ).first()
+        vendor_doc = db.query(Document).filter(
+            Document.id == evaluation.vendor_doc_id
+        ).first()
+        
+        if not sotr_doc:
+            raise ValueError("SOTR document not found in database")
+        if not vendor_doc:
+            raise ValueError("Vendor document not found in database")
+        
+        # Resolve vector store doc IDs
+        sotr_qdrant_id = sotr_doc.qdrant_doc_id or str(sotr_doc.id)
+        vendor_qdrant_id = vendor_doc.qdrant_doc_id or str(vendor_doc.id)
+        
+        # ── Step 1: Parse SOTR ──
+        logger.info(f"[Eval {evaluation_id}] Step 1: Parsing SOTR doc_id={sotr_qdrant_id}")
         evaluation.status = ComplianceStatus.PARSING_SOTR
         db.commit()
         
-        # Get SOTR document text
-        sotr_chunks = db.query(Document).filter(
-            Document.id == evaluation.sotr_doc_id
-        ).first()
+        with httpx.Client(base_url=_AGENT_BASE, timeout=120.0) as client:
+            # Parse SOTR via agent API
+            parse_resp = client.post(
+                "/api/compliance/parse-sotr",
+                json={
+                    "doc_id": sotr_qdrant_id,
+                    "filename": sotr_doc.filename or sotr_doc.original_filename or "",
+                },
+            )
+            
+            if parse_resp.status_code != 200:
+                raise ValueError(
+                    f"SOTR parsing failed (HTTP {parse_resp.status_code}): "
+                    f"{parse_resp.text[:300]}"
+                )
+            
+            parse_data = parse_resp.json()
         
-        if not sotr_chunks:
-            raise ValueError("SOTR document not found")
+        parsed_clauses = parse_data.get("clauses", [])
         
-        # Extract clauses
-        # Note: This would need actual document text - simplified here
-        # In production, retrieve from vector store or document storage
+        if not parsed_clauses:
+            logger.warning(f"[Eval {evaluation_id}] No clauses extracted from SOTR")
+            evaluation.status = ComplianceStatus.FAILED
+            evaluation.recommendation_notes = "No clauses could be extracted from the SOTR document."
+            db.commit()
+            return
         
-        # Step 2: Score clauses
-        logger.info(f"Scoring clauses for evaluation {evaluation_id}")
-        evaluation.status = ComplianceStatus.SCORING
-        db.commit()
+        logger.info(f"[Eval {evaluation_id}] Extracted {len(parsed_clauses)} clauses from SOTR")
         
-        # Get existing clauses or create placeholder
-        clauses = db.query(ComplianceClause).filter(
+        # ── Step 1b: Persist extracted clauses to DB ──
+        # Check if clauses already exist for this SOTR doc
+        existing_clauses = db.query(ComplianceClause).filter(
             ComplianceClause.sotr_doc_id == evaluation.sotr_doc_id
         ).all()
         
-        if not clauses:
-            logger.warning(f"No clauses found for SOTR {evaluation.sotr_doc_id}")
+        if not existing_clauses:
+            # Insert new clauses
+            for pc in parsed_clauses:
+                clause_record = ComplianceClause(
+                    sotr_doc_id=evaluation.sotr_doc_id,
+                    clause_number=pc["clause_number"],
+                    clause_title=pc.get("clause_title"),
+                    clause_text=pc["clause_text"],
+                    category=pc.get("category", "general"),
+                    subcategory=pc.get("subcategory"),
+                    is_mandatory=pc.get("is_mandatory", True),
+                    is_critical=pc.get("is_critical", False),
+                    acceptance_criteria=pc.get("acceptance_criteria"),
+                    page_number=pc.get("page_number"),
+                    extraction_confidence=pc.get("extraction_confidence", 0.0),
+                )
+                db.add(clause_record)
+            db.commit()
+            logger.info(f"[Eval {evaluation_id}] Persisted {len(parsed_clauses)} clauses to DB")
         
-        # Score each clause (placeholder implementation)
-        scored_count = 0
-        for clause in clauses:
-            # Create or update score
-            score = db.query(ClauseScore).filter(
+        # Reload clauses from DB (ensures we have IDs)
+        db_clauses = db.query(ComplianceClause).filter(
+            ComplianceClause.sotr_doc_id == evaluation.sotr_doc_id
+        ).order_by(ComplianceClause.clause_number).all()
+        
+        # ── Step 2: Score clauses via agent ──
+        logger.info(f"[Eval {evaluation_id}] Step 2: Scoring {len(db_clauses)} clauses against vendor doc")
+        evaluation.status = ComplianceStatus.SCORING
+        db.commit()
+        
+        # Build scoring request
+        score_request_clauses = []
+        for clause in db_clauses:
+            score_request_clauses.append({
+                "clause_number": clause.clause_number,
+                "clause_title": clause.clause_title,
+                "clause_text": clause.clause_text,
+                "category": clause.category or "general",
+                "is_mandatory": clause.is_mandatory,
+                "is_critical": clause.is_critical,
+                "acceptance_criteria": clause.acceptance_criteria,
+                "vendor_doc_id": vendor_qdrant_id,
+            })
+        
+        with httpx.Client(base_url=_AGENT_BASE, timeout=300.0) as client:
+            score_resp = client.post(
+                "/api/compliance/score-all",
+                json={
+                    "clauses": score_request_clauses,
+                    "vendor_doc_id": vendor_qdrant_id,
+                    "use_batch": True,
+                },
+            )
+            
+            if score_resp.status_code != 200:
+                raise ValueError(
+                    f"Clause scoring failed (HTTP {score_resp.status_code}): "
+                    f"{score_resp.text[:300]}"
+                )
+            
+            score_data = score_resp.json()
+        
+        scores_list = score_data.get("scores", [])
+        summary = score_data.get("summary", {})
+        
+        logger.info(f"[Eval {evaluation_id}] Received {len(scores_list)} scores from agent")
+        
+        # ── Step 2b: Persist scores to DB ──
+        # Map clause_number -> db clause for lookup
+        clause_map = {c.clause_number: c for c in db_clauses}
+        
+        for score_item in scores_list:
+            clause_number = score_item.get("clause_number", "")
+            db_clause = clause_map.get(clause_number)
+            
+            if not db_clause:
+                logger.warning(f"[Eval {evaluation_id}] Score for unknown clause '{clause_number}', skipping")
+                continue
+            
+            # Create or update score record
+            existing_score = db.query(ClauseScore).filter(
                 ClauseScore.evaluation_id == evaluation_id,
-                ClauseScore.clause_id == clause.id
+                ClauseScore.clause_id == db_clause.id,
             ).first()
             
-            if not score:
-                score = ClauseScore(
-                    evaluation_id=evaluation_id,
-                    clause_id=clause.id,
-                    status=ClauseStatus.PENDING,
-                    confidence=0.0
-                )
-                db.add(score)
+            status_value = score_item.get("status", "pending")
+            confidence_value = score_item.get("confidence", 0.0)
             
-            scored_count += 1
+            if not existing_score:
+                existing_score = ClauseScore(
+                    evaluation_id=evaluation_id,
+                    clause_id=db_clause.id,
+                    status=status_value,
+                    confidence=confidence_value,
+                    vendor_response_summary=score_item.get("vendor_response_summary", ""),
+                    evidence_text=score_item.get("evidence_text", ""),
+                    gaps_identified=score_item.get("gaps_identified"),
+                    deviation_notes=score_item.get("recommendation", ""),
+                    llm_raw_response=None,
+                )
+                db.add(existing_score)
+            else:
+                existing_score.status = status_value
+                existing_score.confidence = confidence_value
+                existing_score.vendor_response_summary = score_item.get("vendor_response_summary", "")
+                existing_score.evidence_text = score_item.get("evidence_text", "")
+                existing_score.gaps_identified = score_item.get("gaps_identified")
+                existing_score.deviation_notes = score_item.get("recommendation", "")
         
         db.commit()
         
-        # Step 3: Calculate summary
+        # ── Step 3: Calculate evaluation summary ──
+        logger.info(f"[Eval {evaluation_id}] Step 3: Calculating summary")
+        
         all_scores = db.query(ClauseScore).filter(
             ClauseScore.evaluation_id == evaluation_id
         ).all()
         
-        # Count by status
         counts = {"compliant": 0, "partial": 0, "non_compliant": 0, "not_applicable": 0}
         for score in all_scores:
             if score.status in counts:
@@ -404,36 +560,48 @@ def _run_evaluation_background(evaluation_id: int):
         evaluation.not_applicable_count = counts["not_applicable"]
         evaluation.total_clauses = len(all_scores)
         
-        # Calculate overall score
-        scored = counts["compliant"] + counts["partial"] + counts["non_compliant"]
-        if scored > 0:
-            evaluation.overall_score = (counts["compliant"] + counts["partial"] * 0.5) / scored
+        # Use agent-provided summary if available, otherwise calculate locally
+        if summary and summary.get("compliance_percentage") is not None:
+            evaluation.overall_score = summary["compliance_percentage"] / 100.0
+            evaluation.recommendation = summary.get("recommendation", "review")
         else:
-            evaluation.overall_score = 0.0
-        
-        # Determine recommendation
-        if counts["non_compliant"] == 0 and counts["compliant"] >= counts["partial"]:
-            evaluation.recommendation = "accept"
-        elif counts["non_compliant"] <= 2 and counts["compliant"] > counts["non_compliant"]:
-            evaluation.recommendation = "conditional"
-        else:
-            evaluation.recommendation = "reject"
+            scored = counts["compliant"] + counts["partial"] + counts["non_compliant"]
+            if scored > 0:
+                evaluation.overall_score = (counts["compliant"] + counts["partial"] * 0.5) / scored
+            else:
+                evaluation.overall_score = 0.0
+            
+            if counts["non_compliant"] == 0 and counts["compliant"] >= counts["partial"]:
+                evaluation.recommendation = "accept"
+            elif counts["non_compliant"] <= 2 and counts["compliant"] > counts["non_compliant"]:
+                evaluation.recommendation = "conditional"
+            else:
+                evaluation.recommendation = "reject"
         
         # Mark complete
         evaluation.status = ComplianceStatus.COMPLETED
         evaluation.completed_at = datetime.utcnow()
         db.commit()
         
-        logger.info(f"Evaluation {evaluation_id} completed with score {evaluation.overall_score}")
+        logger.info(
+            f"[Eval {evaluation_id}] COMPLETED — score={evaluation.overall_score:.2%}, "
+            f"recommendation={evaluation.recommendation}, "
+            f"clauses={evaluation.total_clauses} "
+            f"(C:{counts['compliant']}/P:{counts['partial']}/NC:{counts['non_compliant']}/NA:{counts['not_applicable']})"
+        )
         
     except Exception as e:
-        logger.error(f"Evaluation {evaluation_id} failed: {e}")
-        evaluation = db.query(ComplianceEvaluation).filter(
-            ComplianceEvaluation.id == evaluation_id
-        ).first()
-        if evaluation:
-            evaluation.status = ComplianceStatus.FAILED
-            db.commit()
+        logger.error(f"[Eval {evaluation_id}] FAILED: {e}", exc_info=True)
+        try:
+            evaluation = db.query(ComplianceEvaluation).filter(
+                ComplianceEvaluation.id == evaluation_id
+            ).first()
+            if evaluation:
+                evaluation.status = ComplianceStatus.FAILED
+                evaluation.recommendation_notes = f"Evaluation failed: {str(e)[:500]}"
+                db.commit()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -503,6 +671,18 @@ async def score_single_clause(
     
     db.commit()
     db.refresh(score)
+    
+    # Audit log for manual override
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="COMPLIANCE_CLAUSE_SCORED_MANUAL",
+        resource_type="clause_score",
+        resource_id=str(score.id),
+        new_value=f"eval:{evaluation_id}, clause:{request.clause_id}, status:{request.status}",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
     
     # Recalculate evaluation summary
     _recalculate_evaluation_summary(evaluation_id, db)
