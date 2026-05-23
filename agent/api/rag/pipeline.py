@@ -19,6 +19,9 @@ from api.rag import embedder, chunker, reranker, ocr
 from api.rag.vector_store import get_store
 from api.rag import llm as llm_engine
 from api.rag.cache import semantic_cache
+from api.rag.evaluation_store import get_store as get_eval_store
+from api.rag.citation_validator import validate_citations_against_sources, format_validation_report
+from api.rag.hallucination_detector import detect_hallucinations, format_hallucination_report
 
 logger = logging.getLogger("agra.pipeline")
 
@@ -705,10 +708,72 @@ async def query_pipeline(
     _rrf_max = 1.0 / (60.0 + 1.0)
     confidence = min(max_score / _rrf_max, 1.0) if _rrf_max else 0.0
 
+    # ═══════════════════════════════════════════════════════════════════════
+    #  MODULE 2: Evaluation Logging & Validation
+    # ═══════════════════════════════════════════════════════════════════════
+    eval_store = get_eval_store()
+    
+    # Log query and retrieved chunks
+    try:
+        query_id = eval_store.log_query(
+            query_text=question,
+            user_id=user_id,
+            session_id=token[:16] if token else None,  # Use token prefix as session ID
+            doc_filter=doc_ids_filter,
+            category_filter=category,
+            response_time_ms=elapsed_ms,
+            final_confidence_score=confidence
+        )
+        eval_store.log_chunks(query_id, top_chunks)
+    except Exception as e:
+        logger.warning("Failed to log evaluation data: %s", e)
+    
+    # Citation Validation
+    validation_result = None
+    try:
+        validation_result = validate_citations_against_sources(full_text, sources)
+        eval_store.log_citation_validation(
+            query_id=query_id,
+            response_text=full_text,
+            total_citations=validation_result["total_citations"],
+            valid_citations=validation_result["valid_citations"],
+            invalid_citations=validation_result["invalid_citations"],
+            unverified_claims=validation_result["unverified_claims"],
+            citation_accuracy=validation_result["citation_accuracy"]
+        )
+        logger.info("Citation validation: %.1f%% accuracy (%d/%d)",
+                    validation_result["citation_accuracy"],
+                    validation_result["valid_citations"],
+                    validation_result["total_citations"])
+    except Exception as e:
+        logger.warning("Citation validation failed: %s", e)
+    
+    # Hallucination Detection
+    hallucination_result = None
+    try:
+        hallucination_result = detect_hallucinations(full_text, sources, validation_result)
+        eval_store.log_hallucination_detection(
+            query_id=query_id,
+            total_claims=hallucination_result["total_claims"],
+            supported_claims=hallucination_result["supported_claims"],
+            unsupported_claims=hallucination_result["unsupported_claims"],
+            contradicted_claims=hallucination_result["contradicted_claims"],
+            hallucination_rate=hallucination_result["hallucination_rate"]
+        )
+        logger.info("Hallucination detection: %.1f%% rate (%d/%d claims)",
+                    hallucination_result["hallucination_rate"],
+                    hallucination_result["unsupported_claims"],
+                    hallucination_result["total_claims"])
+    except Exception as e:
+        logger.warning("Hallucination detection failed: %s", e)
+
     yield {
         "done": True,
         "sources": sources,
         "response_time_ms": elapsed_ms,
         "chunks_used": len(top_chunks),
         "confidence_score": round(confidence, 3),
+        "citation_accuracy": round(validation_result["citation_accuracy"], 1) if validation_result else None,
+        "hallucination_rate": round(hallucination_result["hallucination_rate"], 1) if hallucination_result else None,
+        "query_id": query_id,  # For feedback submission
     }

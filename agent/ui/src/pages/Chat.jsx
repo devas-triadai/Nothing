@@ -18,6 +18,7 @@ import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
+import ConfidenceBadge from '../components/ConfidenceBadge';
 
 // ── Timestamp formatter ──
 function formatTimestamp(ts) {
@@ -1241,6 +1242,9 @@ export default function Chat() {
               content: finalText || last?.content || '',
               sources: data?.sources || [],
               confidence_score: data?.confidence_score,
+              citation_accuracy: data?.citation_accuracy,
+              hallucination_rate: data?.hallucination_rate,
+              response_time_ms: data?.response_time_ms,
               streaming: false,
             };
             persistMessages(copy, sessId);
@@ -1258,6 +1262,9 @@ export default function Chat() {
                   content: finalText || msgs[msgs.length - 1].content || '',
                   sources: data?.sources || [],
                   confidence_score: data?.confidence_score,
+                  citation_accuracy: data?.citation_accuracy,
+                  hallucination_rate: data?.hallucination_rate,
+                  response_time_ms: data?.response_time_ms,
                   streaming: false,
                 };
               }
@@ -1781,6 +1788,17 @@ export default function Chat() {
                           ))}
                         </div>
                       )}
+                      
+                      {/* Module 2: Confidence & Quality Metrics */}
+                      {msg.confidence_score !== undefined && !msg.streaming && (
+                        <ConfidenceBadge
+                          confidenceScore={msg.confidence_score}
+                          citationAccuracy={msg.citation_accuracy}
+                          hallucinationRate={msg.hallucination_rate}
+                          chunksUsed={msg.sources?.length}
+                          responseTimeMs={msg.response_time_ms}
+                        />
+                      )}
                     </>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1806,17 +1824,10 @@ export default function Chat() {
                       {msg.content && <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>}
                     </div>
                   )}
-                  {/* Timestamp & Confidence */}
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
-                    {msg.timestamp && (
-                      <div style={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
-                    )}
-                    {msg.confidence_score !== undefined && (
-                      <div style={{...styles.timestamp, color: msg.confidence_score > 0.5 ? 'var(--accent-green)' : 'var(--accent-amber)'}} title="Retrieval Confidence Score">
-                        {Math.round(msg.confidence_score * 100)}% Confidence
-                      </div>
-                    )}
-                  </div>
+                  {/* Timestamp */}
+                  {msg.timestamp && (
+                    <div style={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
+                  )}
                 </div>
               </div>
             ))}
