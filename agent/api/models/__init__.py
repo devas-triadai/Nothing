@@ -18,7 +18,30 @@ from .drawing_models import (
     LegacyDrawingResult,
 )
 
+# Compliance Module Phase 1
+from .compliance_models import (
+    ComplianceStatus,
+    ClauseStatus,
+    Recommendation,
+    ClauseCategory,
+    ComplianceEvaluationRequest,
+    ClauseScoreRequest,
+    ComplianceReportRequest,
+    ComplianceClauseBase,
+    ComplianceClauseResponse,
+    ClauseScoreBase,
+    ClauseScoreResponse,
+    ComplianceSummary,
+    ComplianceEvaluationResponse,
+    ComplianceListResponse,
+    ComplianceReportResponse,
+    SmartComplianceSuggestion,
+    ComplianceProgressUpdate,
+    SimpleComplianceResult,
+)
+
 __all__ = [
+    # Drawing Models
     "DrawingType",
     "DrawingFeature",
     "MeasurementUnit",
@@ -34,4 +57,23 @@ __all__ = [
     "DrawingAnalysisResponse",
     "ChatDrawingAnalysis",
     "LegacyDrawingResult",
+    # Compliance Models
+    "ComplianceStatus",
+    "ClauseStatus",
+    "Recommendation",
+    "ClauseCategory",
+    "ComplianceEvaluationRequest",
+    "ClauseScoreRequest",
+    "ComplianceReportRequest",
+    "ComplianceClauseBase",
+    "ComplianceClauseResponse",
+    "ClauseScoreBase",
+    "ClauseScoreResponse",
+    "ComplianceSummary",
+    "ComplianceEvaluationResponse",
+    "ComplianceListResponse",
+    "ComplianceReportResponse",
+    "SmartComplianceSuggestion",
+    "ComplianceProgressUpdate",
+    "SimpleComplianceResult",
 ]

@@ -11,7 +11,7 @@ import {
   FileText, ShieldCheck, LogOut, User, Loader2, X, Bot, Sparkles,
   Presentation, ClipboardList, BookOpen, Download, CheckCircle, XCircle,
   ExternalLink, ChevronLeft, Sun, Moon, LayoutDashboard, AlertTriangle, Edit2,
-  Upload, FolderOpen,
+  Upload, FolderOpen, FileCheck,
 } from 'lucide-react';
 import { getToken, getUser, decodeToken, logout, getDashboardUrl } from '../utils/auth';
 import api, { getApiUrl } from '../utils/api';
@@ -1610,6 +1610,7 @@ export default function Chat() {
           {isSuperAdmin && (
             <a href={getDashboardUrl('/dashboard')} style={styles.navLink}><LayoutDashboard size={15} />{!sidebarCollapsed && <span>{isHindi ? 'डैशबोर्ड' : 'Dashboard'}</span>}</a>
           )}
+          <Link to="/compliance" style={styles.navLink}><FileCheck size={15} />{!sidebarCollapsed && <span>{isHindi ? 'अनुपालन' : 'Compliance'}</span>}</Link>
         </div>
 
         <div style={styles.sidebarFooter}>

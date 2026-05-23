@@ -339,3 +339,208 @@ class EntitySearchLog(Base):
 
 # Create GIN index for trigram search on entity_normalized
 # Note: This is created via Alembic migration, not here directly
+
+
+# ═══════════════════════════════════════════════════════════════
+#  COMPLIANCE MODULE MODELS (Phase 1)
+# ═══════════════════════════════════════════════════════════════
+
+class ComplianceStatus(str, enum.Enum):
+    """Status of a compliance evaluation."""
+    CREATED = "created"
+    PARSING_SOTR = "parsing_sotr"
+    SCORING = "scoring"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ClauseStatus(str, enum.Enum):
+    """Status of individual clause evaluation."""
+    COMPLIANT = "compliant"
+    PARTIAL = "partial"
+    NON_COMPLIANT = "non_compliant"
+    NOT_APPLICABLE = "not_applicable"
+    PENDING = "pending"
+
+
+class ComplianceEvaluation(Base):
+    """
+    Compliance Module Phase 1: Main compliance evaluation session.
+    Tracks SOTR vs vendor submission evaluation workflow.
+    """
+    __tablename__ = "compliance_evaluations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Document references
+    sotr_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    vendor_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    
+    # Status tracking
+    status = Column(String(20), default=ComplianceStatus.CREATED, nullable=False)
+    
+    # Metadata
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    project_name = Column(String(200), nullable=True)
+    vessel_name = Column(String(100), nullable=True)
+    vendor_name = Column(String(100), nullable=True)
+    
+    # Results summary (populated when completed)
+    overall_score = Column(Float, nullable=True)  # 0.0-1.0 percentage
+    compliant_count = Column(Integer, default=0)
+    partial_count = Column(Integer, default=0)
+    non_compliant_count = Column(Integer, default=0)
+    not_applicable_count = Column(Integer, default=0)
+    total_clauses = Column(Integer, default=0)
+    
+    # Recommendation
+    recommendation = Column(String(20), nullable=True)  # accept, conditional, reject
+    recommendation_notes = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    sotr_document = relationship("Document", foreign_keys=[sotr_doc_id], backref="sotr_evaluations")
+    vendor_document = relationship("Document", foreign_keys=[vendor_doc_id], backref="vendor_evaluations")
+    creator = relationship("User", backref="compliance_evaluations")
+    clause_scores = relationship("ClauseScore", back_populates="evaluation", cascade="all, delete-orphan")
+    reports = relationship("ComplianceReport", back_populates="evaluation", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<ComplianceEvaluation({self.id}: {self.status})>"
+
+
+class ComplianceClause(Base):
+    """
+    Compliance Module Phase 1: Extracted SOTR clause.
+    Represents a single requirement from SOTR document.
+    """
+    __tablename__ = "compliance_clauses"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Link to SOTR document
+    sotr_doc_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Clause identification
+    clause_number = Column(String(20), nullable=False, index=True)  # e.g., "1.1", "1.2.1"
+    clause_title = Column(String(200), nullable=True)
+    clause_text = Column(Text, nullable=False)
+    
+    # Categorization
+    category = Column(String(50), nullable=True, index=True)  # technical, commercial, safety, general
+    subcategory = Column(String(50), nullable=True)
+    
+    # Requirement type
+    is_mandatory = Column(Boolean, default=True)
+    is_critical = Column(Boolean, default=False)  # Critical to safety/operation
+    
+    # Extraction metadata
+    acceptance_criteria = Column(Text, nullable=True)
+    extracted_at = Column(DateTime, default=datetime.utcnow)
+    extraction_confidence = Column(Float, default=0.0)
+    
+    # Source location
+    page_number = Column(Integer, nullable=True)
+    chunk_index = Column(Integer, nullable=True)
+    
+    # Relationships
+    sotr_document = relationship("Document", backref="extracted_clauses")
+    scores = relationship("ClauseScore", back_populates="clause")
+    
+    def __repr__(self):
+        return f"<ComplianceClause({self.clause_number}: {self.clause_title or 'Untitled'})>"
+
+
+class ClauseScore(Base):
+    """
+    Compliance Module Phase 1: Evaluation result for a single clause.
+    Links evaluation + clause + vendor response.
+    """
+    __tablename__ = "clause_scores"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign keys
+    evaluation_id = Column(Integer, ForeignKey("compliance_evaluations.id", ondelete="CASCADE"), nullable=False, index=True)
+    clause_id = Column(Integer, ForeignKey("compliance_clauses.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Scoring
+    status = Column(String(20), default=ClauseStatus.PENDING, nullable=False, index=True)
+    confidence = Column(Float, default=0.0)  # 0.0-1.0 confidence in this score
+    
+    # Vendor response analysis
+    vendor_response_summary = Column(Text, nullable=True)
+    evidence_text = Column(Text, nullable=True)  # Excerpt from vendor doc
+    evidence_chunk_id = Column(String(50), nullable=True)  # Reference to vector store chunk
+    
+    # Gap analysis
+    gaps_identified = Column(Text, nullable=True)
+    deviation_notes = Column(Text, nullable=True)
+    
+    # Manual review
+    manually_reviewed = Column(Boolean, default=False)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewer_notes = Column(Text, nullable=True)
+    
+    # LLM analysis metadata
+    llm_raw_response = Column(Text, nullable=True)  # Store full LLM output for audit
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    evaluation = relationship("ComplianceEvaluation", back_populates="clause_scores")
+    clause = relationship("ComplianceClause", back_populates="scores")
+    reviewer = relationship("User")
+    
+    def __repr__(self):
+        return f"<ClauseScore(Eval:{self.evaluation_id}, Clause:{self.clause_id}, {self.status})>"
+
+
+class ComplianceReport(Base):
+    """
+    Compliance Module Phase 1: Generated compliance report.
+    Stores metadata about PDF/JSON reports.
+    """
+    __tablename__ = "compliance_reports"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Link to evaluation
+    evaluation_id = Column(Integer, ForeignKey("compliance_evaluations.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Report metadata
+    report_type = Column(String(20), default="full", nullable=False)  # full, summary, technical_only
+    file_name = Column(String(255), nullable=True)
+    file_path = Column(String(500), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    
+    # Report content summary
+    summary_text = Column(Text, nullable=True)
+    key_findings = Column(Text, nullable=True)  # JSON array as text
+    
+    # Generation metadata
+    generated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    generation_time_ms = Column(Float, nullable=True)
+    
+    # Versioning
+    version = Column(Integer, default=1)
+    is_latest = Column(Boolean, default=True, index=True)
+    
+    # Relationships
+    evaluation = relationship("ComplianceEvaluation", back_populates="reports")
+    generator = relationship("User")
+    
+    def __repr__(self):
+        return f"<ComplianceReport({self.id}: Eval {self.evaluation_id}, v{self.version})>"
+
+
+# Compliance indexes for performance
+# Note: Additional indexes created via Alembic migrations

@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 
 from app.database import engine, Base, SessionLocal
-from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports, settings
+from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports, settings, compliance
 from app.routers.audit import router as audit_logs_router
 from app.seed import seed_superadmin
 from app.utils.security import decode_access_token
@@ -128,6 +128,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(compliance.router, prefix="/api/compliance", tags=["Compliance"])
 
 
 @app.get("/")

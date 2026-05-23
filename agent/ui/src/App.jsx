@@ -4,6 +4,7 @@ import { getToken, setToken, getDashboardUrl } from './utils/auth';
 import Chat from './pages/Chat';
 import Generate from './pages/Generate';
 import Drawing from './pages/Drawing';
+import Compliance from './pages/Compliance';
 
 function ProtectedRoute({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -69,6 +70,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Drawing />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/compliance"
+        element={
+          <ProtectedRoute>
+            <Compliance />
           </ProtectedRoute>
         }
       />

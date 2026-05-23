@@ -36,6 +36,29 @@ from .confidence_scorer import (
     ConfidenceWeights,
 )
 
+# Compliance Module Phase 2: SOTR Parser exports
+from .sotr_parser import (
+    is_sotr_document,
+    detect_sotr_in_text,
+    extract_clauses,
+    parse_sotr_document,
+    parsed_clause_to_base_model,
+    extract_clauses_to_models,
+    ParsedClause,
+)
+
+# Compliance Module Phase 3: Clause Scorer exports
+from .clause_scorer import (
+    find_relevant_vendor_text,
+    find_all_vendor_text,
+    score_single_clause,
+    score_clauses_batch,
+    score_clause_against_vendor,
+    score_all_clauses,
+    generate_evaluation_summary,
+    ScoringResult,
+)
+
 __all__ = [
     # Drawing Classifier
     "classify_drawing",
@@ -64,4 +87,21 @@ __all__ = [
     "assess_result_quality",
     "calculate_legacy_confidence",
     "ConfidenceWeights",
+    # SOTR Parser
+    "is_sotr_document",
+    "detect_sotr_in_text",
+    "extract_clauses",
+    "parse_sotr_document",
+    "parsed_clause_to_base_model",
+    "extract_clauses_to_models",
+    "ParsedClause",
+    # Clause Scorer
+    "find_relevant_vendor_text",
+    "find_all_vendor_text",
+    "score_single_clause",
+    "score_clauses_batch",
+    "score_clause_against_vendor",
+    "score_all_clauses",
+    "generate_evaluation_summary",
+    "ScoringResult",
 ]
