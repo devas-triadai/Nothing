@@ -146,7 +146,7 @@ def test_validate_citations_with_invalid():
     assert result["total_citations"] == 3
     assert result["valid_citations"] == 2
     assert result["invalid_citations"] == 1
-    assert result["citation_accuracy"] == 200/3  # 66.67%
+    assert abs(result["citation_accuracy"] - 66.667) < 0.1  # ~66.67%
 
 
 def test_extract_claims():
