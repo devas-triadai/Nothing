@@ -85,6 +85,13 @@ async def _extract_and_store_metadata(
         
         logger.info("[Metadata+Lineage+Entities+Changes] Starting for doc_id=%s", doc_id)
         
+        # Check if doc_id is a backend integer ID or a chat-upload UUID
+        try:
+            int(doc_id)
+            _is_backend_doc = True
+        except (ValueError, TypeError):
+            _is_backend_doc = False
+        
         # Step 1: Extract text from document (reuse OCR)
         pages = ocr.extract_document(file_path)
         if not pages:
@@ -100,7 +107,7 @@ async def _extract_and_store_metadata(
         # Step 3: Check confidence threshold and store metadata
         if metadata.get("confidence", 0.0) >= 0.6:
             storage_data = format_metadata_for_storage(metadata)
-            if storage_data:
+            if storage_data and _is_backend_doc:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     response = await client.post(
                         f"{_ADMIN_BASE}/api/documents/{doc_id}/metadata/extracted",
@@ -143,22 +150,25 @@ async def _extract_and_store_metadata(
                 logger.info("[Metadata+Lineage] Found %d lineage candidates for %s (top: %.3f)",
                            len(candidates), doc_id, candidates[0].get("similarity", 0.0))
                 
-                # Send candidates to backend
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(
-                        f"{_ADMIN_BASE}/api/documents/{doc_id}/lineage/detected",
-                        json=candidates,
-                        params={"auto_accept": "false"},  # Manual review for safety
-                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        logger.info("[Metadata+Lineage] Lineage stored for %s: %d auto, %d pending",
-                                   doc_id, result.get("auto_accepted", 0), result.get("pending_review", 0))
-                    else:
-                        logger.warning("[Metadata+Lineage] Lineage backend returned %s: %s",
-                                     response.status_code, response.text[:200])
+                if _is_backend_doc:
+                    # Send candidates to backend
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.post(
+                            f"{_ADMIN_BASE}/api/documents/{doc_id}/lineage/detected",
+                            json=candidates,
+                            params={"auto_accept": "false"},  # Manual review for safety
+                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            logger.info("[Metadata+Lineage] Lineage stored for %s: %d auto, %d pending",
+                                       doc_id, result.get("auto_accepted", 0), result.get("pending_review", 0))
+                        else:
+                            logger.warning("[Metadata+Lineage] Lineage backend returned %s: %s",
+                                         response.status_code, response.text[:200])
+                else:
+                    logger.info("[Metadata+Lineage] Skipping backend lineage for chat-upload doc %s (UUID)", doc_id)
             else:
                 logger.info("[Metadata+Lineage] No lineage candidates found for %s", doc_id)
         else:
@@ -187,20 +197,21 @@ async def _extract_and_store_metadata(
                     for e in entities
                 ]
                 
-                # Send to backend
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(
-                        f"{_ADMIN_BASE}/api/documents/{doc_id}/entities",
-                        json=entity_data,
-                        headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        logger.info("[Metadata+Lineage] Entities stored for %s: %d new",
-                                   doc_id, result.get("entities_stored", 0))
-                    else:
-                        logger.warning("[Metadata+Lineage] Entities backend returned %s", response.status_code)
+                # Send to backend (only for admin-uploaded docs with integer IDs)
+                if _is_backend_doc:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.post(
+                            f"{_ADMIN_BASE}/api/documents/{doc_id}/entities",
+                            json=entity_data,
+                            headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            logger.info("[Metadata+Lineage] Entities stored for %s: %d new",
+                                       doc_id, result.get("entities_stored", 0))
+                        else:
+                            logger.warning("[Metadata+Lineage] Entities backend returned %s", response.status_code)
             else:
                 logger.info("[Metadata+Lineage] No entities extracted for %s", doc_id)
         
