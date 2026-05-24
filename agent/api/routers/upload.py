@@ -92,7 +92,7 @@ async def _extract_and_store_metadata(
             return
         
         # Combine text (first 10 pages for speed)
-        full_text = "\n\n".join(pages[:10])
+        full_text = "\n\n".join(p["text"] if isinstance(p, dict) else p for p in pages[:10])
         
         # Step 2: Run LLM metadata extraction
         metadata = await extract_document_metadata(full_text, filename)
