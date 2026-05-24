@@ -18,7 +18,7 @@ import {
   RefreshCw, FileCheck, BarChart3, PieChart, List, Filter
 } from 'lucide-react';
 import { getToken, getUser, getDashboardUrl } from '../utils/auth';
-import api from '../utils/api';
+import api, { backendApi } from '../utils/api';
 import { useTheme } from '../utils/ThemeContext';
 
 // ── Status Badge Component ──
@@ -116,7 +116,7 @@ export default function Compliance() {
   // ── Fetch Data ──
   const fetchEvaluations = useCallback(async () => {
     try {
-      const res = await api.get('/compliance/evaluations?limit=20');
+      const res = await backendApi.get('/compliance/evaluations?limit=20');
       setEvaluations(res.data || []);
     } catch (err) {
       console.error('Failed to fetch evaluations:', err);
@@ -171,7 +171,7 @@ export default function Compliance() {
       }
 
       // Create evaluation
-      const evalRes = await api.post('/compliance/evaluations', {
+      const evalRes = await backendApi.post('/compliance/evaluations', {
         sotr_doc_id: parseInt(formData.sotr_doc_id),
         vendor_doc_id: vendorDocId,
         project_name: formData.project_name,
@@ -193,7 +193,7 @@ export default function Compliance() {
   const handleRunEvaluation = async (evalId) => {
     setIsLoading(true);
     try {
-      await api.post(`/compliance/evaluations/${evalId}/run`);
+      await backendApi.post(`/compliance/evaluations/${evalId}/run`);
       // Poll for completion
       pollEvaluationStatus(evalId);
     } catch (err) {
@@ -205,7 +205,7 @@ export default function Compliance() {
   const pollEvaluationStatus = async (evalId) => {
     const checkStatus = async () => {
       try {
-        const res = await api.get(`/compliance/evaluations/${evalId}`);
+        const res = await backendApi.get(`/compliance/evaluations/${evalId}`);
         setEvalDetails(res.data);
         
         if (res.data.status === 'completed' || res.data.status === 'failed') {
@@ -226,7 +226,7 @@ export default function Compliance() {
 
   const handleScoreClause = async (evalId, clauseId, status, notes = '') => {
     try {
-      await api.post(`/compliance/evaluations/${evalId}/score`, {
+      await backendApi.post(`/compliance/evaluations/${evalId}/score`, {
         clause_id: clauseId,
         status: status,
         notes: notes,
@@ -234,7 +234,7 @@ export default function Compliance() {
       });
       
       // Refresh evaluation details
-      const res = await api.get(`/compliance/evaluations/${evalId}?include_scores=true`);
+      const res = await backendApi.get(`/compliance/evaluations/${evalId}?include_scores=true`);
       setEvalDetails(res.data);
     } catch (err) {
       console.error('Failed to score clause:', err);
@@ -243,7 +243,7 @@ export default function Compliance() {
 
   const handleGenerateReport = async (evalId) => {
     try {
-      const res = await api.get(`/compliance/evaluations/${evalId}/report?format=pdf`);
+      const res = await backendApi.get(`/compliance/evaluations/${evalId}/report?format=pdf`);
       if (res.data?.download_url) {
         window.open(res.data.download_url, '_blank');
       }
