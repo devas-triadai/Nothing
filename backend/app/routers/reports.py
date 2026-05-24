@@ -278,7 +278,7 @@ def export_report(
 #  COMPLIANCE REPORT OVERSIGHT (SOTR Module 3)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from app.models.models import ComplianceReport, HistoricalFeedback
+from app.models.models import LegacyComplianceReport as ComplianceReport, HistoricalFeedback
 
 
 @router.get("/compliance")

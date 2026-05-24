@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Text, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, Text, ForeignKey, Enum, JSON
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime
 import enum
@@ -221,9 +221,9 @@ class SystemSetting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class ComplianceReport(Base):
-    """SOTR Compliance evaluation reports for audit oversight"""
-    __tablename__ = "compliance_reports"
+class LegacyComplianceReport(Base):
+    """Legacy: SOTR Compliance evaluation reports for audit oversight (pre-Phase 1)"""
+    __tablename__ = "legacy_compliance_reports"
     id = Column(Integer, primary_key=True, index=True)
     report_name = Column(String(255), nullable=False)
     sotr_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
@@ -257,7 +257,7 @@ class HistoricalFeedback(Base):
     """Historical feedback entries for SOTR compliance audit trail"""
     __tablename__ = "historical_feedback"
     id = Column(Integer, primary_key=True, index=True)
-    compliance_report_id = Column(Integer, ForeignKey("compliance_reports.id"), nullable=False)
+    compliance_report_id = Column(Integer, ForeignKey("legacy_compliance_reports.id"), nullable=False)
     
     # Clause reference
     clause_id = Column(String(100), nullable=False)  # e.g., SOTR-7.4.1
@@ -268,7 +268,7 @@ class HistoricalFeedback(Base):
     
     # Referenced past documents
     referenced_sotr_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
-    referenced_evaluation_id = Column(Integer, ForeignKey("compliance_reports.id"), nullable=True)
+    referenced_evaluation_id = Column(Integer, ForeignKey("legacy_compliance_reports.id"), nullable=True)
     
     # Severity of the finding
     severity = Column(String(20), default="INFO")  # INFO, WARNING, CRITICAL
@@ -276,7 +276,7 @@ class HistoricalFeedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    report = relationship("ComplianceReport", foreign_keys=[compliance_report_id], backref="feedback_entries")
+    report = relationship("LegacyComplianceReport", foreign_keys=[compliance_report_id], backref="feedback_entries")
     referenced_sotr = relationship("Document", foreign_keys=[referenced_sotr_id])
 
 
