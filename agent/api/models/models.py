@@ -115,6 +115,10 @@ class AsyncJob(Base):
     status = Column(String(20), default="pending")  # pending, processing, completed, failed
     progress = Column(Integer, default=0)
     
+    filename = Column(String(255), nullable=True)
+    username = Column(String(100), nullable=True)
+    parameters = Column(Text, nullable=True)
+    
     input_data = Column(JSON, nullable=True)
     result_data = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)

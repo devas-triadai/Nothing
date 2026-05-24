@@ -459,9 +459,12 @@ async def chat_upload(
         
         # Module 7: Fire metadata extraction as background task
         # This runs after successful upload without blocking the response
-        import asyncio
-        asyncio.create_task(
-            _extract_and_store_metadata(doc_id, str(saved_path), safe_name, token, None)
-        )
+        # Note: _stream() is a sync generator in a thread pool, so we spawn a new thread
+        import asyncio as _asyncio
+        def _run_metadata():
+            _asyncio.run(
+                _extract_and_store_metadata(doc_id, str(saved_path), safe_name, token, None)
+            )
+        threading.Thread(target=_run_metadata, daemon=True).start()
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
