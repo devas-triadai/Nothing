@@ -12,6 +12,7 @@ Two endpoints:
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import uuid
@@ -34,8 +35,7 @@ _ADMIN_BASE = os.getenv("AGRA_BACKEND_URL", "http://localhost:8000")
 
 router = APIRouter()
 
-import os as _os
-_DATA_DIR = Path(_os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
+_DATA_DIR = Path(os.environ.get("AGRA_DATA_DIR", "/workspace/agra_data"))
 if not _DATA_DIR.exists():
     _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "agra_data"
 _UPLOADS_DIR = _DATA_DIR / "uploads"
