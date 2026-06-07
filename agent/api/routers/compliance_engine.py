@@ -61,6 +61,8 @@ class ScoreClauseRequest(BaseModel):
     is_critical: bool = False
     acceptance_criteria: Optional[str] = None
     vendor_doc_id: str = Field(..., description="Vendor document ID in vector store")
+    vendor_doc_ids: Optional[List[str]] = Field(None, description="All vendor document IDs in vector store")
+    standard_doc_ids: Optional[List[str]] = Field(None, description="Standards document IDs in vector store")
 
 
 class ScoreClauseResponse(BaseModel):
@@ -76,7 +78,9 @@ class ScoreClauseResponse(BaseModel):
 
 class ScoreAllRequest(BaseModel):
     clauses: List[ScoreClauseRequest]
-    vendor_doc_id: str = Field(..., description="Vendor document ID in vector store")
+    vendor_doc_id: Optional[str] = Field(None, description="Vendor document ID in vector store")
+    vendor_doc_ids: Optional[List[str]] = Field(None, description="All vendor document IDs in vector store")
+    standard_doc_ids: Optional[List[str]] = Field(None, description="Standards document IDs in vector store")
     use_batch: bool = Field(default=True, description="Use batch processing for efficiency")
 
 
@@ -236,6 +240,8 @@ async def score_clause(
     score = score_clause_against_vendor(
         clause=clause,
         vendor_doc_id=request.vendor_doc_id,
+        vendor_doc_ids=request.vendor_doc_ids,
+        standard_doc_ids=request.standard_doc_ids,
     )
 
     return ScoreClauseResponse(
@@ -292,11 +298,14 @@ async def score_all_clauses_endpoint(
         raise HTTPException(status_code=400, detail="No clauses provided")
 
     # Score all
-    logger.info("Scoring %d clauses against vendor doc '%s'", len(clauses), request.vendor_doc_id)
+    primary_doc_id = request.vendor_doc_id or (request.vendor_doc_ids[0] if request.vendor_doc_ids else "")
+    logger.info("Scoring %d clauses against vendor doc '%s'", len(clauses), primary_doc_id)
 
     scored_results = score_all_clauses(
         clauses=clauses,
-        vendor_doc_id=request.vendor_doc_id,
+        vendor_doc_id=primary_doc_id,
+        vendor_doc_ids=request.vendor_doc_ids,
+        standard_doc_ids=request.standard_doc_ids,
         use_batch=request.use_batch,
     )
 

@@ -29,7 +29,7 @@ logger = logging.getLogger("agra.clause_scorer")
 #  LLM PROMPT TEMPLATES
 # ═══════════════════════════════════════════════════════════════
 
-_CLAUSE_SCORING_PROMPT = """You are a compliance officer for the Indian Coast Guard evaluating vendor submissions against SOTR requirements.
+_CLAUSE_SCORING_PROMPT = """You are a compliance officer for the Indian Coast Guard evaluating vendor submissions against SOTR requirements and database reference standards.
 
 SOTR CLAUSE:
 Number: {clause_number}
@@ -40,10 +40,13 @@ Mandatory: {is_mandatory}
 Critical: {is_critical}
 Acceptance Criteria: {acceptance_criteria}
 
+APPLICABLE STANDARDS (from database):
+{standards_text}
+
 VENDOR SUBMISSION (relevant excerpts):
 {vendor_text}
 
-Evaluate if the vendor submission meets this requirement.
+Evaluate if the vendor submission meets this requirement and complies with the database reference standards.
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -111,24 +114,50 @@ class ScoringResult:
 #  VENDOR TEXT RETRIEVAL
 # ═══════════════════════════════════════════════════════════════
 
+def check_speed_compliance(text: str) -> Optional[Tuple[float, str]]:
+    """
+    Check if the text specifies a vessel speed exceeding the Indian Coast Guard (ICG) limit of 50.0 knots.
+    Returns (speed_value, matched_text) if a violation is found, else None.
+    """
+    if not text:
+        return None
+    # Match numbers (integers or decimals) followed by knots, kts, or knot
+    pattern = re.compile(r'\b(\d+(?:\.\d+)?)\s*(?:knots|kts|knot)\b', re.IGNORECASE)
+    for match in pattern.finditer(text):
+        try:
+            val = float(match.group(1))
+            if val > 50.0:
+                return val, match.group(0)
+        except ValueError:
+            continue
+    return None
+
+
 def find_relevant_vendor_text(
     clause: ComplianceClauseBase,
     vendor_doc_id: str,
+    vendor_doc_ids: Optional[List[str]] = None,
+    standard_doc_ids: Optional[List[str]] = None,
     max_chunks: int = 5
-) -> Tuple[str, List[str]]:
+) -> Tuple[str, List[str], str]:
     """
-    Find relevant text from vendor document for a clause.
+    Find relevant text from vendor document and reference standards for a clause.
     
     Uses RAG to retrieve chunks that match the clause requirements.
     
     Args:
         clause: The SOTR clause to match against
         vendor_doc_id: Document ID of vendor submission
+        vendor_doc_ids: Optional list of all vendor document IDs
+        standard_doc_ids: Optional list of standard document IDs
         max_chunks: Maximum chunks to retrieve
         
     Returns:
-        (combined_text, chunk_ids)
+        (combined_vendor_text, chunk_ids, combined_standards_text)
     """
+    combined = ""
+    chunk_ids = []
+    standards_text = ""
     try:
         store = get_store()
         
@@ -137,32 +166,44 @@ def find_relevant_vendor_text(
         if clause.acceptance_criteria:
             search_terms += f" {clause.acceptance_criteria}"
         
-        # Search vector store
-        results = store.search(
-            query=search_terms,
-            top_k=max_chunks,
-            doc_filter=[vendor_doc_id]
-        )
+        # Search vendor documents
+        filter_vendor_ids = vendor_doc_ids if vendor_doc_ids else ([vendor_doc_id] if vendor_doc_id else [])
+        if filter_vendor_ids:
+            results = store.search(
+                query=search_terms,
+                top_k=max_chunks,
+                doc_filter=filter_vendor_ids
+            )
+            if results:
+                texts = []
+                for result in results:
+                    chunk_text = result.get("text", "")
+                    chunk_id = result.get("chunk_id", "")
+                    if chunk_text:
+                        texts.append(chunk_text)
+                        chunk_ids.append(chunk_id)
+                combined = "\n\n---\n\n".join(texts)
         
-        if not results:
-            return "", []
+        # Search standard documents
+        if standard_doc_ids:
+            std_results = store.search(
+                query=search_terms,
+                top_k=max_chunks,
+                doc_filter=standard_doc_ids
+            )
+            if std_results:
+                std_texts = []
+                for r in std_results:
+                    txt = r.get("text", "")
+                    if txt:
+                        fname = r.get("metadata", {}).get("filename", "Standard")
+                        std_texts.append(f"[{fname}]: {txt}")
+                standards_text = "\n\n---\n\n".join(std_texts)
         
-        # Combine chunk texts
-        texts = []
-        chunk_ids = []
-        for result in results:
-            chunk_text = result.get("text", "")
-            chunk_id = result.get("chunk_id", "")
-            if chunk_text:
-                texts.append(chunk_text)
-                chunk_ids.append(chunk_id)
-        
-        combined = "\n\n---\n\n".join(texts)
-        return combined, chunk_ids
-    
     except Exception as e:
-        logger.warning(f"Failed to retrieve vendor text for clause {clause.clause_number}: {e}")
-        return "", []
+        logger.warning(f"Failed to retrieve vendor/standards text for clause {clause.clause_number}: {e}")
+        
+    return combined, chunk_ids, standards_text
 
 
 def find_all_vendor_text(vendor_doc_id: str) -> str:
@@ -189,6 +230,7 @@ def find_all_vendor_text(vendor_doc_id: str) -> str:
 def score_single_clause(
     clause: ComplianceClauseBase,
     vendor_text: str,
+    standards_text: str = "",
     use_batch: bool = False
 ) -> ScoringResult:
     """
@@ -197,6 +239,7 @@ def score_single_clause(
     Args:
         clause: The SOTR clause
         vendor_text: Relevant text from vendor submission
+        standards_text: Reference standard text
         use_batch: If True, uses batch-optimized prompt
         
     Returns:
@@ -211,6 +254,7 @@ def score_single_clause(
         is_mandatory="Yes" if clause.is_mandatory else "No",
         is_critical="Yes" if clause.is_critical else "No",
         acceptance_criteria=clause.acceptance_criteria or "Not specified",
+        standards_text=standards_text if standards_text else "[No relevant standards found in database]",
         vendor_text=vendor_text if vendor_text else "[No relevant text found in vendor submission]"
     )
     
@@ -535,6 +579,8 @@ def calculate_confidence_factors(
 def score_clause_against_vendor(
     clause: ComplianceClauseBase,
     vendor_doc_id: str,
+    vendor_doc_ids: Optional[List[str]] = None,
+    standard_doc_ids: Optional[List[str]] = None,
     evaluation_context: Optional[Dict] = None
 ) -> ClauseScoreBase:
     """
@@ -543,14 +589,37 @@ def score_clause_against_vendor(
     Args:
         clause: SOTR clause to evaluate
         vendor_doc_id: Vendor document ID
+        vendor_doc_ids: Optional list of all vendor document IDs
+        standard_doc_ids: Optional list of standard document IDs
         evaluation_context: Optional context (project name, vessel, etc.)
         
     Returns:
         ClauseScoreBase with scoring result
     """
-    # Find relevant vendor text
-    vendor_text, chunk_ids = find_relevant_vendor_text(clause, vendor_doc_id)
+    # Find relevant vendor text and standards text
+    vendor_text, chunk_ids, standards_text = find_relevant_vendor_text(
+        clause, vendor_doc_id, vendor_doc_ids=vendor_doc_ids, standard_doc_ids=standard_doc_ids
+    )
     
+    # ── Speed Compliance Rule Override ──
+    # If the vendor text specifies a vessel speed exceeding ICG maximum limit of 50.0 knots
+    speed_violation = check_speed_compliance(vendor_text)
+    if speed_violation:
+        speed_val, matched_str = speed_violation
+        logger.warning(
+            "SPEED LIMIT VIOLATION DETECTED: %s (%s) — specified speed %f knots exceeds 50.0 knots limit",
+            clause.clause_number, clause.clause_title or "Untitled", speed_val
+        )
+        return ClauseScoreBase(
+            status=ClauseStatus.NON_COMPLIANT,
+            confidence=1.0,
+            vendor_response_summary=f"Vendor submission specifies a speed of {speed_val} knots ({matched_str}).",
+            evidence_text=matched_str,
+            gaps_identified=f"VIOLATION: Specified vessel speed of {speed_val} knots exceeds the Indian Coast Guard (ICG) maximum limit of 50.0 knots.",
+            deviation_notes="reject",
+            is_missing=False,
+        )
+        
     # ── Missing Clause Detection ──
     # If no vendor text found and clause is mandatory/critical, flag immediately
     if not vendor_text.strip():
@@ -586,7 +655,7 @@ def score_clause_against_vendor(
             )
     
     # Score with LLM
-    result = score_single_clause(clause, vendor_text)
+    result = score_single_clause(clause, vendor_text, standards_text)
     
     # Calculate detailed confidence
     confidence_factors = calculate_confidence_factors(result, clause)
@@ -606,6 +675,8 @@ def score_clause_against_vendor(
 def score_all_clauses(
     clauses: List[ComplianceClauseBase],
     vendor_doc_id: str,
+    vendor_doc_ids: Optional[List[str]] = None,
+    standard_doc_ids: Optional[List[str]] = None,
     use_batch: bool = True,
     progress_callback: Optional[callable] = None
 ) -> List[Tuple[ComplianceClauseBase, ClauseScoreBase]]:
@@ -615,6 +686,8 @@ def score_all_clauses(
     Args:
         clauses: List of SOTR clauses
         vendor_doc_id: Vendor document ID
+        vendor_doc_ids: Optional list of all vendor document IDs
+        standard_doc_ids: Optional list of standard document IDs
         use_batch: Use batch processing for efficiency
         progress_callback: Optional callback(clause_number, status, progress_percent)
         
@@ -624,6 +697,11 @@ def score_all_clauses(
     results = []
     total = len(clauses)
     
+    # If multiple vendor documents or standard references are provided,
+    # force individual scoring to allow clause-level RAG search across them.
+    if (vendor_doc_ids and len(vendor_doc_ids) > 1) or standard_doc_ids:
+        use_batch = False
+        
     if use_batch and total > 3:
         # ── Pre-check: Detect missing clauses before batch scoring ──
         # For each clause, check if vendor has relevant text. If not, flag as missing.
@@ -631,8 +709,28 @@ def score_all_clauses(
         missing_indices = {}  # index -> ClauseScoreBase for missing clauses
         
         for i, clause in enumerate(clauses):
-            vendor_text, _ = find_relevant_vendor_text(clause, vendor_doc_id)
-            if not vendor_text.strip():
+            vendor_text, _, standards_text = find_relevant_vendor_text(
+                clause, vendor_doc_id, vendor_doc_ids=vendor_doc_ids, standard_doc_ids=standard_doc_ids
+            )
+            # Speed violation check
+            speed_violation = check_speed_compliance(vendor_text)
+            if speed_violation:
+                speed_val, matched_str = speed_violation
+                score = ClauseScoreBase(
+                    status=ClauseStatus.NON_COMPLIANT,
+                    confidence=1.0,
+                    vendor_response_summary=f"Vendor specified speed of {speed_val} knots ({matched_str}).",
+                    evidence_text=matched_str,
+                    gaps_identified=f"VIOLATION: Specified vessel speed of {speed_val} knots exceeds the Indian Coast Guard (ICG) maximum limit of 50.0 knots.",
+                    deviation_notes="reject",
+                    is_missing=False,
+                )
+                missing_indices[i] = score
+                logger.warning(
+                    "SPEED LIMIT VIOLATION (batch precheck): %s (%s)",
+                    clause.clause_number, clause.clause_title or "Untitled"
+                )
+            elif not vendor_text.strip():
                 # Missing clause — handle without LLM
                 if clause.is_mandatory or clause.is_critical:
                     score = ClauseScoreBase(
@@ -701,13 +799,18 @@ def score_all_clauses(
         
         if missing_indices:
             logger.info(
-                "Missing clause detection (batch): %d/%d clauses have no vendor coverage",
+                "Missing/Violated clause detection (batch): %d/%d clauses handled by rule filters",
                 len(missing_indices), total
             )
     else:
         # Individual scoring (already has missing clause detection via score_clause_against_vendor)
         for i, clause in enumerate(clauses):
-            score = score_clause_against_vendor(clause, vendor_doc_id)
+            score = score_clause_against_vendor(
+                clause,
+                vendor_doc_id,
+                vendor_doc_ids=vendor_doc_ids,
+                standard_doc_ids=standard_doc_ids
+            )
             results.append((clause, score))
             
             if progress_callback:

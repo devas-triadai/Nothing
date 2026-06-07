@@ -458,8 +458,26 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
             ComplianceClause.sotr_doc_id == evaluation.sotr_doc_id
         ).order_by(ComplianceClause.clause_number).all()
         
+        # Query all documents uploaded by this user/vendor for this evaluation context (excluding SOTR and standards)
+        vendor_docs = db.query(Document).filter(
+            Document.uploaded_by == vendor_doc.uploaded_by,
+            Document.id != evaluation.sotr_doc_id,
+            Document.source != "knowledge_base"
+        ).all()
+        vendor_doc_ids = [d.qdrant_doc_id or str(d.id) for d in vendor_docs]
+        vendor_doc_ids = [d for d in vendor_doc_ids if d]
+        if vendor_qdrant_id not in vendor_doc_ids:
+            vendor_doc_ids.append(vendor_qdrant_id)
+
+        # Query all standard documents
+        standard_docs = db.query(Document).filter(
+            Document.source == "knowledge_base"
+        ).all()
+        standard_doc_ids = [d.qdrant_doc_id or str(d.id) for d in standard_docs]
+        standard_doc_ids = [d for d in standard_doc_ids if d]
+
         # ── Step 2: Score clauses via agent ──
-        logger.info(f"[Eval {evaluation_id}] Step 2: Scoring {len(db_clauses)} clauses against vendor doc")
+        logger.info(f"[Eval {evaluation_id}] Step 2: Scoring {len(db_clauses)} clauses against vendor docs")
         evaluation.status = ComplianceStatus.SCORING
         db.commit()
         
@@ -475,6 +493,8 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
                 "is_critical": clause.is_critical,
                 "acceptance_criteria": clause.acceptance_criteria,
                 "vendor_doc_id": vendor_qdrant_id,
+                "vendor_doc_ids": vendor_doc_ids,
+                "standard_doc_ids": standard_doc_ids,
             })
         
         with httpx.Client(base_url=_AGENT_BASE, timeout=300.0) as client:
@@ -483,6 +503,8 @@ def _run_evaluation_background(evaluation_id: int, db_session=None):
                 json={
                     "clauses": score_request_clauses,
                     "vendor_doc_id": vendor_qdrant_id,
+                    "vendor_doc_ids": vendor_doc_ids,
+                    "standard_doc_ids": standard_doc_ids,
                     "use_batch": True,
                 },
             )

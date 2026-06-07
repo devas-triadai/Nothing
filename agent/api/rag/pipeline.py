@@ -306,16 +306,30 @@ def ingest_document(
     if parent_doc_id:
         # This is a version update — use delta indexing
         import asyncio
-        loop = asyncio.get_event_loop()
         
         # Attach embeddings to chunks for delta indexer
         for chunk, emb in zip(chunks, all_embeddings):
             chunk["embedding"] = emb
         
-        # Run delta indexing
-        delta_result = loop.run_until_complete(
-            delta_index_document(doc_id, chunks, store)
-        )
+        # Run delta indexing safely
+        try:
+            def run_async_safe(coro):
+                try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
+                if running_loop and running_loop.is_running():
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(asyncio.run, coro)
+                        return future.result()
+                else:
+                    return asyncio.run(coro)
+
+            delta_result = run_async_safe(delta_index_document(doc_id, chunks, store))
+        except Exception as e:
+            logger.error("Delta indexing event loop error: %s", e)
+            delta_result = {"success": False, "error": str(e)}
         
         if delta_result["success"]:
             ops = delta_result["operations"]

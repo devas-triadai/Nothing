@@ -10,6 +10,7 @@ Architecture:
 Both models are lazy-loaded as singletons to avoid blocking FastAPI startup.
 """
 
+import base64
 import io
 import logging
 import threading
@@ -125,7 +126,12 @@ def extract_printed_text(image_input) -> Dict:
         pil_img = Image.fromarray(image_input)
     elif isinstance(image_input, (str, bytes)):
         if isinstance(image_input, str):
-            image_input = image_input.encode()
+            if "," in image_input:
+                image_input = image_input.split(",", 1)[1]
+            try:
+                image_input = base64.b64decode(image_input)
+            except Exception:
+                image_input = image_input.encode()
         pil_img = Image.open(io.BytesIO(image_input))
     else:
         pil_img = image_input
@@ -189,7 +195,12 @@ def extract_handwritten_text(image_input, confidence_threshold: int = 40) -> Dic
         pil_img = Image.fromarray(image_input)
     elif isinstance(image_input, (str, bytes)):
         if isinstance(image_input, str):
-            image_input = image_input.encode()
+            if "," in image_input:
+                image_input = image_input.split(",", 1)[1]
+            try:
+                image_input = base64.b64decode(image_input)
+            except Exception:
+                image_input = image_input.encode()
         pil_img = Image.open(io.BytesIO(image_input))
     else:
         pil_img = image_input

@@ -394,7 +394,7 @@ def _calculate_extraction_confidence(result: Dict, drawing_type: DrawingType) ->
 def stage_validate(
     vlm_result: Dict[str, Any],
     ocr_result: Dict[str, Any]
-) -> Tuple[List[Dimension], List[EquipmentTag], List[ComplianceNote], float]:
+) -> Tuple[List[Dimension], List[EquipmentTag], List[ComplianceNote], float, List]:
     """
     Validate and parse measurements from VLM result.
     
@@ -539,8 +539,9 @@ def run_drawing_analysis_pipeline(
     try:
         # Update job status
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
-        job.status = "processing"
-        db_session.commit()
+        if job:
+            job.status = "processing"
+            db_session.commit()
         
         # ── STAGE 1: INGEST ──
         stages["ingest"].start()
@@ -655,10 +656,12 @@ def run_drawing_analysis_pipeline(
         stages["index"].complete(index_conf, "Indexed in vector store")
         
         # Update job
-        job.status = "completed"
-        job.progress = 100
-        job.result_data = result.dict()
-        db_session.commit()
+        job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
+        if job:
+            job.status = "completed"
+            job.progress = 100
+            job.result_data = result.dict()
+            db_session.commit()
         
         return result
     
@@ -672,9 +675,10 @@ def run_drawing_analysis_pipeline(
         
         # Update job
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
-        job.status = "failed"
-        job.error_message = str(e)
-        db_session.commit()
+        if job:
+            job.status = "failed"
+            job.error_message = str(e)
+            db_session.commit()
         
         # Return partial result with error info
         return DrawingAnalysisResult(
@@ -727,16 +731,18 @@ async def analyze_drawing(
     db.commit()
     db.refresh(job)
     
-    # Queue pipeline
+    # Queue pipeline — wrap in helper that closes DB session after use
     from api.models.models import SessionLocal
-    background_tasks.add_task(
-        run_drawing_analysis_pipeline,
-        job.id,
-        file_bytes,
-        image.filename,
-        image.content_type,
-        SessionLocal()
-    )
+    def _run_and_close_session():
+        session = SessionLocal()
+        try:
+            run_drawing_analysis_pipeline(
+                job.id, file_bytes, image.filename, image.content_type, session
+            )
+        finally:
+            session.close()
+
+    background_tasks.add_task(_run_and_close_session)
     
     return DrawingAnalysisResponse(
         job_id=job.id,

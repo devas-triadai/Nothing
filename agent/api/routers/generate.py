@@ -1317,9 +1317,14 @@ Return ONLY valid JSON in this exact format:
 
     doc.add_heading("Multiple Choice Questions", level=2)
     for i, q in enumerate(quiz_data.get("mcq", []), 1):
-        doc.add_paragraph(f"Q{i}. {q['question']}", style="List Number")
+        if not isinstance(q, dict):
+            continue
+        doc.add_paragraph(f"Q{i}. {q.get('question', '')}")
+        options = q.get("options")
+        if not isinstance(options, dict):
+            options = {}
         for key in ("A", "B", "C", "D"):
-            opt = q.get("options", {}).get(key, "")
+            opt = options.get(key, "")
             doc.add_paragraph(f"   {key}) {opt}")
         doc.add_paragraph(f"   ✓ Correct: {q.get('correct', '?')}")
         doc.add_paragraph("")
@@ -1327,16 +1332,20 @@ Return ONLY valid JSON in this exact format:
     if quiz_data.get("true_false"):
         doc.add_heading("True / False Questions", level=2)
         for i, q in enumerate(quiz_data["true_false"], 1):
+            if not isinstance(q, dict):
+                continue
             ans = "True" if q.get("answer") is True else "False"
-            doc.add_paragraph(f"Q{i}. {q['question']}", style="List Number")
+            doc.add_paragraph(f"Q{i}. {q.get('question', '')}")
             doc.add_paragraph(f"   ✓ Answer: {ans}")
             if q.get("explanation"):
-                doc.add_paragraph(f"   Explanation: {q['explanation']}")
+                doc.add_paragraph(f"   Explanation: {q.get('explanation')}")
             doc.add_paragraph("")
 
     doc.add_heading("Short Answer Questions", level=2)
     for i, q in enumerate(quiz_data.get("short_answer", []), 1):
-        doc.add_paragraph(f"Q{i}. {q['question']}", style="List Number")
+        if not isinstance(q, dict):
+            continue
+        doc.add_paragraph(f"Q{i}. {q.get('question', '')}")
         doc.add_paragraph(f"   Model Answer: {q.get('model_answer', '')}")
         doc.add_paragraph("")
 

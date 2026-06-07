@@ -235,16 +235,50 @@ async def upload_document(
 @router.get("/lineage/all")
 def get_all_lineage(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_superadmin)
+    current_user: User = Depends(get_current_user)
 ):
-    all_docs = db.query(Document).order_by(Document.created_at.asc()).all()
-    nodes = [_doc_to_dict(d, db) for d in all_docs]
-    edges = [
-        {"from": d.parent_doc_id, "to": d.id}
-        for d in all_docs
-        if d.parent_doc_id is not None
-    ]
-    return {"nodes": nodes, "edges": edges}
+    """Get the full document DAG for the D3.js Genealogy visualization."""
+    docs = db.query(Document).all()
+    edges = db.query(DocEdge).all()
+    
+    nodes_data = []
+    for d in docs:
+        nodes_data.append({
+            "id": str(d.id),
+            "filename": d.original_filename,
+            "category": d.category or "General",
+            "version": d.version,
+            "group": d.doc_group_id,
+            "status": d.status,
+            "source": d.source,
+            "created_at": d.created_at.isoformat(),
+            "sha256": d.sha256_hash
+        })
+        
+    edges_data = []
+    # 1. Add explicit edges
+    for e in edges:
+        edges_data.append({
+            "source": str(e.source_id),
+            "target": str(e.target_id),
+            "type": e.edge_type,
+            "confidence": e.confidence
+        })
+        
+    # 2. Add implicit version edges (parent -> child)
+    for d in docs:
+        if d.parent_doc_id:
+            edges_data.append({
+                "source": str(d.parent_doc_id),
+                "target": str(d.id),
+                "type": "supersedes",
+                "confidence": 1.0
+            })
+            
+    return {
+        "nodes": nodes_data,
+        "edges": edges_data
+    }
 
 
 # ─── Check superseded documents ──────────────────────────────────────────────
@@ -763,53 +797,7 @@ def link_documents(
     
     return {"message": "Documents linked successfully", "edge_id": edge.id}
 
-@router.get("/lineage/all")
-def get_all_lineage(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get the full document DAG for the D3.js Genealogy visualization."""
-    docs = db.query(Document).all()
-    edges = db.query(DocEdge).all()
-    
-    nodes_data = []
-    for d in docs:
-        nodes_data.append({
-            "id": str(d.id),
-            "filename": d.original_filename,
-            "category": d.category or "General",
-            "version": d.version,
-            "group": d.doc_group_id,
-            "status": d.status,
-            "source": d.source,
-            "created_at": d.created_at.isoformat(),
-            "sha256": d.sha256_hash
-        })
-        
-    edges_data = []
-    # 1. Add explicit edges
-    for e in edges:
-        edges_data.append({
-            "source": str(e.source_id),
-            "target": str(e.target_id),
-            "type": e.edge_type,
-            "confidence": e.confidence
-        })
-        
-    # 2. Add implicit version edges (parent -> child)
-    for d in docs:
-        if d.parent_doc_id:
-            edges_data.append({
-                "source": str(d.parent_doc_id),
-                "target": str(d.id),
-                "type": "supersedes",
-                "confidence": 1.0
-            })
-            
-    return {
-        "nodes": nodes_data,
-        "edges": edges_data
-    }
+
 
 @router.get("/lineage/export")
 def export_lineage(

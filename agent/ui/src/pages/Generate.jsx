@@ -101,13 +101,37 @@ function PPTGenerator({ documents }) {
         num_slides: numSlides,
         doc_ids: selectedDocs,
         style_notes: styleNotes || null,
-      }, { responseType: 'blob' });
+      });
 
-      const url = window.URL.createObjectURL(data);
-      setDownloadUrl(url);
+      const jobId = data.job_id;
+      if (!jobId) {
+        throw new Error('No job ID returned from server');
+      }
+
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await api.get(`/generate/ppt/status/${jobId}`);
+          const statusData = statusRes.data;
+
+          if (statusData.status === 'done') {
+            clearInterval(pollInterval);
+            setDownloadUrl(getApiUrl(statusData.download_url));
+            setGenerating(false);
+          } else if (statusData.status === 'error') {
+            clearInterval(pollInterval);
+            setError(statusData.error || 'Generation failed');
+            setGenerating(false);
+          }
+        } catch (pollErr) {
+          clearInterval(pollInterval);
+          setError(pollErr.message || 'Error checking job status');
+          setGenerating(false);
+        }
+      }, 3000);
+
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Generation failed');
-    } finally {
       setGenerating(false);
     }
   };
@@ -491,6 +515,30 @@ function QuizGenerator({ documents }) {
                       {q.explanation && (
                         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', fontStyle: 'italic' }}>
                           💡 {q.explanation}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {quizData.true_false?.length > 0 && (
+              <>
+                <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--primary)', margin: '20px 0 12px' }}>
+                  True / False Questions
+                </h3>
+                {quizData.true_false.map((q, i) => (
+                  <div key={i} style={styles.quizQuestion}>
+                    <div style={styles.qNum}>Q{i + 1}.</div>
+                    <div>
+                      <div style={{ fontWeight: 500, marginBottom: '4px', color: 'var(--text-primary)' }}>{q.question}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--accent-green)', marginBottom: '4px' }}>
+                        <strong>✓ Answer:</strong> {q.answer === true ? 'True' : 'False'}
+                      </div>
+                      {q.explanation && (
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                          {q.explanation}
                         </div>
                       )}
                     </div>

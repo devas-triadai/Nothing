@@ -90,6 +90,16 @@ export default function Compliance() {
   const [error, setError] = useState(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [expandedScores, setExpandedScores] = useState({});
+  const [expandedClauses, setExpandedClauses] = useState({});
+  
+  const toggleEvidenceExpand = (scoreId) => {
+    setExpandedScores(prev => ({ ...prev, [scoreId]: !prev[scoreId] }));
+  };
+  
+  const toggleClauseExpand = (scoreId) => {
+    setExpandedClauses(prev => ({ ...prev, [scoreId]: !prev[scoreId] }));
+  };
   
   // Form state
   const [formData, setFormData] = useState({
@@ -535,17 +545,67 @@ export default function Compliance() {
                         <StatusBadge status={score.status} confidence={score.confidence} />
                       </div>
                       
-                      <p style={{ ...styles.clauseText, color: isDark ? '#cbd5e1' : '#475569' }}>
-                        {score.clause?.clause_text?.substring(0, 150)}...
-                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <p style={{ ...styles.clauseText, color: isDark ? '#cbd5e1' : '#475569', margin: 0 }}>
+                          {expandedClauses[score.id]
+                            ? score.clause?.clause_text
+                            : (score.clause?.clause_text?.length > 150
+                              ? `${score.clause.clause_text.substring(0, 150)}...`
+                              : score.clause?.clause_text)}
+                        </p>
+                        {score.clause?.clause_text?.length > 150 && (
+                          <button
+                            onClick={() => toggleClauseExpand(score.id)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#4a8bff',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              alignSelf: 'flex-start',
+                              cursor: 'pointer',
+                              padding: '2px 0 6px'
+                            }}
+                          >
+                            {expandedClauses[score.id] ? 'Show less requirement' : 'Show full requirement'}
+                          </button>
+                        )}
+                      </div>
 
                       {score.evidence_text && (
                         <div style={{ ...styles.evidenceBox, background: isDark ? '#0f172a' : '#f8fafc' }}>
-                          <span style={{ fontSize: '11px', color: '#4a8bff', fontWeight: 600 }}>
-                            Evidence:
-                          </span>
-                          <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: 0 }}>
-                            {score.evidence_text?.substring(0, 200)}...
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', color: '#4a8bff', fontWeight: 600 }}>
+                              Evidence:
+                            </span>
+                            {score.evidence_text.length > 200 && (
+                              <button 
+                                onClick={() => toggleEvidenceExpand(score.id)}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: '#4a8bff',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  padding: 0
+                                }}
+                              >
+                                {expandedScores[score.id] ? 'Show less' : 'Show more'}
+                              </button>
+                            )}
+                          </div>
+                          <p style={{ 
+                            fontSize: '12px', 
+                            color: isDark ? '#94a3b8' : '#64748b', 
+                            margin: 0,
+                            whiteSpace: 'pre-wrap'
+                          }}>
+                            {expandedScores[score.id] 
+                              ? score.evidence_text 
+                              : (score.evidence_text.length > 200 
+                                ? `${score.evidence_text.substring(0, 200)}...` 
+                                : score.evidence_text)}
                           </p>
                         </div>
                       )}

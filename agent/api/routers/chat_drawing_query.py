@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, B
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api.models.models import AsyncJob, get_agent_db
+from api.models.models import AsyncJob, get_agent_db, SessionLocal
 from api.models.drawing_models import DrawingAnalysisResult
 from api.utils.auth_check import get_current_user
 from api.utils.usage_logger import log_usage
@@ -507,18 +507,20 @@ def run_chat_drawing_query_pipeline(
     try:
         # Update job status
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
-        job.status = "processing"
-        job.progress = 10
-        db_session.commit()
+        if job:
+            job.status = "processing"
+            job.progress = 10
+            db_session.commit()
         
         # ── STEP 1: DRAWING ANALYSIS ──
-        job.progress = 30
-        db_session.commit()
+        if job:
+            job.progress = 30
+            db_session.commit()
         
         from api.models.drawing_models import DrawingAnalysisRequest
         
         drawing_result = run_drawing_analysis_pipeline(
-            job_id=f"{job_id}_analysis",
+            job_id=job_id,
             file_bytes=file_bytes,
             filename=filename,
             content_type=content_type,
@@ -530,8 +532,9 @@ def run_chat_drawing_query_pipeline(
         drawing_data = drawing_result.dict() if hasattr(drawing_result, 'dict') else drawing_result
         
         # ── STEP 2: INTENT CLASSIFICATION (Phase 2: Using Router) ──
-        job.progress = 50
-        db_session.commit()
+        if job:
+            job.progress = 50
+            db_session.commit()
         
         # Get full query plan from router
         query_plan = route_query(query)
@@ -540,15 +543,17 @@ def run_chat_drawing_query_pipeline(
         logger.info(f"Query routed: intent={intent}, priority={query_plan.priority}, requires_rag={query_plan.requires_rag}")
         
         # ── STEP 3: RAG CONTEXT SEARCH (Phase 3) ──
-        job.progress = 70
-        db_session.commit()
+        if job:
+            job.progress = 70
+            db_session.commit()
         
         # Use Phase 3 context search (integrated vessel/drawing/equipment search)
         rag_sources = search_rag_context(drawing_data)
         
         # ── STEP 4: ANSWER GENERATION ──
-        job.progress = 85
-        db_session.commit()
+        if job:
+            job.progress = 85
+            db_session.commit()
         
         answer = generate_answer(query, intent, drawing_data, rag_sources)
         
@@ -571,11 +576,7 @@ def run_chat_drawing_query_pipeline(
         
         # Update job
         processing_time = (time.time() - start_time) * 1000
-        job.status = "completed"
-        job.progress = 100
-        db_session.commit()
-        
-        return DrawingQueryResponse(
+        response = DrawingQueryResponse(
             job_id=job_id,
             status="completed",
             query=query,
@@ -585,17 +586,25 @@ def run_chat_drawing_query_pipeline(
             confidence=confidence,
             suggestions=suggestions,
             processing_time_ms=processing_time,
-            created_at=job.created_at,
+            created_at=job.created_at if job else datetime.utcnow(),
             completed_at=datetime.utcnow()
         )
+        if job:
+            job.status = "completed"
+            job.progress = 100
+            job.result_data = json.loads(response.json())
+            db_session.commit()
+        
+        return response
         
     except Exception as e:
         logger.error(f"Chat drawing query failed for job {job_id}: {e}")
         
         job = db_session.query(AsyncJob).filter(AsyncJob.id == job_id).first()
-        job.status = "failed"
-        job.error_message = str(e)
-        db_session.commit()
+        if job:
+            job.status = "failed"
+            job.error_message = str(e)
+            db_session.commit()
         
         raise
 
@@ -648,16 +657,17 @@ async def submit_drawing_query(
     db.add(job)
     db.commit()
     
-    # Queue pipeline
-    background_tasks.add_task(
-        run_chat_drawing_query_pipeline,
-        job_id,
-        file_bytes,
-        image.filename,
-        content_type,
-        query,
-        db
-    )
+    # Queue pipeline — wrap in helper that closes the DB session after use
+    def _run_and_close_session():
+        session = SessionLocal()
+        try:
+            run_chat_drawing_query_pipeline(
+                job_id, file_bytes, image.filename, content_type, query, session
+            )
+        finally:
+            session.close()
+
+    background_tasks.add_task(_run_and_close_session)
     
     log_usage(
         action_type="chat_drawing_query",

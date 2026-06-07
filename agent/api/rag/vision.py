@@ -1,8 +1,13 @@
-import cv2
-import numpy as np
 import base64
 import io
 from PIL import Image
+
+try:
+    import cv2
+    import numpy as np
+    opencv_available = True
+except ImportError:
+    opencv_available = False
 
 def preprocess_engineering_drawing(data_uri: str) -> str:
     """
@@ -13,6 +18,9 @@ def preprocess_engineering_drawing(data_uri: str) -> str:
     4. Deskew
     Takes a base64 data URI and returns a processed base64 data URI.
     """
+    if not opencv_available:
+        return data_uri
+
     if data_uri.startswith("data:"):
         header, encoded = data_uri.split(",", 1)
     else:

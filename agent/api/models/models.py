@@ -133,5 +133,31 @@ class AsyncJob(Base):
 # ═══════════════════════════════════════════════════════════════
 
 def init_agent_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, and add any missing columns to async_jobs."""
+    from sqlalchemy import text, inspect
     Base.metadata.create_all(bind=engine)
+    
+    # Check for missing columns in async_jobs and dynamically add them
+    try:
+        inspector = inspect(engine)
+        columns = [col["name"] for col in inspector.get_columns("async_jobs")]
+        
+        # Columns to check and add
+        expected_cols = {
+            "filename": "VARCHAR(255)",
+            "username": "VARCHAR(100)",
+            "parameters": "TEXT",
+            "input_data": "JSON",
+            "result_data": "JSON",
+            "error_message": "TEXT"
+        }
+        
+        with engine.begin() as conn:
+            for col_name, col_type in expected_cols.items():
+                if col_name not in columns:
+                    try:
+                        conn.execute(text(f"ALTER TABLE async_jobs ADD COLUMN {col_name} {col_type}"))
+                    except Exception as e:
+                        pass
+    except Exception:
+        pass
