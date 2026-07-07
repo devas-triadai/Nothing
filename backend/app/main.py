@@ -16,9 +16,39 @@ from app.seed import seed_superadmin
 from app.utils.security import decode_access_token
 
 
+def _run_migrations():
+    """Add columns that were added to models after the SQLite DB was first created."""
+    import sqlalchemy as sa
+    from sqlalchemy import inspect
+    from app.models.models import DocumentFolder
+
+    inspector = inspect(engine)
+    doc_columns = {c["name"] for c in inspector.get_columns("documents")}
+
+    with engine.connect() as conn:
+        # ── Add missing columns to `documents` ──
+        for col_name, col_type in (
+            ("ocr_status", sa.String(20)),
+            ("expiry_date", sa.DateTime()),
+            ("full_text", sa.Text()),
+            ("folder_id", sa.Integer()),
+        ):
+            if col_name not in doc_columns:
+                conn.execute(sa.text(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
+                print(f"  [migrate] Added column `documents.{col_name}`")
+
+        # ── Create `document_folders` table if missing ──
+        if "document_folders" not in inspector.get_table_names():
+            DocumentFolder.__table__.create(engine)
+            print("  [migrate] Created table `document_folders`")
+
+        conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _run_migrations()
     seed_superadmin()
     
     # ── Log Retention Enforcement (Background) ──
