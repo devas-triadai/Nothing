@@ -335,6 +335,99 @@ def check_superseded(
     return {"superseded": result}
 
 
+# ─── Folder CRUD ──────────────────────────────────────────────────────────
+
+class FolderCreate(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+    color: Optional[str] = "#6b7280"
+    icon: Optional[str] = "folder"
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+@router.get("/folders")
+def list_folders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all document folders as a flat list with nesting info."""
+    folders = db.query(DocumentFolder).order_by(DocumentFolder.name).all()
+    return {
+        "folders": [
+            {
+                "id": f.id,
+                "name": f.name,
+                "parent_id": f.parent_id,
+                "color": f.color,
+                "icon": f.icon,
+                "document_count": f.documents.count(),
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f in folders
+        ]
+    }
+
+@router.post("/folders")
+def create_folder(
+    body: FolderCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Create a new document folder."""
+    folder = DocumentFolder(
+        name=body.name,
+        parent_id=body.parent_id,
+        color=body.color,
+        icon=body.icon,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+    return {"message": "Folder created", "folder": {"id": folder.id, "name": folder.name}}
+
+@router.put("/folders/{folder_id}")
+def update_folder(
+    folder_id: int,
+    body: FolderUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Update a folder's metadata."""
+    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if body.name is not None:
+        folder.name = body.name
+    if body.parent_id is not None:
+        folder.parent_id = body.parent_id
+    if body.color is not None:
+        folder.color = body.color
+    if body.icon is not None:
+        folder.icon = body.icon
+    db.commit()
+    return {"message": "Folder updated"}
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(
+    folder_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Delete a folder (documents inside become unfiled)."""
+    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    # Unlink all documents
+    db.query(Document).filter(Document.folder_id == folder_id).update({"folder_id": None})
+    db.delete(folder)
+    db.commit()
+    return {"message": "Folder deleted"}
+
+
 # ─── Get single document ──────────────────────────────────────────────────────
 @router.get("/{doc_id}")
 def get_document(
@@ -1739,95 +1832,3 @@ def trigger_ocr(
         "extracted_length": len(extracted)
     }
 
-
-# ─── Folder CRUD ──────────────────────────────────────────────────────────
-
-class FolderCreate(BaseModel):
-    name: str
-    parent_id: Optional[int] = None
-    color: Optional[str] = "#6b7280"
-    icon: Optional[str] = "folder"
-
-class FolderUpdate(BaseModel):
-    name: Optional[str] = None
-    parent_id: Optional[int] = None
-    color: Optional[str] = None
-    icon: Optional[str] = None
-
-@router.get("/folders")
-def list_folders(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """List all document folders as a flat list with nesting info."""
-    folders = db.query(DocumentFolder).order_by(DocumentFolder.name).all()
-    return {
-        "folders": [
-            {
-                "id": f.id,
-                "name": f.name,
-                "parent_id": f.parent_id,
-                "color": f.color,
-                "icon": f.icon,
-                "document_count": f.documents.count(),
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-            }
-            for f in folders
-        ]
-    }
-
-@router.post("/folders")
-def create_folder(
-    body: FolderCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """Create a new document folder."""
-    folder = DocumentFolder(
-        name=body.name,
-        parent_id=body.parent_id,
-        color=body.color,
-        icon=body.icon,
-    )
-    db.add(folder)
-    db.commit()
-    db.refresh(folder)
-    return {"message": "Folder created", "folder": {"id": folder.id, "name": folder.name}}
-
-@router.put("/folders/{folder_id}")
-def update_folder(
-    folder_id: int,
-    body: FolderUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """Update a folder's metadata."""
-    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
-    if not folder:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    if body.name is not None:
-        folder.name = body.name
-    if body.parent_id is not None:
-        folder.parent_id = body.parent_id
-    if body.color is not None:
-        folder.color = body.color
-    if body.icon is not None:
-        folder.icon = body.icon
-    db.commit()
-    return {"message": "Folder updated"}
-
-@router.delete("/folders/{folder_id}")
-def delete_folder(
-    folder_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    """Delete a folder (documents inside become unfiled)."""
-    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
-    if not folder:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    # Unlink all documents
-    db.query(Document).filter(Document.folder_id == folder_id).update({"folder_id": None})
-    db.delete(folder)
-    db.commit()
-    return {"message": "Folder deleted"}
