@@ -235,19 +235,30 @@ def run_evaluation(
 
 def _run_evaluation(eval_id: int, db: Session):
     """Core logic: call agent score-all, store results."""
-    eval_ = db.query(ComplianceEvaluation).filter(ComplianceEvaluation.id == eval_id).first()
-    if not eval_:
-        return
+    try:
+        eval_ = db.query(ComplianceEvaluation).filter(ComplianceEvaluation.id == eval_id).first()
+        if not eval_:
+            return
 
-    eval_.status = "running"
-    db.commit()
-
-    # Fetch stored clauses
-    scores = db.query(ClauseScore).filter(ClauseScore.evaluation_id == eval_id).all()
-    if not scores:
-        eval_.status = "failed"
+        eval_.status = "running"
         db.commit()
-        return
+
+        # Fetch stored clauses
+        scores = db.query(ClauseScore).filter(ClauseScore.evaluation_id == eval_id).all()
+        if not scores:
+            eval_.status = "failed"
+            db.commit()
+            return
+    except Exception as e:
+        logger.exception("Failed to initialize evaluation run")
+        try:
+            eval_ = db.query(ComplianceEvaluation).filter(ComplianceEvaluation.id == eval_id).first()
+            if eval_:
+                eval_.status = "failed"
+                db.commit()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Evaluation initialization failed: {e}")
 
     clauses_payload = []
     for s in scores:

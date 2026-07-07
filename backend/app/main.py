@@ -63,9 +63,33 @@ def _run_migrations():
 
         conn.commit()
 
+    # ── Reset stuck compliance evaluations ──
+    _reset_stuck_evaluations()
+
+
+def _reset_stuck_evaluations():
+    """Reset any evaluations stuck in 'running' status on startup."""
+    try:
+        from app.models.models import ComplianceEvaluation
+        db = SessionLocal()
+        stuck = db.query(ComplianceEvaluation).filter(
+            ComplianceEvaluation.status == "running"
+        ).all()
+        for eval_ in stuck:
+            eval_.status = "failed"
+            logger = logging.getLogger("agra.backend.migrate")
+            logger.warning("Reset stuck evaluation #%s (was 'running')", eval_.id)
+        if stuck:
+            db.commit()
+        db.close()
+    except Exception as exc:
+        logger = logging.getLogger("agra.backend.migrate")
+        logger.warning("Could not reset stuck evaluations: %s", exc)
+
 
 def _migrate_missing_columns(conn, inspector, table_name: str, model_class):
     """Add any columns that exist in the model but are missing from the DB table."""
+    import sqlalchemy as sa
     existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
     for col in model_class.__table__.columns:
         if col.name not in existing_cols and not col.primary_key:
