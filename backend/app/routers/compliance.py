@@ -7,7 +7,7 @@ Stores evaluations in local DB, delegates parsing/scoring to the agent API.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import httpx
@@ -18,11 +18,20 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import ComplianceEvaluation, ClauseScore, User
 from app.routers.auth import get_current_user
+from app.utils.security import create_access_token
 
 logger = logging.getLogger("agra.backend.compliance")
 
 _AGENT_BASE = os.getenv("AGENT_BASE_URL", "http://localhost:8005")
 router = APIRouter()
+
+
+def _get_service_token() -> str:
+    """Generate a short-lived service token for backend→agent API calls."""
+    return create_access_token(
+        data={"sub": "backend_service", "role": "service"},
+        expires_delta=timedelta(minutes=5),
+    )
 
 
 # ── Pydantic schemas ──
@@ -106,7 +115,9 @@ class EvaluationResponse(BaseModel):
 
 def _agent_post(path: str, payload: dict, timeout: int = 120):
     url = f"{_AGENT_BASE}/api/compliance/{path.lstrip('/')}"
-    resp = httpx.post(url, json=payload, timeout=timeout)
+    token = _get_service_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = httpx.post(url, json=payload, headers=headers, timeout=timeout)
     if resp.status_code >= 400:
         detail = resp.text[:500]
         logger.error("Agent API error %s -> %s: %s", url, resp.status_code, detail)
