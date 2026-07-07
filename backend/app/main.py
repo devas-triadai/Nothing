@@ -59,6 +59,7 @@ def _run_migrations():
             for col_name, col_type in (
                 ("report_pdf_path", sa.String(500)),
                 ("agent_eval_id", sa.String(100)),
+                ("updated_at", sa.DateTime()),
             ):
                 if col_name not in ce_columns:
                     conn.execute(sa.text(f"ALTER TABLE compliance_evaluations ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
