@@ -66,15 +66,192 @@ function renderWithCitations(html, sources, onCiteClick) {
   });
 }
 
+// Group source entries by document to avoid duplicate pills for the same file.
+// Returns an array of grouped source objects with `_childSources`, `chunk_count`, `indexRange`.
+function groupSourcesByDocument(sources) {
+  const groups = {};
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const key = src.doc_id || src.document || `chunk_${i}`;
+    if (!groups[key]) {
+      groups[key] = { _childSources: [], _indices: [], pages: new Set() };
+    }
+    const g = groups[key];
+    g._childSources.push(src);
+    g._indices.push(src.index || i + 1);
+    if (src.page) g.pages.add(src.page);
+  }
+  return Object.values(groups).map(g => {
+    const sortedPages = [...g.pages].sort((a, b) => parseInt(a) - parseInt(b));
+    const first = g._childSources[0];
+    // Build page range or comma-separated list
+    let pageLabel = '';
+    if (sortedPages.length === 1) {
+      pageLabel = sortedPages[0];
+    } else if (sortedPages.length <= 3) {
+      pageLabel = sortedPages.join(', ');
+    } else {
+      pageLabel = `${sortedPages[0]}-${sortedPages[sortedPages.length - 1]}`;
+    }
+    // Build index range string for the pill badge
+    const sortedIdx = g._indices.sort((a, b) => a - b);
+    const idxRange = sortedIdx.length === 1
+      ? `${sortedIdx[0]}`
+      : `${sortedIdx[0]}-${sortedIdx[sortedIdx.length - 1]}`;
+    return {
+      document: first.document,
+      page: pageLabel,
+      clause: first.clause,
+      doc_id: first.doc_id,
+      excerpt: first.excerpt,
+      indexRange: idxRange,
+      chunk_count: g._childSources.length,
+      _childSources: g._childSources,
+    };
+  });
+}
+
 // ── Inline Quiz Component ──
-function InlineQuiz({ quiz, downloadUrl }) {
+function InlineQuiz({ quiz, downloadUrl, pdfDownloadUrl }) {
   const [answers, setAnswers] = useState({});
   const [revealed, setRevealed] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [showIncorrectOnly, setShowIncorrectOnly] = useState(false);
+  const [timers, setTimers] = useState({});
+  const timersRef = useRef(timers);
+  timersRef.current = timers;
+
+  // Build a flat question index: { idx: { type, typeIdx, key, timeLimit } }
+  const [questionMap] = useState(() => {
+    const map = {};
+    let idx = 0;
+    (quiz?.mcq || []).forEach((q, i) => {
+      map[idx] = { type: 'mcq', typeIdx: i, key: idx, timeLimit: 30, q };
+      idx++;
+    });
+    (quiz?.true_false || []).forEach((q, i) => {
+      map[idx] = { type: 'tf', typeIdx: i, key: `tf-${i}`, timeLimit: 20, q };
+      idx++;
+    });
+    (quiz?.short_answer || []).forEach((q, i) => {
+      map[idx] = { type: 'sa', typeIdx: i, key: `sa-${i}`, timeLimit: 60, q };
+      idx++;
+    });
+    return map;
+  });
+
+  // Initialize timers
+  useEffect(() => {
+    if (!quiz) return;
+    const initial = {};
+    for (const idx in questionMap) {
+      initial[idx] = questionMap[idx].timeLimit;
+    }
+    setTimers(initial);
+  }, [quiz, questionMap]);
+
+  // Global tick every second
+  useEffect(() => {
+    if (Object.keys(timers).length === 0 || submitted) return;
+    const interval = setInterval(() => {
+      setTimers(prev => {
+        const next = {};
+        for (const k in prev) {
+          next[k] = Math.max(0, prev[k] - 1);
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timers, submitted]);
+
+  // Auto-reveal when timer expires
+  useEffect(() => {
+    const expired = {};
+    for (const idx in timers) {
+      const qi = questionMap[idx]?.key;
+      if (!qi) continue;
+      if (timers[idx] <= 0 && !revealed[qi]) {
+        expired[qi] = true;
+      }
+    }
+    if (Object.keys(expired).length > 0) {
+      setRevealed(prev => ({ ...prev, ...expired }));
+    }
+  }, [timers, revealed, questionMap]);
 
   const select = (qi, opt) => setAnswers(p => ({ ...p, [qi]: opt }));
   const reveal = (qi) => setRevealed(p => ({ ...p, [qi]: true }));
 
+  // Compute score
+  const computeScore = () => {
+    let correct = 0;
+    let total = 0;
+    const details = [];
+    for (const idx in questionMap) {
+      const item = questionMap[idx];
+      const qi = item.key;
+      const userAns = answers[qi];
+      let isCorrect = false;
+      if (item.type === 'mcq') {
+        if (userAns && item.q.correct) {
+          isCorrect = userAns === item.q.correct;
+          total++;
+        }
+      } else if (item.type === 'tf') {
+        if (userAns !== undefined) {
+          const correctAns = item.q.answer === true || String(item.q.answer).toLowerCase() === 'true';
+          const correctLabel = correctAns ? 'True' : 'False';
+          isCorrect = userAns === correctLabel;
+          total++;
+        }
+      } else {
+        total++; // SA counted as attempted if not skipped
+        isCorrect = false; // SA cannot be auto-scored
+      }
+      if (isCorrect) correct++;
+      details.push({ idx, ...item, isCorrect, userAns });
+    }
+    return { correct, total, percentage: total > 0 ? Math.round((correct / total) * 100) : 0, details };
+  };
+
+  const handleSubmitAll = () => {
+    // Reveal all questions
+    const allKeys = {};
+    for (const idx in questionMap) {
+      allKeys[questionMap[idx].key] = true;
+    }
+    setRevealed(prev => ({ ...prev, ...allKeys }));
+    setSubmitted(true);
+  };
+
+  // Filter questions if showing incorrect only
+  const filteredMcq = submitted && showIncorrectOnly
+    ? (quiz?.mcq || []).filter((q, i) => {
+        const qi = i;
+        const userAns = answers[qi];
+        return userAns !== undefined && userAns !== q.correct;
+      })
+    : (quiz?.mcq || []);
+
+  const filteredTf = submitted && showIncorrectOnly
+    ? (quiz?.true_false || []).filter((q, i) => {
+        const qi = `tf-${i}`;
+        const userAns = answers[qi];
+        if (userAns === undefined) return false;
+        const correctAns = q.answer === true || String(q.answer).toLowerCase() === 'true';
+        const correctLabel = correctAns ? 'True' : 'False';
+        return userAns !== correctLabel;
+      })
+    : (quiz?.true_false || []);
+
+  const filteredSa = submitted && showIncorrectOnly
+    ? []
+    : (quiz?.short_answer || []);
+
   if (!quiz?.mcq && !quiz?.true_false && !quiz?.short_answer) return null;
+
+  const score = submitted ? computeScore() : null;
 
   return (
     <div style={quizStyles.container}>
@@ -88,20 +265,69 @@ function InlineQuiz({ quiz, downloadUrl }) {
         </span>
       </div>
 
-      {(quiz.mcq || []).map((q, qi) => {
-        const chosen = answers[qi];
-        const isRevealed = revealed[qi];
+      {/* Score summary after submission */}
+      {score && (
+        <div style={quizStyles.scoreCard}>
+          <div style={quizStyles.scoreRow}>
+            <span style={quizStyles.scoreLabel}>Your Score</span>
+            <span style={{
+              ...quizStyles.scoreValue,
+              color: score.percentage >= 70 ? '#22c55e' : score.percentage >= 40 ? '#f59e0b' : '#ef4444',
+            }}>
+              {score.correct}/{score.total} ({score.percentage}%)
+            </span>
+          </div>
+          {score.percentage >= 70 && <span style={quizStyles.scoreBadge}>Passing</span>}
+          {score.percentage < 70 && <span style={{ ...quizStyles.scoreBadge, background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}>Needs Improvement</span>}
+          {showIncorrectOnly && (
+            <button onClick={() => setShowIncorrectOnly(false)} style={quizStyles.incorrectToggle}>
+              Show All Questions
+            </button>
+          )}
+          {!showIncorrectOnly && (
+            <button onClick={() => setShowIncorrectOnly(true)} style={quizStyles.incorrectToggle}>
+              Review Incorrect Only
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Submit All button */}
+      {!submitted && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <button onClick={handleSubmitAll} style={quizStyles.submitAllBtn}>
+            Submit All Answers
+          </button>
+        </div>
+      )}
+
+      {/* MCQ Questions */}
+      {filteredMcq.map((q, qi) => {
+        const actualIdx = submitted && showIncorrectOnly
+          ? (quiz?.mcq || []).indexOf(q)
+          : qi;
+        const chosen = answers[actualIdx];
+        const isRevealed = revealed[actualIdx];
         const isCorrect = chosen === q.correct;
+        const timerVal = timers[actualIdx];
+        const showTimer = !isRevealed && !submitted && timerVal !== undefined;
         return (
-          <div key={qi} style={quizStyles.question}>
-            <p style={quizStyles.questionText}><strong>Q{qi + 1}.</strong> {q.question}</p>
+          <div key={`mcq-${actualIdx}`} style={quizStyles.question}>
+            <p style={quizStyles.questionText}>
+              <strong>Q{actualIdx + 1}.</strong> {q.question}
+              {showTimer && (
+                <span style={{ ...quizStyles.timer, color: timerVal <= 5 ? '#ef4444' : 'var(--text-muted)' }}>
+                  {Math.floor(timerVal / 60)}:{String(timerVal % 60).padStart(2, '0')}
+                </span>
+              )}
+            </p>
             <div style={quizStyles.options}>
               {Object.entries(q.options || {}).map(([key, val]) => {
                 let bg = 'var(--bg-card)';
                 let border = 'var(--border)';
                 let color = 'var(--text-secondary)';
                 if (chosen === key) {
-                  if (isRevealed) {
+                  if (isRevealed || submitted) {
                     bg = isCorrect ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)';
                     border = isCorrect ? '#22c55e' : '#ef4444';
                     color = isCorrect ? '#22c55e' : '#ef4444';
@@ -110,7 +336,7 @@ function InlineQuiz({ quiz, downloadUrl }) {
                     border = '#7c6ef7';
                     color = '#7c6ef7';
                   }
-                } else if (isRevealed && key === q.correct) {
+                } else if ((isRevealed || submitted) && key === q.correct) {
                   bg = 'rgba(34, 197, 94, 0.08)';
                   border = '#22c55e';
                   color = '#22c55e';
@@ -118,16 +344,23 @@ function InlineQuiz({ quiz, downloadUrl }) {
                 return (
                   <button
                     key={key}
-                    onClick={() => !isRevealed && select(qi, key)}
+                    onClick={() => !isRevealed && !submitted && select(actualIdx, key)}
                     style={{ ...quizStyles.option, background: bg, borderColor: border, color }}
+                    disabled={submitted}
                   >
                     <span style={quizStyles.optKey}>{key}</span>
                     {val}
+                    {(isRevealed || submitted) && key === q.correct && (
+                      <CheckCircle size={12} color="#22c55e" style={{ marginLeft: 'auto' }} />
+                    )}
+                    {(isRevealed || submitted) && chosen === key && !isCorrect && (
+                      <XCircle size={12} color="#ef4444" style={{ marginLeft: 'auto' }} />
+                    )}
                   </button>
                 );
               })}
             </div>
-            {isRevealed && (
+            {(isRevealed || submitted) && (
               <div style={quizStyles.explanation}>
                 {isCorrect ? <CheckCircle size={13} color="#22c55e" /> : <XCircle size={13} color="#ef4444" />}
                 <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -136,8 +369,8 @@ function InlineQuiz({ quiz, downloadUrl }) {
                 </span>
               </div>
             )}
-            {chosen && !isRevealed && (
-              <button onClick={() => reveal(qi)} style={quizStyles.revealBtn}>
+            {chosen && !isRevealed && !submitted && (
+              <button onClick={() => reveal(actualIdx)} style={quizStyles.revealBtn}>
                 Reveal Answer
               </button>
             )}
@@ -145,69 +378,117 @@ function InlineQuiz({ quiz, downloadUrl }) {
         );
       })}
 
-      {quiz.true_false?.map((q, tfi) => {
-        const tfKey = `tf-${tfi}`;
+      {/* True/False Questions */}
+      {filteredTf.map((q, tfi) => {
+        const actualTfIdx = submitted && showIncorrectOnly
+          ? (quiz?.true_false || []).indexOf(q)
+          : tfi;
+        const tfKey = `tf-${actualTfIdx}`;
         const tfChosen = answers[tfKey];
         const tfRevealed = revealed[tfKey];
         const correctAns = q.answer === true || String(q.answer).toLowerCase() === 'true';
         const correctLabel = correctAns ? 'True' : 'False';
+        const timerVal = timers[Object.keys(questionMap).find(k => questionMap[k]?.key === tfKey)];
+        const showTimer = !tfRevealed && !submitted && timerVal !== undefined;
         return (
           <div key={tfKey} style={quizStyles.question}>
-            <p style={quizStyles.questionText}><strong>T/F {tfi + 1}.</strong> {q.question}</p>
+            <p style={quizStyles.questionText}>
+              <strong>T/F {actualTfIdx + 1}.</strong> {q.question}
+              {showTimer && (
+                <span style={{ ...quizStyles.timer, color: timerVal <= 5 ? '#ef4444' : 'var(--text-muted)' }}>
+                  {Math.floor(timerVal / 60)}:{String(timerVal % 60).padStart(2, '0')}
+                </span>
+              )}
+            </p>
             <div style={quizStyles.options}>
               {['True', 'False'].map(opt => {
                 const isChosen = tfChosen === opt;
                 const isCorrectOpt = opt === correctLabel;
                 let bg = 'var(--bg-card)', border = 'var(--border)', color = 'var(--text-secondary)';
                 if (isChosen) {
-                  if (tfRevealed) {
+                  if (tfRevealed || submitted) {
                     bg = isCorrectOpt ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
                     border = isCorrectOpt ? '#22c55e' : '#ef4444';
                     color = isCorrectOpt ? '#22c55e' : '#ef4444';
                   } else { bg = 'rgba(124,110,247,0.1)'; border = '#7c6ef7'; color = '#7c6ef7'; }
-                } else if (tfRevealed && isCorrectOpt) {
+                } else if ((tfRevealed || submitted) && isCorrectOpt) {
                   bg = 'rgba(34,197,94,0.08)'; border = '#22c55e'; color = '#22c55e';
                 }
                 return (
-                  <button key={opt} onClick={() => !tfRevealed && setAnswers(p => ({ ...p, [tfKey]: opt }))}
-                    style={{ ...quizStyles.option, background: bg, borderColor: border, color }}>
+                  <button key={opt} onClick={() => !tfRevealed && !submitted && setAnswers(p => ({ ...p, [tfKey]: opt }))}
+                    style={{ ...quizStyles.option, background: bg, borderColor: border, color }} disabled={submitted}>
                     {opt}
+                    {(tfRevealed || submitted) && isCorrectOpt && (
+                      <CheckCircle size={12} color="#22c55e" style={{ marginLeft: 'auto' }} />
+                    )}
+                    {(tfRevealed || submitted) && isChosen && !isCorrectOpt && (
+                      <XCircle size={12} color="#ef4444" style={{ marginLeft: 'auto' }} />
+                    )}
                   </button>
                 );
               })}
             </div>
-            {tfRevealed && q.explanation && (
+            {(tfRevealed || submitted) && q.explanation && (
               <div style={quizStyles.explanation}>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{q.explanation}</span>
               </div>
             )}
-            {tfChosen && !tfRevealed && (
+            {tfChosen && !tfRevealed && !submitted && (
               <button onClick={() => setRevealed(p => ({ ...p, [tfKey]: true }))} style={quizStyles.revealBtn}>Reveal Answer</button>
             )}
           </div>
         );
       })}
 
-      {quiz.short_answer?.map((q, qi) => (
-        <div key={`sa-${qi}`} style={quizStyles.question}>
-          <p style={quizStyles.questionText}><strong>SA{qi + 1}.</strong> {q.question}</p>
-          <details style={quizStyles.details}>
-            <summary style={quizStyles.summary}>Show model answer</summary>
-            <p style={quizStyles.modelAnswer}>{q.model_answer}</p>
-          </details>
-        </div>
-      ))}
+      {/* Short Answer Questions */}
+      {filteredSa.map((q, qi) => {
+        const actualSaIdx = submitted && showIncorrectOnly
+          ? (quiz?.short_answer || []).indexOf(q)
+          : qi;
+        const saKey = `sa-${actualSaIdx}`;
+        const timerVal = timers[Object.keys(questionMap).find(k => questionMap[k]?.key === saKey)];
+        const showTimer = !revealed[saKey] && !submitted && timerVal !== undefined;
+        return (
+          <div key={saKey} style={quizStyles.question}>
+            <p style={quizStyles.questionText}>
+              <strong>SA{actualSaIdx + 1}.</strong> {q.question}
+              {showTimer && (
+                <span style={{ ...quizStyles.timer, color: timerVal <= 5 ? '#ef4444' : 'var(--text-muted)' }}>
+                  {Math.floor(timerVal / 60)}:{String(timerVal % 60).padStart(2, '0')}
+                </span>
+              )}
+            </p>
+            <details style={quizStyles.details}>
+              <summary style={quizStyles.summary}>Show model answer</summary>
+              <p style={quizStyles.modelAnswer}>{q.model_answer}</p>
+            </details>
+          </div>
+        );
+      })}
 
-      {downloadUrl && (
-        <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
-          <a
-            href={downloadUrl}
-            download
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}
-          >
-            <Download size={13} />
-            Download Quiz (.docx)
-          </a>
+      {/* Download buttons */}
+      {(downloadUrl || pdfDownloadUrl) && (
+        <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border)', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          {downloadUrl && (
+            <a
+              href={downloadUrl}
+              download
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}
+            >
+              <Download size={13} />
+              .docx
+            </a>
+          )}
+          {pdfDownloadUrl && (
+            <a
+              href={pdfDownloadUrl}
+              download
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: '#e74c3c', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none' }}
+            >
+              <Download size={13} />
+              .pdf
+            </a>
+          )}
         </div>
       )}
     </div>
@@ -265,7 +546,8 @@ function PPTCard({ filename, slides, downloadUrl, topic, version, onRefine }) {
 }
 
 // ── Summary Card ──
-function SummaryCard({ filename, downloadUrl }) {
+function SummaryCard({ filename, downloadUrl, pdfDownloadUrl }) {
+  const [format, setFormat] = useState('docx');
   return (
     <div style={pptStyles.card}>
       <div style={{ ...pptStyles.icon, background: 'rgba(52, 211, 153, 0.1)' }}>
@@ -273,12 +555,43 @@ function SummaryCard({ filename, downloadUrl }) {
       </div>
       <div style={pptStyles.info}>
         <div style={pptStyles.title}>{filename || 'Executive Summary'}</div>
-        <div style={pptStyles.meta}>Word Document (.docx)</div>
+        <div style={pptStyles.meta}>
+          {downloadUrl && pdfDownloadUrl ? (
+            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+              <button
+                onClick={() => setFormat('docx')}
+                style={{
+                  ...formatTabStyle.tab,
+                  ...(format === 'docx' ? formatTabStyle.active : {}),
+                }}
+              >
+                .docx
+              </button>
+              <button
+                onClick={() => setFormat('pdf')}
+                style={{
+                  ...formatTabStyle.tab,
+                  ...(format === 'pdf' ? formatTabStyle.active : {}),
+                }}
+              >
+                .pdf
+              </button>
+            </span>
+          ) : (
+            'Word Document (.docx)'
+          )}
+        </div>
       </div>
-      {downloadUrl && (
+      {format === 'docx' && downloadUrl && (
         <a href={downloadUrl} download={filename || "Summary.docx"} style={{ ...pptStyles.dlBtn, background: '#34d399' }}>
           <Download size={14} />
           Download
+        </a>
+      )}
+      {format === 'pdf' && pdfDownloadUrl && (
+        <a href={pdfDownloadUrl} download={filename || "Summary.pdf"} style={{ ...pptStyles.dlBtn, background: '#e74c3c' }}>
+          <Download size={14} />
+          Download PDF
         </a>
       )}
     </div>
@@ -396,6 +709,11 @@ export default function Chat() {
   const [isProcessingBg, setIsProcessingBg] = useState(false); // Separate flag for custom bg actions
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null); // for side panel
+  const [groupClickOffsets, setGroupClickOffsets] = useState({}); // per-document chunk cycle offset for grouped pills
+  const [showSummarySelector, setShowSummarySelector] = useState(false);
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [summaryDetailLevel, setSummaryDetailLevel] = useState('detailed');
+  const [summaryType, setSummaryType] = useState('executive');
   const [isHindi, setIsHindi] = useState(false); // Hindi language toggle
   const [selectedFiles, setSelectedFiles] = useState([]); // VLM image attachments
   const [attachedDocs, setAttachedDocs] = useState([]);   // Document attachments for chat
@@ -412,8 +730,6 @@ export default function Chat() {
   
   // Phase 5: Multi-document context selection
   const [documents, setDocuments] = useState([]);
-  const [selectedDocIds, setSelectedDocIds] = useState([]);
-  const [showDocSelector, setShowDocSelector] = useState(false);
 
   // Phase C2: Upload wizard state
   const [uploadQueue, setUploadQueue] = useState([]); // files pending metadata
@@ -746,12 +1062,16 @@ export default function Chat() {
         const quizDlUrl = data.download_url
           ? `${getApiUrl(data.download_url)}?token=${encodeURIComponent(token || '')}`
           : null;
+        const quizPdfDlUrl = data.pdf_download_url
+          ? `${getApiUrl(data.pdf_download_url)}?token=${encodeURIComponent(token || '')}`
+          : null;
         showNotification('Quiz is ready!', 'success');
         return {
           role: 'assistant',
           content: 'Here is your knowledge quiz:',
           quiz: data.quiz,
           quizDownloadUrl: quizDlUrl,
+          quizPdfDownloadUrl: quizPdfDlUrl,
           sources: [],
           timestamp: Date.now(),
         };
@@ -792,18 +1112,21 @@ export default function Chat() {
       payload = { doc_id: doc_id || docIdsPayload[0], target_audience: target_audience || 'shipyard' };
     }
 
+    let docPdfDownloadUrl = null;
+
     const abort = connectStream(
       getApiUrl(endpoint),
       payload,
       (data) => {
         if (data.token) {
           accumulated += data.token;
-          updateMsgs(accumulated, null);
+          updateMsgs(accumulated, null, null);
         }
       },
       (data) => {
         docDownloadUrl = data.download_url || null;
-        updateMsgs(accumulated, docDownloadUrl);
+        docPdfDownloadUrl = data.pdf_download_url || null;
+        updateMsgs(accumulated, docDownloadUrl, docPdfDownloadUrl);
         setIsStreaming(false);
         showNotification('Document generation complete.', 'success');
       },
@@ -1146,7 +1469,7 @@ export default function Chat() {
               intentType,
               intentParams,
               sessId,
-              (text, downloadUrl) => {
+              (text, downloadUrl, pdfDownloadUrl) => {
                 setMessages(prev => {
                   const copy = [...prev];
                   const last = copy[copy.length - 1];
@@ -1155,7 +1478,7 @@ export default function Chat() {
                     content: text,
                     streaming: !downloadUrl,
                     summaryLabel: _summaryLabel,
-                    summary: downloadUrl ? { downloadUrl } : last.summary,
+                    summary: downloadUrl ? { downloadUrl, pdfDownloadUrl } : last.summary,
                   };
                   if (!downloadUrl) return copy;
                   persistMessages(copy, sessId);
@@ -1325,6 +1648,64 @@ export default function Chat() {
     );
   };
 
+  // ── Direct summary trigger for document selector ──
+  const triggerSummaryForDocs = useCallback((docIds, summaryTypeVal, detailLevel) => {
+    if (!docIds || docIds.length === 0) return;
+    const sessId = activeSessionId;
+    const label = summaryTypeVal === 'technical' ? 'Technical Summary' : 'Executive Summary';
+    const userMsg = {
+      role: 'user',
+      content: `Generate a ${detailLevel} ${label} of ${docIds.length} selected document(s).`,
+      timestamp: Date.now(),
+      fileChips: [],
+    };
+    const aiMsg = { role: 'assistant', content: '', sources: [], timestamp: Date.now(), streaming: true, summaryHeader: true, summaryLabel: label };
+    const updatedMsgs = [...messages, userMsg, aiMsg];
+
+    setMessages(updatedMsgs);
+    setIsStreaming(true);
+
+    let sessIdLocal = sessId;
+    if (!sessIdLocal) {
+      const id = newSessionId();
+      const sess = { id, title: label, messages: updatedMsgs, createdAt: Date.now(), updatedAt: Date.now() };
+      setSessions(prev => { const u = [sess, ...prev]; saveSessions(u); return u; });
+      switchSession(id);
+      sessIdLocal = id;
+    } else {
+      setSessions(prev => {
+        const u = prev.map(s => s.id === sessIdLocal
+          ? { ...s, title: s.title === 'New Chat' ? label : s.title, messages: updatedMsgs, updatedAt: Date.now() }
+          : s
+        );
+        saveSessions(u);
+        return u;
+      });
+    }
+
+    streamRefs.current[sessIdLocal] = streamDocument(
+      'summary',
+      { doc_ids: docIds, summary_type: summaryTypeVal, detail_level: detailLevel },
+      sessIdLocal,
+      (text, downloadUrl, pdfDownloadUrl) => {
+        setMessages(prev => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          copy[copy.length - 1] = {
+            ...last,
+            content: text,
+            streaming: !downloadUrl,
+            summaryLabel: label,
+            summary: downloadUrl ? { downloadUrl, pdfDownloadUrl } : last.summary,
+          };
+          if (!downloadUrl) return copy;
+          persistMessages(copy, sessIdLocal);
+          return copy;
+        });
+      }
+    );
+  }, [messages, activeSessionId]);
+
   // ── Workstream A: Clean Enter key handling ──
   // Block submission while draft is uploading files to prevent partial sends.
   const handleKeyDown = (e) => {
@@ -1342,10 +1723,21 @@ export default function Chat() {
     const images = [];
     const docs = [];
     const rejected = [];
+    const docMimeTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+      'text/markdown',
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+    const docExts = ['.md', '.csv', '.xlsx', '.pptx'];
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         images.push(file);
-      } else if (['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'].includes(file.type)) {
+      } else if (docMimeTypes.includes(file.type) || docExts.some(ext => file.name.toLowerCase().endsWith(ext))) {
         docs.push(file);
       } else {
         rejected.push(file.name);
@@ -1359,9 +1751,10 @@ export default function Chat() {
       setAttachedDocs(prev => [...prev, ...docs]);
     }
     if (rejected.length > 0) {
+      const supported = 'PDF, DOCX, DOC, TXT, MD, CSV, XLSX, PPTX, and images';
       setMessages(prev => [...prev, {
         role: 'system',
-        content: `⚠️ Unsupported files (${rejected.join(', ')}) — only PDF, DOCX, DOC and TXT are accepted.`,
+        content: `⚠️ Unsupported files (${rejected.join(', ')}) — only ${supported} are accepted.`,
         timestamp: Date.now(),
         isToast: true,
       }]);
@@ -1880,13 +2273,20 @@ export default function Chat() {
                       )}
 
                       {/* Quiz */}
-                      {msg.quiz && !msg.streaming && <InlineQuiz quiz={msg.quiz} downloadUrl={msg.quizDownloadUrl} />}
+                      {msg.quiz && !msg.streaming && (
+                        <InlineQuiz
+                          quiz={msg.quiz}
+                          downloadUrl={msg.quizDownloadUrl}
+                          pdfDownloadUrl={msg.quizPdfDownloadUrl ? `${getApiUrl(msg.quizPdfDownloadUrl)}?token=${encodeURIComponent(token || '')}` : null}
+                        />
+                      )}
 
                       {/* Summary download card */}
                       {msg.summary?.downloadUrl && !msg.streaming && (
                         <SummaryCard
                           filename={msg.summaryLabel || 'Executive Summary'}
                           downloadUrl={`${getApiUrl(msg.summary.downloadUrl)}?token=${encodeURIComponent(token || '')}`}
+                          pdfDownloadUrl={msg.summary.pdfDownloadUrl ? `${getApiUrl(msg.summary.pdfDownloadUrl)}?token=${encodeURIComponent(token || '')}` : null}
                         />
                       )}
 
@@ -1945,25 +2345,39 @@ export default function Chat() {
                         </div>
                       )}
 
-                      {/* Perplexity-style citation pills */}
+                      {/* Perplexity-style citation pills — deduplicated by document */}
                       {msg.sources?.length > 0 && !msg.streaming && (
                         <div style={styles.sourcePills}>
-                          {msg.sources.map((src, si) => (
-                            <button
-                              key={si}
-                              onClick={() => setSelectedSource(src)}
-                              style={styles.sourcePill}
-                              title={`${src.excerpt}\n\nClause: ${src.clause || 'N/A'}`}
-                            >
-                              <span style={styles.pillNum}>{src.index || si + 1}</span>
-                              <FileText size={10} />
-                              <span style={styles.pillName}>{src.document}</span>
-                              {src.clause && src.clause !== 'Unknown' && (
-                                <span style={{...styles.pillPage, color: 'var(--accent-red)'}}>§ {src.clause.split(' ')[1] || 'Sec'}</span>
-                              )}
-                              {src.page && <span style={styles.pillPage}>p.{src.page}</span>}
-                            </button>
-                          ))}
+                          {groupSourcesByDocument(msg.sources).map((group, gi) => {
+                            const key = group.doc_id || group.document || `group_${gi}`;
+                            const currentOffset = groupClickOffsets[key] || 0;
+                            return (
+                              <button
+                                key={gi}
+                                onClick={() => {
+                                  const source = group._childSources[currentOffset % group._childSources.length];
+                                  setSelectedSource(source);
+                                  setGroupClickOffsets(prev => ({
+                                    ...prev,
+                                    [key]: (currentOffset + 1) % group._childSources.length,
+                                  }));
+                                }}
+                                style={styles.sourcePill}
+                                title={`${group.chunk_count} chunk(s) from ${group.document}\nClick to cycle through chunks`}
+                              >
+                                <span style={styles.pillNum}>{group.indexRange}</span>
+                                <FileText size={10} />
+                                <span style={styles.pillName}>{group.document}</span>
+                                {group.clause && group.clause !== 'Unknown' && (
+                                  <span style={{...styles.pillPage, color: 'var(--accent-red)'}}>§ {group.clause.split(' ')[1] || 'Sec'}</span>
+                                )}
+                                {group.page && <span style={styles.pillPage}>p.{group.page}</span>}
+                                {group.chunk_count > 1 && (
+                                  <span style={styles.pillCount}>{group.chunk_count}</span>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                       
@@ -2010,6 +2424,71 @@ export default function Chat() {
               </div>
             ))}
             <div ref={messagesEndRef} />
+          </div>
+        )}
+
+        {/* ── Document Selector for Summary ── */}
+        {showSummarySelector && (
+          <div style={styles.summarySelector}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>Select Documents to Summarize</span>
+              <button onClick={() => setShowSummarySelector(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={16} /></button>
+            </div>
+            <div style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {(documents || []).length === 0 && (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No documents found in knowledge base. Upload documents first.</span>
+              )}
+              {(documents || []).map((doc, di) => (
+                <label key={doc.doc_id || di} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', background: selectedDocIds.includes(doc.doc_id) ? 'rgba(52,211,153,0.08)' : 'transparent', transition: 'background 0.15s' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedDocIds.includes(doc.doc_id)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedDocIds(prev => [...prev, doc.doc_id]);
+                      else setSelectedDocIds(prev => prev.filter(id => id !== doc.doc_id));
+                    }}
+                  />
+                  <FileText size={12} color="var(--text-muted)" />
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename || doc.doc_id}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{doc.chunks || 0} chunks</span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+              <select
+                value={summaryType}
+                onChange={(e) => setSummaryType(e.target.value)}
+                style={styles.selectorInput}
+              >
+                <option value="executive">Executive Summary</option>
+                <option value="technical">Technical Summary</option>
+              </select>
+              <select
+                value={summaryDetailLevel}
+                onChange={(e) => setSummaryDetailLevel(e.target.value)}
+                style={styles.selectorInput}
+              >
+                <option value="detailed">Detailed</option>
+                <option value="brief">Brief</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowSummarySelector(false)} style={{ padding: '7px 14px', fontSize: '12px', color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (selectedDocIds.length === 0) return;
+                  setShowSummarySelector(false);
+                  triggerSummaryForDocs(selectedDocIds, summaryType, summaryDetailLevel);
+                }}
+                disabled={selectedDocIds.length === 0}
+                style={{ padding: '7px 14px', fontSize: '12px', background: selectedDocIds.length === 0 ? 'var(--border)' : '#34d399', color: '#fff', borderRadius: '6px', border: 'none', cursor: selectedDocIds.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}
+              >
+                <BookOpen size={13} style={{ marginRight: '4px' }} />
+                Generate Summary ({selectedDocIds.length} doc{selectedDocIds.length > 1 ? 's' : ''})
+              </button>
+            </div>
           </div>
         )}
 
@@ -2132,8 +2611,11 @@ export default function Chat() {
             <button onClick={() => fileInputRef.current?.click()} style={{ ...styles.attachBtn, color: selectedFiles.length > 0 ? '#8b5cf6' : 'var(--text-muted)' }} title={selectedFiles.length > 0 ? 'Attach another file or drawing' : 'Attach file'} id="attach-file-btn">
               <Paperclip size={17} />
             </button>
+            <button onClick={() => setShowSummarySelector(true)} style={{ ...styles.attachBtn, color: showSummarySelector ? '#34d399' : 'var(--text-muted)' }} title="Summarize documents">
+              <BookOpen size={16} />
+            </button>
             
-            <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf,.docx,.doc,.txt" onChange={handleFileAttach} />
+            <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf,.docx,.doc,.txt,.md,.csv,.xlsx,.pptx" onChange={handleFileAttach} />
             <textarea
               ref={inputRef}
               value={input}
@@ -2234,12 +2716,15 @@ const styles = {
   pillNum: { width: '16px', height: '16px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'var(--primary)', color: '#fff', fontSize: '9px', fontWeight: 700, flexShrink: 0 },
   pillName: { maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   pillPage: { color: 'var(--text-muted)', fontSize: '10px' },
+  pillCount: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '16px', height: '16px', borderRadius: '10px', background: 'var(--primary)', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '0 5px', flexShrink: 0 },
 
   /* Input */
   inputBarWrap: { padding: '10px 20px 14px', borderTop: '1px solid var(--border)', background: 'var(--bg-page)' },
   inputBar: { display: 'flex', alignItems: 'flex-end', gap: '6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '5px 7px', transition: 'border-color 0.15s' },
   attachBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', flexShrink: 0 },
   textarea: { flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '14px', resize: 'none', padding: '8px 4px', lineHeight: '1.5', outline: 'none', fontFamily: 'var(--font-sans)', maxHeight: '120px', minHeight: '36px' },
+  summarySelector: { padding: '12px 14px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '10px' },
+  selectorInput: { padding: '6px 10px', fontSize: '12px', background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '6px', fontFamily: 'var(--font-sans)', flex: 1, minWidth: '120px' },
   sendBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'var(--primary)', color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'opacity 0.15s' },
   disclaimer: { fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px' },
 };
@@ -2260,6 +2745,14 @@ const quizStyles = {
   details: { marginTop: '8px' },
   summary: { fontSize: '12px', color: 'var(--primary)', cursor: 'pointer', padding: '4px 0' },
   modelAnswer: { fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px', padding: '8px', background: 'rgba(52,211,153,0.06)', borderRadius: '6px', border: '1px solid rgba(52,211,153,0.15)' },
+  timer: { float: 'right', fontSize: '11px', fontWeight: 600, fontFamily: 'monospace', padding: '2px 8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px' },
+  scoreCard: { marginBottom: '14px', padding: '12px', background: 'rgba(34,197,94,0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(34,197,94,0.2)' },
+  scoreRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  scoreLabel: { fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' },
+  scoreValue: { fontSize: '16px', fontWeight: 800 },
+  scoreBadge: { display: 'inline-block', marginTop: '6px', fontSize: '11px', fontWeight: 600, background: 'rgba(34,197,94,0.1)', color: '#22c55e', padding: '3px 10px', borderRadius: '20px' },
+  submitAllBtn: { padding: '8px 16px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)' },
+  incorrectToggle: { marginTop: '8px', padding: '5px 12px', background: 'rgba(255,159,67,0.1)', border: '1px solid rgba(255,159,67,0.25)', borderRadius: '20px', color: '#f59e0b', fontSize: '11px', cursor: 'pointer', fontFamily: 'var(--font-sans)', marginLeft: '8px' },
 };
 
 /* ── PPT card styles ── */
@@ -2270,6 +2763,12 @@ const pptStyles = {
   title: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   meta: { fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' },
   dlBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: 'var(--primary)', color: '#fff', borderRadius: 'var(--radius-md)', fontSize: '12px', fontWeight: 600, textDecoration: 'none', flexShrink: 0, transition: 'opacity 0.15s' },
+};
+
+/* ── Summary format tabs ── */
+const formatTabStyle = {
+  tab: { padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: '11px', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 600 },
+  active: { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' },
 };
 
 /* ── Source side panel ── */

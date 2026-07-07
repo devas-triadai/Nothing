@@ -27,6 +27,7 @@ from api.rag import embedder, llm as llm_engine
 from api.rag.vector_store import get_store
 from api.rag.reranker import rerank
 from api.generators.ppt_gen import build_pptx
+from api.generators.pdf_gen import generate_summary_pdf, generate_quiz_pdf
 
 # ── Async PPT job store (in-memory, per-process) ──
 # Maps job_id -> {"status": "pending"|"done"|"error", "filename": str, "slides_json": str, "error": str}
@@ -853,12 +854,18 @@ Use real content from the context above. Return ONLY the JSON array:""",
     # ── 6. Build PPTX ──
     # job_id is passed in as parameter (matches the polling key in _ppt_jobs)
     version_label = f"_v{body.version}" if body.version > 1 else ""
-    # When doc_ids are provided and topic is a generic fallback, derive a meaningful
-    # presentation title from the first document's filename (strip extension).
+    # When doc_ids are provided and topic is a generic fallback or still looks like
+    # an unparsed user query, derive a meaningful presentation title from the first
+    # document's filename (strip extension).
     presentation_title = body.topic
     if body.doc_ids and context_chunks:
         first_filename = context_chunks[0].get("metadata", {}).get("filename", "")
-        if first_filename and (not body.topic or body.topic.lower() in ("document overview", "")):
+        if first_filename and (
+            not body.topic
+            or body.topic.lower() in ("document overview", "")
+            or re.match(r'^(can|could|would|should|how|what|why|when|where|do|does|did|is|are|will)', body.topic, re.IGNORECASE)
+            or len(body.topic.split()) > 8
+        ):
             stem = Path(first_filename).stem.replace('_', ' ').replace('-', ' ')
             presentation_title = stem[:80] or body.topic
         safe_topic = re.sub(r'[^\w\s-]', '', first_filename or body.topic)[:30].replace(' ', '_')
@@ -871,8 +878,7 @@ Use real content from the context above. Return ONLY the JSON array:""",
 
     # Patch the title slide with the resolved presentation_title
     if slides_data and slides_data[0].get("layout") == "title":
-        if not slides_data[0].get("title") or slides_data[0]["title"] in (body.topic, "Document Overview"):
-            slides_data[0]["title"] = presentation_title
+        slides_data[0]["title"] = presentation_title
 
     # ── 6.5 ICG Master Template Integration ──
     assets_dir = Path(__file__).resolve().parent.parent.parent / "assets"
@@ -937,6 +943,7 @@ class SummaryRequest(BaseModel):
     doc_ids: List[str] = Field(default_factory=list)
     doc_id: Optional[str] = None  # Legacy support
     summary_type: str = Field(default="executive", pattern="^(executive|technical)$")
+    detail_level: str = Field(default="detailed", pattern="^(brief|detailed)$")
 
 
 @router.post("/generate/summary")
@@ -1022,7 +1029,23 @@ async def generate_summary(
     if superseded_warning_text:
         superseded_note = f"\n\nIMPORTANT - DOCUMENT STATUS:\n{superseded_warning_text}\n\n"
     
-    prompt = f"""Generate a comprehensive {type_label} of the following document(s).
+    detail_instruction = ""
+    if body.detail_level == "brief":
+        detail_instruction = (
+            "Keep the summary CONCISE — maximum 3 paragraphs per document.\n"
+            "Focus ONLY on the most critical findings, key numbers, and bottom-line conclusions.\n"
+            "Omit background explanation and peripheral details.\n"
+            "Target length: 300-500 words total."
+        )
+    else:
+        detail_instruction = (
+            "Provide a COMPREHENSIVE and THOROUGH summary.\n"
+            "Include relevant details, data points, exceptions, and nuances.\n"
+            "Cover each document's scope, methodology, findings, and implications.\n"
+            "Target length: 1000-2000 words total."
+        )
+    
+    prompt = f"""Generate a {type_label} of the following document(s). {detail_instruction}
 {superseded_note}
 DOCUMENTS: {filename_label}
 
@@ -1129,7 +1152,25 @@ CITE using format: [Document Name, p.X] or [Document Name, Section Y]."""
 
         doc.save(str(docx_path))
 
-        yield f"data: {json.dumps({'done': True, 'download_url': f'/api/agent/download/{summary_filename}'})}\n\n"
+        # Build PDF export
+        pdf_filename = f"{safe_topic}_summary_v1.pdf"
+        pdf_path = _OUTPUTS_DIR / pdf_filename
+        try:
+            full_summary_text = "".join(collected_text)
+            generate_summary_pdf(
+                title=f"{type_label}: {filename_label}",
+                content_text=full_summary_text,
+                output_path=pdf_path,
+                detail_level=body.detail_level,
+            )
+        except Exception as e:
+            logger.warning("Summary PDF generation failed: %s", e)
+            pdf_filename = None
+
+        result = {'done': True, 'download_url': f'/api/agent/download/{summary_filename}'}
+        if pdf_filename:
+            result['pdf_download_url'] = f'/api/agent/download/{pdf_filename}'
+        yield f"data: {json.dumps(result)}\n\n"
 
         # Log usage
         elapsed_ms = (time.time() - summary_start) * 1000
@@ -1360,13 +1401,29 @@ Return ONLY valid JSON in this exact format:
 
     doc.save(str(docx_path))
 
+    # Build PDF export
+    quiz_pdf_filename = f"{quiz_topic}_quiz_v1.pdf"
+    quiz_pdf_path = _OUTPUTS_DIR / quiz_pdf_filename
+    try:
+        generate_quiz_pdf(
+            quiz_data=quiz_data,
+            filename=quiz_filename,
+            output_path=quiz_pdf_path,
+        )
+    except Exception as e:
+        logger.warning("Quiz PDF generation failed: %s", e)
+        quiz_pdf_filename = None
+
     elapsed_ms = (time.time() - quiz_start) * 1000
     log_usage(action_type="quiz", module="generate", token=auth_tok, response_time_ms=elapsed_ms)
 
-    return {
+    result = {
         "quiz": quiz_data,
         "download_url": f"/api/agent/download/{quiz_filename}",
     }
+    if quiz_pdf_filename:
+        result["pdf_download_url"] = f"/api/agent/download/{quiz_pdf_filename}"
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════

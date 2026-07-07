@@ -72,25 +72,44 @@ def _detect_intent(question: str) -> Optional[Dict[str, Any]]:
     """
     q = question.strip()
     if _INTENT_PPT.search(q):
-        # Extract topic: everything after 'about/on/for/regarding'
+        # Extract topic: everything after 'about/on/for/regarding/by/from/with/using/titled'
         topic_match = re.search(
-            r'(?:about|on|for|regarding|titled?)\s+["\']?(.+?)["\']?\s*$',
+            r'(?:about|on|for|regarding|by|from|with|using|titled?)\s+["\']?(.+?)["\']?\s*$',
             q, re.IGNORECASE
         )
         topic = topic_match.group(1).strip() if topic_match else q
-        # Clean up topic — remove PPT trigger verb phrases
+        # Strip question prefixes and polite modifiers
         topic = re.sub(
-            r'^(creat|generat|build|make|prepar)e?\s+(a\s+)?(ppt|powerpoint|presentation|slides?)\s*',
+            r'^(can\s+you|could\s+you|would\s+you|i\s+(want|need|would\s+like|like)|please|kindly)\s+',
             '', topic, flags=re.IGNORECASE
         ).strip()
-        # Strip common non-topic filler phrases (e.g. "with the file attached", "from the document")
+        # Clean up topic — remove PPT trigger verb phrases (at start or after prefix)
         topic = re.sub(
-            r'\b(with\s+the\s+file\s+attached|from\s+the\s+(attached\s+)?(file|document|docs?)|using\s+the\s+(attached\s+)?(file|document|docs?)|based\s+on\s+(the\s+)?(attached\s+)?(file|document|docs?))\b',
+            r'^(creat|generat|build|make|prepar|draft)e?\s+(a|an|the|me|my|us|our)?\s*(ppt|powerpoint|presentation|slides?)\s*',
             '', topic, flags=re.IGNORECASE
         ).strip()
-        # If topic is now empty or still looks like a raw command, use a clean default
-        if not topic or re.match(
-            r'^(creat|generat|build|make|a|ppt|powerpoint|presentation|slides?|the|this)[\s.,!]*$',
+        # Strip common non-topic filler phrases (expanded for question-form queries)
+        topic = re.sub(
+            r'\b(with|from|by|using|based\s+on)\s+the\s+(previously\s+)?(attached\s+)?(file|document|docs?|upload)\b',
+            '', topic, flags=re.IGNORECASE
+        ).strip()
+        topic = re.sub(
+            r'^(the\s+)?(previously\s+)?(attached\s+)?(file|document|docs?|upload)\b',
+            '', topic, flags=re.IGNORECASE
+        ).strip()
+        topic = re.sub(
+            r'\b(regarding|related\s+to|pertaining\s+to)\s+(the|this|my|our)?\s*(attached\s+)?(file|document|docs?)\b',
+            '', topic, flags=re.IGNORECASE
+        ).strip()
+        # Strip leading prepositions left after removal of doc-reference filler
+        topic = re.sub(r'^(about|on|for|regarding|by|from|with|using)\s+', '', topic, flags=re.IGNORECASE).strip()
+        # If after cleaning the topic still looks like a full question/command sentence,
+        # it means we couldn't extract a real subject — trigger the document-name fallback
+        if not topic or len(topic.split()) > 8 or re.match(
+            r'^(creat|generat|build|make|a|an|the|ppt|powerpoint|presentation|slides?|this|that|it|document|file|can|could|please)[\s.,!?]*$',
+            topic, re.IGNORECASE
+        ) or re.match(
+            r'^(can|could|would|should|how|what|why|when|where|do|does|did|is|are|will)',
             topic, re.IGNORECASE
         ):
             topic = "Document Overview"
