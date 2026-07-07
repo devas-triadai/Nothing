@@ -298,7 +298,7 @@ def get_document_entities(
 def link_entity_evolution(
     entity_id: int,
     evolves_from_id: int,
-    evolution_type: str = Query(..., regex="^(renamed|redefined|deprecated|added|removed)$"),
+    evolution_type: str = Query(..., pattern="^(renamed|redefined|deprecated|added|removed)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):

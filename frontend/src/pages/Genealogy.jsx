@@ -772,7 +772,7 @@ function DiffModal({ node, onClose }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/documents/${node.parent_doc_id}/diff/${node.id}`)
+      const res = await apiFetch(`/documents/${node.parent_doc_id}/diff/${node.id}`)
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         throw new Error(err.detail || `HTTP ${res.status}`)

@@ -752,6 +752,7 @@ def register_agent_doc(
 class DocLinkRequest(BaseModel):
     target_id: int
     edge_type: str  # supersedes, derived_from, references, amends
+    confidence: float = 1.0
 
 @router.post("/{doc_id}/link")
 def link_documents(
@@ -779,7 +780,8 @@ def link_documents(
     edge = DocEdge(
         source_id=doc_id,
         target_id=body.target_id,
-        edge_type=body.edge_type
+        edge_type=body.edge_type,
+        confidence=body.confidence
     )
     db.add(edge)
     
@@ -802,7 +804,8 @@ def link_documents(
 @router.get("/lineage/export")
 def export_lineage(
     format: str = Query("json-ld", description="Export format: json-ld or graphml"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Export the document DAG in industry-standard formats."""
     docs = db.query(Document).all()
