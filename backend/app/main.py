@@ -65,6 +65,28 @@ def _run_migrations():
                     conn.execute(sa.text(f"ALTER TABLE compliance_evaluations ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
                     print(f"  [migrate] Added column `compliance_evaluations.{col_name}`")
 
+        # ── Clause scores migration ──
+        if "clause_scores" not in table_names:
+            from app.models.models import ClauseScore
+            ClauseScore.__table__.create(engine)
+            print("  [migrate] Created table `clause_scores`")
+        else:
+            cs_columns = {c["name"] for c in inspector.get_columns("clause_scores")}
+            for col_name, col_type in (
+                ("clause_number", sa.String(50)),
+                ("subcategory", sa.String(50)),
+                ("is_mandatory", sa.Boolean()),
+                ("is_critical", sa.Boolean()),
+                ("vendor_response_summary", sa.Text()),
+                ("recommendation", sa.String(50)),
+                ("ai_notes", sa.Text()),
+                ("manually_overridden", sa.Boolean()),
+                ("updated_at", sa.DateTime()),
+            ):
+                if col_name not in cs_columns:
+                    conn.execute(sa.text(f"ALTER TABLE clause_scores ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
+                    print(f"  [migrate] Added column `clause_scores.{col_name}`")
+
         conn.commit()
 
 
