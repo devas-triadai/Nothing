@@ -301,8 +301,8 @@ class ComplianceEvaluation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    sotr_doc_id = Column(Integer, nullable=False)
-    vendor_doc_id = Column(Integer, nullable=False)
+    sotr_doc_id = Column(String(100), nullable=False)
+    vendor_doc_id = Column(String(100), nullable=False)
     project_name = Column(String(200), nullable=True)
     vessel_name = Column(String(200), nullable=True)
     vendor_name = Column(String(200), nullable=True)

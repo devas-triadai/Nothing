@@ -28,8 +28,8 @@ router = APIRouter()
 # ── Pydantic schemas ──
 
 class CreateEvaluationRequest(BaseModel):
-    sotr_doc_id: int = Field(..., description="SOTR document ID from agent vector store")
-    vendor_doc_id: int = Field(..., description="Vendor submission document ID from agent vector store")
+    sotr_doc_id: str = Field(..., description="SOTR document ID from agent vector store")
+    vendor_doc_id: str = Field(..., description="Vendor submission document ID from agent vector store")
     project_name: Optional[str] = None
     vessel_name: Optional[str] = None
     vendor_name: Optional[str] = None

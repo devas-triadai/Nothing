@@ -214,7 +214,7 @@ export default function Compliance() {
 
       // Step 3: Create evaluation
       const evalRes = await backendApi.post('/compliance/evaluations', {
-        sotr_doc_id: parseInt(sotrDocId),
+        sotr_doc_id: sotrDocId,
         vendor_doc_id: vendorDocId,
         project_name: formData.project_name,
         vessel_name: formData.vessel_name,

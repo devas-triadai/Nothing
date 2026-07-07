@@ -43,6 +43,27 @@ def _run_migrations():
             DocumentFolder.__table__.create(engine)
             print("  [migrate] Created table `document_folders`")
 
+        # ── Compliance evaluations migration ──
+        table_names = inspector.get_table_names()
+        if "compliance_evaluations" not in table_names:
+            from app.models.models import ComplianceEvaluation
+            ComplianceEvaluation.__table__.create(engine)
+            print("  [migrate] Created table `compliance_evaluations`")
+            # clause_scores depends on compliance_evaluations FK, so create both
+            from app.models.models import ClauseScore
+            ClauseScore.__table__.create(engine)
+            print("  [migrate] Created table `clause_scores`")
+        else:
+            # Add columns that may have been added later
+            ce_columns = {c["name"] for c in inspector.get_columns("compliance_evaluations")}
+            for col_name, col_type in (
+                ("report_pdf_path", sa.String(500)),
+                ("agent_eval_id", sa.String(100)),
+            ):
+                if col_name not in ce_columns:
+                    conn.execute(sa.text(f"ALTER TABLE compliance_evaluations ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
+                    print(f"  [migrate] Added column `compliance_evaluations.{col_name}`")
+
         conn.commit()
 
 
