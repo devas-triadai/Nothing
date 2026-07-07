@@ -731,10 +731,8 @@ export default function Chat() {
   // Phase 5: Multi-document context selection
   const [documents, setDocuments] = useState([]);
 
-  // Phase C2: Upload wizard state
-  const [uploadQueue, setUploadQueue] = useState([]); // files pending metadata
-  const [uploadJobs, setUploadJobs] = useState([]);   // active/completed jobs
-  const [showUploadWizard, setShowUploadWizard] = useState(false);
+  // Active/completed upload jobs
+  const [uploadJobs, setUploadJobs] = useState([]);
 
   // PPT version history per session: { [sessionId]: { topic, version, slidesJson } }
   const [pptHistory, setPptHistory] = useState({});
@@ -1757,94 +1755,6 @@ export default function Chat() {
     e.target.value = '';
   };
 
-  const updateUploadField = (index, field, value) => {
-    setUploadQueue(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
-  };
-
-  const removeFromQueue = (index) => {
-    setUploadQueue(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      if (next.length === 0) setShowUploadWizard(false);
-      return next;
-    });
-  };
-
-  const startUploads = async () => {
-    if (uploadQueue.length === 0) return;
-    setShowUploadWizard(false);
-
-    const sessId = activeSessionIdRef.current || newSessionId();
-    if (!activeSessionId) switchSession(sessId);
-
-    for (const item of uploadQueue) {
-      const job = {
-        id: 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-        filename: item.file.name,
-        stage: 'uploading',
-        progress: 0,
-        metadata: { document_type: item.document_type },
-        error: null,
-        doc_id: null,
-      };
-      setUploadJobs(prev => [...prev, job]);
-
-      const formData = new FormData();
-      formData.append('file', item.file);
-      formData.append('document_type', item.document_type || '');
-      formData.append('auto_extract', 'true');
-
-      try {
-        const res = await fetch(getApiUrl('/api/agent/upload'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (value) {
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const dataStr = line.slice(6).trim();
-                if (!dataStr) continue;
-                try {
-                  const data = JSON.parse(dataStr);
-                  setUploadJobs(prev => prev.map(j => {
-                    if (j.id !== job.id) return j;
-                    if (data.stage === 'saved') return { ...j, stage: 'saved', progress: 10 };
-                    if (data.stage === 'metadata_extraction') return { ...j, stage: 'extracting', progress: 20 };
-                    if (data.stage === 'metadata_extracted') return { ...j, stage: 'extracted', progress: 35, metadata: { ...j.metadata, ...data.metadata } };
-                    if (data.stage === 'chunking') return { ...j, stage: 'chunking', progress: 50 };
-                    if (data.stage === 'embedding') return { ...j, stage: 'embedding', progress: 70 };
-                    if (data.stage === 'storing') return { ...j, stage: 'storing', progress: 90 };
-                    if (data.stage === 'done') return { ...j, stage: 'done', progress: 100, doc_id: data.doc_id };
-                    if (data.stage === 'error') return { ...j, stage: 'error', error: data.error };
-                    return j;
-                  }));
-                } catch (e) {
-                  console.error('Upload SSE parse error', e, dataStr);
-                }
-              }
-            }
-          }
-          if (done) break;
-        }
-      } catch (err) {
-        setUploadJobs(prev => prev.map(j => j.id === job.id ? { ...j, stage: 'error', error: err.message } : j));
-      }
-    }
-    setUploadQueue([]);
-  };
-
-
   const handleDrawingExtract = async () => {
     if (selectedFiles.length === 0) return;
     setIsPollingDrawing(true);
@@ -2501,33 +2411,6 @@ export default function Chat() {
               ))}
             </div>
           )}
-
-          {/* Upload wizard */}
-          {showUploadWizard && uploadQueue.length > 0 && (
-            <div style={{ padding: '12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Upload Documents</span>
-                <button onClick={() => { setShowUploadWizard(false); setUploadQueue([]); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
-              </div>
-              {uploadQueue.map((item, idx) => (
-                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', marginBottom: '8px', border: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <FolderOpen size={14} color="var(--primary)" />
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</span>
-                    <button onClick={() => removeFromQueue(idx)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={12} /></button>
-                  </div>
-                </div>
-              ))}
-              <button
-                onClick={startUploads}
-                style={{ width: '100%', padding: '8px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <Upload size={14} />
-                Upload {uploadQueue.length} document{uploadQueue.length > 1 ? 's' : ''}
-              </button>
-            </div>
-          )}
-
 
           {/* Phase 5: Drawing Attachments with Query Support */}
           {selectedFiles.length > 0 && (
