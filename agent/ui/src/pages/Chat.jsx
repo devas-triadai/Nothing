@@ -21,7 +21,7 @@ import { useTheme } from '../utils/ThemeContext';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 
 // Phase 5: Drawing Query Components
-import DrawingDropZone from '../components/DrawingDropZone';
+
 import DrawingAttachment from '../components/DrawingAttachment';
 import DrawingAnswerBubble from '../components/DrawingAnswerBubble';
 import ConfidencePanel from '../components/ConfidencePanel';
@@ -404,7 +404,6 @@ export default function Chat() {
   // Phase 5: Drawing Query State
   const [drawingQueryJob, setDrawingQueryJob] = useState(null); // Active drawing query job
   const [isQueryingDrawing, setIsQueryingDrawing] = useState(false); // Polling state
-  const [showDrawingDropZone, setShowDrawingDropZone] = useState(false); // Toggle drop zone
 
   // ── Workstream A: Persistent Draft State ──
   // Unified draft model: text + all file attachments + upload-in-progress flag.
@@ -1538,7 +1537,6 @@ export default function Chat() {
     if (!imageFile || !queryText.trim()) return;
 
     setIsQueryingDrawing(true);
-    setShowDrawingDropZone(false);
 
     const token = getToken();
     const tempUrl = URL.createObjectURL(imageFile);
@@ -1671,15 +1669,6 @@ export default function Chat() {
     }
   };
 
-  const handleDrawingDrop = (files) => {
-    // Handle files dropped in the drawing drop zone
-    if (files.length > 0) {
-      // Add to selected files
-      setSelectedFiles(prev => [...prev, ...files]);
-      // Hide drop zone
-      setShowDrawingDropZone(false);
-    }
-  };
 
   // Citation click handler — attach to document, read data-cite attr
   useEffect(() => {
@@ -2078,16 +2067,6 @@ export default function Chat() {
             </div>
           )}
 
-          {/* Phase 5: Drawing Drop Zone */}
-          {showDrawingDropZone && (
-            <div style={{ marginBottom: '12px' }}>
-              <DrawingDropZone
-                onFilesDrop={handleDrawingDrop}
-                disabled={isQueryingDrawing}
-                isDark={theme === 'dark'}
-              />
-            </div>
-          )}
 
           {/* Phase 5: Drawing Attachments with Query Support */}
           {selectedFiles.length > 0 && (
@@ -2150,25 +2129,8 @@ export default function Chat() {
             </div>
           )}
           <div style={styles.inputBar}>
-            <button onClick={() => fileInputRef.current?.click()} style={styles.attachBtn} title="Attach file" id="attach-file-btn">
+            <button onClick={() => fileInputRef.current?.click()} style={{ ...styles.attachBtn, color: selectedFiles.length > 0 ? '#8b5cf6' : 'var(--text-muted)' }} title={selectedFiles.length > 0 ? 'Attach another file or drawing' : 'Attach file'} id="attach-file-btn">
               <Paperclip size={17} />
-            </button>
-            
-            {/* Phase 5: Drawing Drop Zone Toggle */}
-            <button 
-              onClick={() => setShowDrawingDropZone(!showDrawingDropZone)}
-              style={{
-                ...styles.attachBtn,
-                background: showDrawingDropZone ? 'rgba(139, 92, 246, 0.2)' : undefined,
-                borderColor: showDrawingDropZone ? '#8b5cf6' : undefined,
-              }}
-              title="Drawing analysis"
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: showDrawingDropZone ? '#8b5cf6' : 'inherit' }}>
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
             </button>
             
             <input type="file" multiple ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf,.docx,.doc,.txt" onChange={handleFileAttach} />

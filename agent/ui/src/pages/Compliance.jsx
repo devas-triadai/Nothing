@@ -15,11 +15,40 @@ import {
   ShieldCheck, FileText, Upload, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Download, Play, Loader2, ArrowLeft,
   Check, AlertCircle, Minus, ChevronRight, ChevronLeft, Plus,
-  RefreshCw, FileCheck, BarChart3, PieChart, List, Filter
+  RefreshCw, FileCheck, BarChart3, PieChart, List, Filter,
+  Database, HardDrive
 } from 'lucide-react';
 import { getToken, getUser, getDashboardUrl } from '../utils/auth';
 import api, { backendApi } from '../utils/api';
 import { useTheme } from '../utils/ThemeContext';
+
+// ── SSE Upload Helper ──
+// Uploads a file via the agent SSE endpoint and returns the doc_id
+const uploadFileViaSSE = async (file, documentType) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (documentType) formData.append('document_type', documentType);
+
+  const res = await api.post('/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    responseType: 'text',
+    timeout: 180000,
+  });
+
+  const lines = res.data.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('data: ')) {
+      try {
+        const event = JSON.parse(trimmed.slice(6));
+        if (event.doc_id) return event.doc_id;
+      } catch {
+        // skip malformed SSE lines
+      }
+    }
+  }
+  throw new Error('Could not extract doc_id from upload response');
+};
 
 // ── Status Badge Component ──
 function StatusBadge({ status, confidence }) {
@@ -86,6 +115,8 @@ export default function Compliance() {
   const [evalDetails, setEvalDetails] = useState(null);
   const [sotrDocs, setSotrDocs] = useState([]);
   const [vendorFile, setVendorFile] = useState(null);
+  const [sotrSource, setSotrSource] = useState('database'); // 'database' | 'upload'
+  const [sotrFile, setSotrFile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -157,8 +188,14 @@ export default function Compliance() {
 
   // ── Handlers ──
   const handleCreateEvaluation = async () => {
-    if (!formData.sotr_doc_id || !vendorFile) {
-      setError('Please select both SOTR document and vendor submission');
+    const hasDbSotr = sotrSource === 'database' && formData.sotr_doc_id;
+    const hasLocalSotr = sotrSource === 'upload' && sotrFile;
+    if (!hasDbSotr && !hasLocalSotr) {
+      setError('Please select or upload an SOTR document and a vendor submission');
+      return;
+    }
+    if (!vendorFile) {
+      setError('Please select a vendor submission document');
       return;
     }
 
@@ -166,23 +203,18 @@ export default function Compliance() {
     setError(null);
 
     try {
-      // First upload vendor document
-      const uploadForm = new FormData();
-      uploadForm.append('file', vendorFile);
-      uploadForm.append('source', 'vendor_submission');
-      
-      const uploadRes = await api.post('/upload', uploadForm, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      
-      const vendorDocId = uploadRes.data?.doc_id;
-      if (!vendorDocId) {
-        throw new Error('Failed to upload vendor document');
+      // Step 1: Upload SOTR if local file
+      let sotrDocId = formData.sotr_doc_id;
+      if (sotrSource === 'upload' && sotrFile) {
+        sotrDocId = await uploadFileViaSSE(sotrFile, 'sotr');
       }
 
-      // Create evaluation
+      // Step 2: Upload vendor document
+      const vendorDocId = await uploadFileViaSSE(vendorFile, 'vendor_submission');
+
+      // Step 3: Create evaluation
       const evalRes = await backendApi.post('/compliance/evaluations', {
-        sotr_doc_id: parseInt(formData.sotr_doc_id),
+        sotr_doc_id: parseInt(sotrDocId),
         vendor_doc_id: vendorDocId,
         project_name: formData.project_name,
         vessel_name: formData.vessel_name,
@@ -390,22 +422,76 @@ export default function Compliance() {
                   <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
                     SOTR Document *
                   </label>
-                  <select
-                    value={formData.sotr_doc_id}
-                    onChange={(e) => setFormData({...formData, sotr_doc_id: e.target.value})}
-                    style={{ ...styles.select, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
-                  >
-                    <option value="">Select SOTR...</option>
-                    {sotrDocs.map(doc => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.filename} ({doc.category})
-                      </option>
-                    ))}
-                  </select>
-                  {sotrDocs.length === 0 && (
-                    <p style={{ fontSize: '12px', color: '#eab308', marginTop: '4px' }}>
-                      No SOTR documents found. Upload an SOTR first.
-                    </p>
+                  
+                  {/* Source Toggle */}
+                  <div style={styles.toggleGroup}>
+                    <button
+                      type="button"
+                      onClick={() => { setSotrSource('database'); setSotrFile(null); }}
+                      style={{
+                        ...styles.toggleBtn,
+                        background: sotrSource === 'database' ? '#4a8bff' : (isDark ? '#334155' : '#e2e8f0'),
+                        color: sotrSource === 'database' ? '#fff' : (isDark ? '#cbd5e1' : '#475569'),
+                      }}
+                    >
+                      <Database size={14} />
+                      From Database
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSotrSource('upload'); setFormData({...formData, sotr_doc_id: ''}); }}
+                      style={{
+                        ...styles.toggleBtn,
+                        background: sotrSource === 'upload' ? '#4a8bff' : (isDark ? '#334155' : '#e2e8f0'),
+                        color: sotrSource === 'upload' ? '#fff' : (isDark ? '#cbd5e1' : '#475569'),
+                      }}
+                    >
+                      <HardDrive size={14} />
+                      Upload Local
+                    </button>
+                  </div>
+
+                  {sotrSource === 'database' ? (
+                    <>
+                      <select
+                        value={formData.sotr_doc_id}
+                        onChange={(e) => setFormData({...formData, sotr_doc_id: e.target.value})}
+                        style={{ ...styles.select, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
+                      >
+                        <option value="">Select SOTR...</option>
+                        {sotrDocs.map(doc => (
+                          <option key={doc.id} value={doc.id}>
+                            {doc.filename} ({doc.category})
+                          </option>
+                        ))}
+                      </select>
+                      {sotrDocs.length === 0 && (
+                        <p style={{ fontSize: '12px', color: '#eab308', marginTop: '4px' }}>
+                          No SOTR documents found in database. Switch to "Upload Local" to upload one.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ ...styles.uploadArea, borderColor: isDark ? '#334155' : '#e2e8f0', marginBottom: 0 }}>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt"
+                        onChange={(e) => setSotrFile(e.target.files?.[0] || null)}
+                        style={styles.fileInput}
+                      />
+                      {sotrFile && (
+                        <div style={styles.filePreview}>
+                          <FileText size={20} color="#4a8bff" />
+                          <span style={{ color: isDark ? '#fff' : '#1e293b' }}>{sotrFile.name}</span>
+                          <button
+                            onClick={() => setSotrFile(null)}
+                            style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -474,15 +560,15 @@ export default function Compliance() {
               {/* Submit Button */}
               <button
                 onClick={handleCreateEvaluation}
-                disabled={isLoading || !formData.sotr_doc_id || !vendorFile}
+                disabled={isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile)}
                 style={{
                   ...styles.submitBtn,
-                  opacity: isLoading || !formData.sotr_doc_id || !vendorFile ? 0.6 : 1,
-                  cursor: isLoading || !formData.sotr_doc_id || !vendorFile ? 'not-allowed' : 'pointer'
+                  opacity: isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile) ? 0.6 : 1,
+                  cursor: isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile) ? 'not-allowed' : 'pointer'
                 }}
               >
                 {isLoading ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
-                {isLoading ? 'Creating...' : 'Start Evaluation'}
+                {isLoading ? 'Uploading & Creating...' : 'Start Evaluation'}
               </button>
             </div>
           )}
@@ -952,6 +1038,26 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+  },
+  toggleGroup: {
+    display: 'flex',
+    gap: '0',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    border: '1px solid #e2e8f0',
+  },
+  toggleBtn: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    padding: '8px 12px',
+    border: 'none',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
   },
   label: {
     fontSize: '13px',
