@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from app.database import engine, Base, SessionLocal
 from app.routers import auth, users, usage, audit, dashboard, documents, agents, reports, settings, genealogy
+from app.routers.compliance import router as compliance_router
 from app.routers.audit import router as audit_logs_router
 from app.seed import seed_superadmin
 from app.utils.security import decode_access_token
@@ -159,6 +160,7 @@ app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(genealogy.router, prefix="/api/genealogy", tags=["Genealogy"])
+app.include_router(compliance_router, prefix="/api/compliance", tags=["Compliance"])
 
 
 

@@ -295,6 +295,58 @@ class EntitySearchLog(Base):
     cleared_entities = Column(JSON, nullable=True)  # List of entity IDs user had clearance to see
 
 
+class ComplianceEvaluation(Base):
+    """Compliance evaluation: SOTR vs Vendor Submission."""
+    __tablename__ = "compliance_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    sotr_doc_id = Column(Integer, nullable=False)
+    vendor_doc_id = Column(Integer, nullable=False)
+    project_name = Column(String(200), nullable=True)
+    vessel_name = Column(String(200), nullable=True)
+    vendor_name = Column(String(200), nullable=True)
+    status = Column(String(20), default="pending")
+    overall_score = Column(Float, nullable=True)
+    compliant_count = Column(Integer, default=0)
+    partial_count = Column(Integer, default=0)
+    non_compliant_count = Column(Integer, default=0)
+    not_applicable_count = Column(Integer, default=0)
+    total_clauses = Column(Integer, default=0)
+    recommendation = Column(String(20), nullable=True)
+    report_pdf_path = Column(String(500), nullable=True)
+    agent_eval_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    scores = relationship("ClauseScore", back_populates="evaluation", cascade="all, delete-orphan")
+
+
+class ClauseScore(Base):
+    """Individual clause scoring result within a compliance evaluation."""
+    __tablename__ = "clause_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    evaluation_id = Column(Integer, ForeignKey("compliance_evaluations.id", ondelete="CASCADE"), nullable=False)
+    clause_number = Column(String(50), nullable=True)
+    clause_title = Column(String(200), nullable=True)
+    clause_text = Column(Text, nullable=True)
+    category = Column(String(50), nullable=True)
+    subcategory = Column(String(50), nullable=True)
+    is_mandatory = Column(Boolean, default=True)
+    is_critical = Column(Boolean, default=False)
+    status = Column(String(20), default="pending")
+    confidence = Column(Float, nullable=True)
+    evidence_text = Column(Text, nullable=True)
+    gaps_identified = Column(Text, nullable=True)
+    vendor_response_summary = Column(Text, nullable=True)
+    recommendation = Column(String(50), nullable=True)
+    ai_notes = Column(Text, nullable=True)
+    manually_overridden = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    evaluation = relationship("ComplianceEvaluation", back_populates="scores")
+
+
 # Create GIN index for trigram search on entity_normalized
 # Note: This is created via Alembic migration, not here directly
 
