@@ -13,7 +13,7 @@ import re
 import httpx
 
 from app.database import get_db
-from app.models.models import User, Document, AuditLog, DocEdge, DocEdgeType, DocumentChangeSummary, DocumentEntity
+from app.models.models import User, Document, AuditLog, DocEdge, DocEdgeType, DocumentChangeSummary, DocumentEntity, DocumentFolder
 from app.routers.auth import require_superadmin, require_admin, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -38,11 +38,18 @@ class DocumentUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     version_notes: Optional[str] = None
+    expiry_date: Optional[str] = None
+    folder_id: Optional[int] = None
 
 
 def _doc_to_dict(doc: Document, db: Session) -> dict:
     """Serialize a Document ORM object to dict."""
     uploader = db.query(User).filter(User.id == doc.uploaded_by).first()
+    folder_name = None
+    if doc.folder_id:
+        folder = db.query(DocumentFolder).filter(DocumentFolder.id == doc.folder_id).first()
+        if folder:
+            folder_name = folder.name
     return {
         "id": doc.id,
         "filename": doc.filename,
@@ -63,6 +70,10 @@ def _doc_to_dict(doc: Document, db: Session) -> dict:
         "doc_group_id": doc.doc_group_id,
         "parent_doc_id": doc.parent_doc_id,
         "qdrant_doc_id": doc.qdrant_doc_id,
+        "ocr_status": doc.ocr_status,
+        "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None,
+        "folder_id": doc.folder_id,
+        "folder_name": folder_name,
         "uploaded_by": uploader.username if uploader else "unknown",
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
         "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
@@ -1473,3 +1484,350 @@ def get_document_entity_stats(
         "total_entities": total_entities,
         "by_type": [{"type": t, "count": c} for t, c in stats]
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENHANCED FEATURES: Bulk ops, search, rollback, OCR, folders, expiry
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BulkCategorizeRequest(BaseModel):
+    doc_ids: List[int]
+    category: str
+
+class BulkIdsRequest(BaseModel):
+    doc_ids: List[int]
+
+@router.post("/bulk/delete")
+def bulk_delete_documents(
+    body: BulkIdsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    """Delete multiple documents at once."""
+    deleted = []
+    errors = []
+    for doc_id in body.doc_ids:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if not doc:
+            errors.append({"id": doc_id, "error": "Not found"})
+            continue
+        db.query(Document).filter(Document.parent_doc_id == doc_id).update({"parent_doc_id": None})
+        audit = AuditLog(
+            user_id=current_user.id,
+            action="BULK_DELETE_DOCUMENT",
+            resource_type="document",
+            resource_id=str(doc_id),
+            old_value=doc.original_filename,
+            status="success"
+        )
+        db.add(audit)
+        db.delete(doc)
+        deleted.append(doc_id)
+    db.commit()
+    return {"message": f"Deleted {len(deleted)} document(s)", "deleted": deleted, "errors": errors}
+
+
+@router.post("/bulk/categorize")
+def bulk_categorize_documents(
+    body: BulkCategorizeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    """Set category for multiple documents at once."""
+    updated = 0
+    for doc_id in body.doc_ids:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            old_cat = doc.category
+            doc.category = body.category
+            audit = AuditLog(
+                user_id=current_user.id,
+                action="BULK_CATEGORIZE_DOCUMENT",
+                resource_type="document",
+                resource_id=str(doc_id),
+                old_value=old_cat,
+                new_value=body.category,
+                status="success"
+            )
+            db.add(audit)
+            updated += 1
+    db.commit()
+    return {"message": f"Categorized {updated} document(s) as '{body.category}'", "updated": updated}
+
+
+@router.get("/search")
+def search_documents(
+    q: str = Query(..., min_length=2, max_length=200),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Full-text search across document filenames, descriptions, tags, and extracted text.
+    Returns results with highlighted match snippets.
+    """
+    query = db.query(Document)
+    search_term = f"%{q}%"
+    query = query.filter(
+        Document.original_filename.ilike(search_term) |
+        Document.description.ilike(search_term) |
+        Document.tags.ilike(search_term) |
+        Document.full_text.ilike(search_term) |
+        Document.category.ilike(search_term) |
+        Document.sub_category.ilike(search_term)
+    )
+    total = query.count()
+    results = query.order_by(Document.created_at.desc()).offset(skip).limit(limit).all()
+
+    def highlight(text, term):
+        if not text:
+            return ""
+        import re as _re
+        return _re.sub(f'(?i)({_re.escape(term)})', r'<mark>\1</mark>', text[:500])
+
+    return {
+        "query": q,
+        "total": total,
+        "results": [_doc_to_dict(d, db) for d in results],
+        "highlights": {
+            str(d.id): {
+                "filename": highlight(d.original_filename, q),
+                "description": highlight(d.description, q),
+                "category": highlight(d.category, q),
+            }
+            for d in results
+        }
+    }
+
+
+@router.post("/{doc_id}/rollback/{version_id}")
+def rollback_document(
+    doc_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin)
+):
+    """
+    Rollback a document to a previous version.
+    Creates a new version that is a copy of the target version's metadata.
+    """
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    target = db.query(Document).filter(Document.id == version_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target version not found")
+
+    if not doc.doc_group_id:
+        raise HTTPException(status_code=400, detail="Document has no version group")
+
+    # Verify they share the same doc_group
+    if target.doc_group_id != doc.doc_group_id:
+        raise HTTPException(status_code=400, detail="Target version is not in the same document group")
+
+    # Create a new version that copies target's metadata
+    import shutil
+    new_version = (doc.version or 1) + 1
+    new_filename = f"{doc.doc_group_id}_v{new_version}_{target.original_filename}"
+    new_filepath = os.path.join(UPLOAD_DIR, new_filename)
+    src_path = os.path.join(UPLOAD_DIR, target.filename)
+
+    if os.path.exists(src_path):
+        shutil.copy2(src_path, new_filepath)
+
+    rollback_doc = Document(
+        uploaded_by=current_user.id,
+        filename=new_filename,
+        original_filename=target.original_filename,
+        file_type=target.file_type,
+        file_size=target.file_size,
+        page_count=target.page_count,
+        status="indexed",
+        category=target.category,
+        sub_category=target.sub_category,
+        tags=target.tags,
+        description=target.description,
+        sha256_hash=target.sha256_hash,
+        source=doc.source,
+        classification_confidence=target.classification_confidence,
+        version=new_version,
+        version_notes=f"Rollback to v{target.version} ({target.original_filename})",
+        doc_group_id=doc.doc_group_id,
+        parent_doc_id=doc.id,
+        qdrant_doc_id=target.qdrant_doc_id,
+        ocr_status=target.ocr_status,
+        expiry_date=target.expiry_date,
+        full_text=target.full_text,
+        folder_id=target.folder_id,
+    )
+    db.add(rollback_doc)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="ROLLBACK_DOCUMENT",
+        resource_type="document",
+        resource_id=str(doc_id),
+        old_value=f"v{doc.version}",
+        new_value=f"Rolled back to v{target.version}",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(rollback_doc)
+
+    return {"message": f"Rolled back to v{target.version}", "document": _doc_to_dict(rollback_doc, db)}
+
+
+@router.post("/{doc_id}/ocr")
+def trigger_ocr(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Trigger OCR processing for a scanned document."""
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc.ocr_status = "processing"
+    db.commit()
+
+    # Attempt to extract text (simulated — in production, call Tesseract/agent)
+    file_path = os.path.join(UPLOAD_DIR, doc.filename)
+    extracted = ""
+    if os.path.exists(file_path) and doc.file_type in ("pdf", "png", "jpg", "jpeg"):
+        try:
+            # Placeholder: In production, integrate with OCR service
+            # For now, if it's a text-based PDF we try pdftotext equivalent
+            if doc.file_type == "pdf":
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ["pdftotext", file_path, "-"],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    if result.returncode == 0:
+                        extracted = result.stdout
+                except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+                    pass
+            doc.full_text = extracted or "(OCR pending — text extraction not available on this system)"
+            doc.ocr_status = "completed" if extracted else "failed"
+        except Exception as e:
+            doc.ocr_status = "failed"
+            logger.error("OCR failed for %s: %s", doc_id, e)
+    else:
+        doc.ocr_status = "failed"
+
+    db.commit()
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="OCR_DOCUMENT",
+        resource_type="document",
+        resource_id=str(doc_id),
+        new_value=f"ocr_status={doc.ocr_status}",
+        status="success"
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": f"OCR {'completed' if doc.ocr_status == 'completed' else 'failed'}",
+        "ocr_status": doc.ocr_status,
+        "extracted_length": len(extracted)
+    }
+
+
+# ─── Folder CRUD ──────────────────────────────────────────────────────────
+
+class FolderCreate(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+    color: Optional[str] = "#6b7280"
+    icon: Optional[str] = "folder"
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+
+@router.get("/folders")
+def list_folders(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all document folders as a flat list with nesting info."""
+    folders = db.query(DocumentFolder).order_by(DocumentFolder.name).all()
+    return {
+        "folders": [
+            {
+                "id": f.id,
+                "name": f.name,
+                "parent_id": f.parent_id,
+                "color": f.color,
+                "icon": f.icon,
+                "document_count": f.documents.count(),
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f in folders
+        ]
+    }
+
+@router.post("/folders")
+def create_folder(
+    body: FolderCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Create a new document folder."""
+    folder = DocumentFolder(
+        name=body.name,
+        parent_id=body.parent_id,
+        color=body.color,
+        icon=body.icon,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+    return {"message": "Folder created", "folder": {"id": folder.id, "name": folder.name}}
+
+@router.put("/folders/{folder_id}")
+def update_folder(
+    folder_id: int,
+    body: FolderUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Update a folder's metadata."""
+    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if body.name is not None:
+        folder.name = body.name
+    if body.parent_id is not None:
+        folder.parent_id = body.parent_id
+    if body.color is not None:
+        folder.color = body.color
+    if body.icon is not None:
+        folder.icon = body.icon
+    db.commit()
+    return {"message": "Folder updated"}
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(
+    folder_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Delete a folder (documents inside become unfiled)."""
+    folder = db.query(DocumentFolder).filter(DocumentFolder.id == folder_id).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    # Unlink all documents
+    db.query(Document).filter(Document.folder_id == folder_id).update({"folder_id": None})
+    db.delete(folder)
+    db.commit()
+    return {"message": "Folder deleted"}

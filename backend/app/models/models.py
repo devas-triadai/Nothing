@@ -119,11 +119,28 @@ class Document(Base):
     doc_group_id = Column(String(64), nullable=True, index=True)  # UUID grouping all versions
     parent_doc_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # direct parent version
     qdrant_doc_id = Column(String(100), nullable=True, index=True)  # matching doc_id in Qdrant for cross-sync
+    # --- Enhanced fields ---
+    ocr_status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    expiry_date = Column(DateTime, nullable=True)
+    full_text = Column(Text, nullable=True)  # Extracted text content for full-text search
+    folder_id = Column(Integer, ForeignKey("document_folders.id"), nullable=True, index=True)
     # --------------------------------
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     # relationships
     child_versions = relationship("Document", foreign_keys=[parent_doc_id], backref=backref("parent_doc", remote_side=[id]), lazy="dynamic")
+
+class DocumentFolder(Base):
+    __tablename__ = "document_folders"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    parent_id = Column(Integer, ForeignKey("document_folders.id"), nullable=True)
+    color = Column(String(20), default="#6b7280")
+    icon = Column(String(50), default="folder")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    children = relationship("DocumentFolder", backref=backref("parent", remote_side=[id]), lazy="dynamic")
+    documents = relationship("Document", backref="folder", lazy="dynamic")
+
 
 class DocEdgeType(str, enum.Enum):
     SUPERSEDES = "supersedes"

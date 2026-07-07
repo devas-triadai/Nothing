@@ -1708,7 +1708,7 @@ export default function Chat() {
     <div style={styles.layout}>
       {/* ── Sidebar ── */}
       <aside style={{ ...styles.sidebar, width: sidebarCollapsed ? '60px' : '260px', minWidth: sidebarCollapsed ? '60px' : '260px' }}>
-        <div style={styles.sidebarHeader}>
+        <div style={{ ...styles.sidebarHeader, flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: sidebarCollapsed ? 'center' : 'center', gap: sidebarCollapsed ? '6px' : '0' }}>
           <div style={styles.logoGroup}>
             <div style={styles.logoIcon}><ShieldCheck size={20} color="var(--primary)" /></div>
             {!sidebarCollapsed && (
@@ -1718,7 +1718,7 @@ export default function Chat() {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '2px' }}>
+          <div style={{ display: 'flex', gap: '2px', flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: 'center' }}>
             <button onClick={toggleTheme} style={styles.collapseBtn} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
             </button>

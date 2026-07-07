@@ -272,7 +272,7 @@ export default function Compliance() {
         background: isDark ? '#1e293b' : '#fff',
         borderColor: isDark ? '#334155' : '#e2e8f0'
       }}>
-        <div style={{ ...styles.sidebarHeader, borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+        <div style={{ ...styles.sidebarHeader, flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: 'center', gap: sidebarCollapsed ? '6px' : '0', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
           <div style={styles.logoGroup}>
             <div style={styles.logoIcon}><ShieldCheck size={20} color="#4a8bff" /></div>
             {!sidebarCollapsed && (
