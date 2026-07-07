@@ -288,6 +288,27 @@ def ingest_document(
         return
     yield {"stage": "ocr", "progress": 100, "message": f"Extracted {len(pages)} pages."}
 
+    # ── Stage 1b: Embedded image extraction + VLM description ──
+    yield {"stage": "images", "progress": 0, "message": "Extracting embedded images…"}
+    try:
+        from api.generators.image_extractor import extract_and_describe_images
+        image_descriptions = extract_and_describe_images(file_path, pages, filename)
+        if image_descriptions:
+            for page_num, desc_text in image_descriptions.items():
+                page_idx = page_num - 1  # pages list is 0-indexed
+                if 0 <= page_idx < len(pages):
+                    # Prepend image description to the page text so the chunker
+                    # naturally incorporates it into chunks from that page
+                    existing = pages[page_idx]["text"]
+                    pages[page_idx]["text"] = desc_text + "\n\n" + existing
+                    logger.info("Injected image description into page %d", page_num)
+            yield {"stage": "images", "progress": 100, "message": f"Described {len(image_descriptions)} pages with embedded images."}
+        else:
+            yield {"stage": "images", "progress": 100, "message": "No embedded images found."}
+    except Exception as e:
+        logger.warning("Embedded image extraction failed (non-fatal): %s", e)
+        yield {"stage": "images", "progress": 100, "message": "Image extraction skipped.", "warning": True}
+
     # ── Stage 2: Chunking ──
     yield {"stage": "chunking", "progress": 0, "message": "Chunking text…"}
     chunks = chunker.chunk_pages(

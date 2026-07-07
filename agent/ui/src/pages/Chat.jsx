@@ -18,7 +18,7 @@ import api, { getApiUrl } from '../utils/api';
 import { connectStream } from '../utils/stream';
 import { renderMarkdown } from '../utils/markdown';
 import { useTheme } from '../utils/ThemeContext';
-import ConfidenceBadge from '../components/ConfidenceBadge';
+
 
 // Phase 5: Drawing Query Components
 
@@ -1574,10 +1574,6 @@ export default function Chat() {
               ...last,
               content: finalText || last?.content || '',
               sources: data?.sources || [],
-              confidence_score: data?.confidence_score,
-              citation_accuracy: data?.citation_accuracy,
-              hallucination_rate: data?.hallucination_rate,
-              response_time_ms: data?.response_time_ms,
               streaming: false,
             };
             persistMessages(copy, sessId);
@@ -1594,10 +1590,6 @@ export default function Chat() {
                   ...msgs[msgs.length - 1],
                   content: finalText || msgs[msgs.length - 1].content || '',
                   sources: data?.sources || [],
-                  confidence_score: data?.confidence_score,
-                  citation_accuracy: data?.citation_accuracy,
-                  hallucination_rate: data?.hallucination_rate,
-                  response_time_ms: data?.response_time_ms,
                   streaming: false,
                 };
               }
@@ -2381,16 +2373,6 @@ export default function Chat() {
                         </div>
                       )}
                       
-                      {/* Module 2: Confidence & Quality Metrics */}
-                      {msg.confidence_score !== undefined && !msg.streaming && (
-                        <ConfidenceBadge
-                          confidenceScore={msg.confidence_score}
-                          citationAccuracy={msg.citation_accuracy}
-                          hallucinationRate={msg.hallucination_rate}
-                          chunksUsed={msg.sources?.length}
-                          responseTimeMs={msg.response_time_ms}
-                        />
-                      )}
                     </>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
