@@ -21,7 +21,7 @@ def _run_migrations():
     """Add columns that were added to models after the SQLite DB was first created."""
     import sqlalchemy as sa
     from sqlalchemy import inspect
-    from app.models.models import DocumentFolder
+    from app.models.models import DocumentFolder, ComplianceEvaluation, ClauseScore
 
     inspector = inspect(engine)
     doc_columns = {c["name"] for c in inspector.get_columns("documents")}
@@ -46,48 +46,37 @@ def _run_migrations():
         # ── Compliance evaluations migration ──
         table_names = inspector.get_table_names()
         if "compliance_evaluations" not in table_names:
-            from app.models.models import ComplianceEvaluation
             ComplianceEvaluation.__table__.create(engine)
             print("  [migrate] Created table `compliance_evaluations`")
             # clause_scores depends on compliance_evaluations FK, so create both
-            from app.models.models import ClauseScore
             ClauseScore.__table__.create(engine)
             print("  [migrate] Created table `clause_scores`")
         else:
-            # Add columns that may have been added later
-            ce_columns = {c["name"] for c in inspector.get_columns("compliance_evaluations")}
-            for col_name, col_type in (
-                ("report_pdf_path", sa.String(500)),
-                ("agent_eval_id", sa.String(100)),
-                ("updated_at", sa.DateTime()),
-            ):
-                if col_name not in ce_columns:
-                    conn.execute(sa.text(f"ALTER TABLE compliance_evaluations ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
-                    print(f"  [migrate] Added column `compliance_evaluations.{col_name}`")
+            _migrate_missing_columns(conn, inspector, "compliance_evaluations", ComplianceEvaluation)
 
         # ── Clause scores migration ──
         if "clause_scores" not in table_names:
-            from app.models.models import ClauseScore
             ClauseScore.__table__.create(engine)
             print("  [migrate] Created table `clause_scores`")
         else:
-            cs_columns = {c["name"] for c in inspector.get_columns("clause_scores")}
-            for col_name, col_type in (
-                ("clause_number", sa.String(50)),
-                ("subcategory", sa.String(50)),
-                ("is_mandatory", sa.Boolean()),
-                ("is_critical", sa.Boolean()),
-                ("vendor_response_summary", sa.Text()),
-                ("recommendation", sa.String(50)),
-                ("ai_notes", sa.Text()),
-                ("manually_overridden", sa.Boolean()),
-                ("updated_at", sa.DateTime()),
-            ):
-                if col_name not in cs_columns:
-                    conn.execute(sa.text(f"ALTER TABLE clause_scores ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
-                    print(f"  [migrate] Added column `clause_scores.{col_name}`")
+            _migrate_missing_columns(conn, inspector, "clause_scores", ClauseScore)
 
         conn.commit()
+
+
+def _migrate_missing_columns(conn, inspector, table_name: str, model_class):
+    """Add any columns that exist in the model but are missing from the DB table."""
+    existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+    for col in model_class.__table__.columns:
+        if col.name not in existing_cols and not col.primary_key:
+            col_type = col.type
+            try:
+                conn.execute(sa.text(
+                    f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type.compile(dialect=engine.dialect)}"
+                ))
+                print(f"  [migrate] Added column `{table_name}.{col.name}`")
+            except Exception as exc:
+                print(f"  [migrate] WARNING: Could not add `{table_name}.{col.name}`: {exc}")
 
 
 @asynccontextmanager
