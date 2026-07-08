@@ -304,8 +304,10 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
 
         # Pipeline runs async on agent — poll DB until agent's PATCH /complete writes results
         import time
-        max_wait = 600
+        max_wait = 1800
         waited = 0
+        log_interval = 60
+        next_log = log_interval
         while waited < max_wait:
             time.sleep(3)
             waited += 3
@@ -318,6 +320,9 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
                     break
                 if poll_status == "failed":
                     return
+                if waited >= next_log:
+                    logger.info("Pipeline run %s: still running after %ds (max %ds)", run_id, waited, max_wait)
+                    next_log += log_interval
             except Exception:
                 pass
         else:

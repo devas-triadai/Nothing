@@ -437,7 +437,7 @@ Guidelines:
     ]
 
     try:
-        raw = llm_engine.generate(messages, max_tokens=800, temperature=0.1)
+        raw = llm_engine.generate(messages, max_tokens=400, temperature=0.1)
         parsed = _parse_llm_json(raw) or {}
     except Exception:
         parsed = {}
