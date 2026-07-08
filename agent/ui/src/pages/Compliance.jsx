@@ -219,7 +219,9 @@ export default function Compliance() {
       pollStatus(res.data.id);
       fetchRuns();
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to create compliance run');
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail.map(d => d.msg || String(d)).join('; ') : (detail || err.message || 'Failed to create compliance run');
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
