@@ -323,13 +323,14 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
         _update_backend_progress(run_id, "evaluating", evaluated, total, f"Evaluating clause {clause.clause_id}...")
 
         # RAG search across both vendor files for this clause
-        vendor_evidence = _search_vendor_for_clause(store, clause.requirement_text, body)
+        vendor_evidence = _search_vendor_for_clause(store, clause.requirement_text, body, clause_id=clause.clause_id)
         std_evidence = ""
         for std_id, std_text in standard_texts.items():
             if clause.requirement_text.lower()[:50] in std_text.lower():
                 std_evidence += f"\n[Standard {std_id}]:\n{std_text[:2000]}\n"
 
         # ── Stage 5: LLM Evaluation ──
+        logger.debug("Clause %s: vendor_evidence length=%d chars", clause.clause_id, len(vendor_evidence))
         verdict, finding, severity, recommendation, citations = _evaluate_clause_llm(
             clause, vendor_evidence, std_evidence, llm_engine
         )
@@ -376,7 +377,7 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     return result, report_path
 
 
-def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest) -> str:
+def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest, clause_id: str = "") -> str:
     """Search across both vendor files for evidence relevant to a clause."""
     evidence_parts = []
     vendor_doc_ids = [body.doc_id_vendor_com, body.doc_id_vendor_dpr]
@@ -386,16 +387,19 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest)
         try:
             results = store.search(
                 query=requirement[:500],
-                top_k=3,
+                top_k=5,
                 doc_filter=[vid],
             )
             for r in results:
                 txt = r.get("text", "")
                 if txt:
                     evidence_parts.append(txt)
-        except Exception:
-            pass
-    return "\n\n---\n\n".join(evidence_parts[:5])
+        except Exception as exc:
+            logger.warning("Vector search failed for %s (doc=%s): %s", clause_id, vid[:8] if vid else "?", exc)
+    result = "\n\n---\n\n".join(evidence_parts[:5])
+    if not result.strip():
+        logger.debug("No vendor evidence found for clause %s (query=%s…)", clause_id, requirement[:80])
+    return result
 
 
 def _evaluate_clause_llm(clause: ClauseResultData, vendor_text: str, standards_text: str, llm_engine) -> tuple:
