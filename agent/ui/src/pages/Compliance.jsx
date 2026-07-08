@@ -202,14 +202,13 @@ export default function Compliance() {
     try {
       const formData = new FormData();
       formData.append('reference_name', refName.trim());
-      formData.append('sotr_commercial', sotrCom);
+      if (sotrCom) formData.append('sotr_commercial', sotrCom);
       if (sotrTech) formData.append('sotr_technical', sotrTech);
       if (vendorCom) formData.append('vendor_commercial', vendorCom);
       if (vendorDpr) formData.append('vendor_dpr', vendorDpr);
       formData.append('selected_standards', JSON.stringify(selectedStandards));
 
       const res = await backendApi.post('/compliance/runs', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
       });
 
