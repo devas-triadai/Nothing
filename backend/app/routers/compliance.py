@@ -86,6 +86,7 @@ class ClauseResultResponse(BaseModel):
     id: int
     clause_id: str
     source_file: str
+    source_doc_id: Optional[str] = None
     requirement_text: Optional[str] = None
     verdict: Optional[str] = None
     finding: Optional[str] = None
@@ -95,6 +96,7 @@ class ClauseResultResponse(BaseModel):
     citations: Optional[list] = None
     contradictions: Optional[list] = None
     is_missing: bool = False
+    historical_notes: Optional[list] = None
 
 
 class RunResponse(BaseModel):
@@ -125,6 +127,7 @@ class RunResponse(BaseModel):
                     id=cr.id,
                     clause_id=cr.clause_id,
                     source_file=cr.source_file,
+                    source_doc_id=cr.source_doc_id,
                     requirement_text=cr.requirement_text,
                     verdict=cr.verdict,
                     finding=cr.finding,
@@ -134,6 +137,7 @@ class RunResponse(BaseModel):
                     citations=cr.citations,
                     contradictions=cr.contradictions,
                     is_missing=cr.is_missing or False,
+                    historical_notes=cr.historical_notes,
                 ))
 
         result = run.result_json or {}
@@ -243,8 +247,9 @@ async def create_run(
 
 def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, reference_name: str):
     """Background task: ingest files via agent, run pipeline, store results."""
-    db = next(get_db())
+    db = None
     try:
+        db = next(get_db())
         run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
         if not run:
             return
@@ -275,7 +280,7 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         run.progress = {"stage": "evaluating", "current": 0, "total": 0, "message": "Starting evaluation..."}
         db.commit()
 
-        pipeline_resp = _agent_post("/run-pipeline", RunPipelineRequest(
+        _agent_post("/run-pipeline", RunPipelineRequest(
             run_id=run_id,
             doc_id_sotr_com=run.doc_id_sotr_com or "",
             doc_id_sotr_tech=run.doc_id_sotr_tech or "",
@@ -285,37 +290,46 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
             reference_name=reference_name,
         ).model_dump())
 
-        # Pipeline runs async, so we poll for result
+        # Pipeline runs async on agent — poll DB until agent's PATCH /complete writes results
         import time
         max_wait = 600
         waited = 0
         while waited < max_wait:
-            try:
-                agent_result = _agent_get(f"/pipeline/{run_id}/result")
-                if agent_result:
-                    break
-            except HTTPException:
-                pass
             time.sleep(3)
             waited += 3
-
-        if not agent_result:
+            try:
+                poll_db = next(get_db())
+                poll_run = poll_db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
+                poll_status = poll_run.status if poll_run else None
+                poll_db.close()
+                if poll_status == "complete":
+                    break
+                if poll_status == "failed":
+                    return
+            except Exception:
+                pass
+        else:
             run.status = "failed"
             run.progress = {"stage": "failed", "current": 0, "total": 0, "message": "Pipeline timed out"}
             db.commit()
             return
 
-        _store_results_in_db(run, agent_result, db)
+        db.refresh(run)
 
     except Exception as e:
         logger.exception("Pipeline error for run %s: %s", run_id, e)
-        run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
-        if run:
-            run.status = "failed"
-            run.progress = {"stage": "failed", "current": 0, "total": 0, "message": str(e)}
-            db.commit()
+        if db is not None:
+            try:
+                run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
+                if run:
+                    run.status = "failed"
+                    run.progress = {"stage": "failed", "current": 0, "total": 0, "message": str(e)}
+                    db.commit()
+            except Exception:
+                pass
     finally:
-        db.close()
+        if db is not None:
+            db.close()
         # Clean up temp files
         run_dir = saved_paths.get("sotr_commercial", "")
         if run_dir:
@@ -336,11 +350,12 @@ def _store_results_in_db(run: ComplianceRun, agent_result: dict, db: Session):
     run.overall_score = agent_result.get("overall_score", 0.0)
     run.recommendation = agent_result.get("recommendation")
     run.result_json = agent_result
+    run.report_docx_path = agent_result.get("report_path") or run.report_docx_path
     run.status = "complete"
     run.progress = {"stage": "complete", "current": 0, "total": 0, "message": "Evaluation complete"}
 
     # Delete old clause results if any
-    db.query(ClauseResult).filter(ClauseResult.run_id == run.id).delete()
+    db.query(ClauseResult).filter(ClauseResult.run_id == run.id).delete(synchronize_session='fetch')
 
     for cd in clauses_data:
         cr = ClauseResult(
@@ -349,6 +364,9 @@ def _store_results_in_db(run: ComplianceRun, agent_result: dict, db: Session):
             source_file=cd.get("source_file", ""),
             source_doc_id=cd.get("source_doc_id", ""),
             requirement_text=cd.get("requirement_text", ""),
+            applicable_standards=cd.get("applicable_standards"),
+            technical_parameters=cd.get("technical_parameters"),
+            acceptance_criterion=cd.get("acceptance_criterion", ""),
             verdict=cd.get("verdict"),
             finding=cd.get("finding", ""),
             house_rule_flag=cd.get("house_rule_flag"),
@@ -444,11 +462,20 @@ def download_report(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    safe_name = _sanitize_filename(run.reference_name) or "compliance_report"
-    filename = f"{safe_name}_Compliance_Report.docx"
-    report_path = _DATA_DIR / "outputs" / filename
+    # Prefer stored path from agent, then fall back to constructing it
+    report_path = None
+    if run.report_docx_path:
+        p = Path(run.report_docx_path)
+        if p.exists():
+            report_path = p
+    if not report_path:
+        safe_name = _sanitize_filename(run.reference_name) or "compliance_report"
+        filename = f"{safe_name}_Compliance_Report.docx"
+        report_path = _DATA_DIR / "outputs" / filename
+    else:
+        filename = Path(report_path).name
 
-    if not report_path.exists():
+    if not report_path or not report_path.exists():
         raise HTTPException(status_code=404, detail="Report file not found. Run may still be in progress.")
 
     return FileResponse(
@@ -482,17 +509,32 @@ def update_progress(
 
 # ── Internal: Store Result (called by agent) ──
 
+class CompleteRunRequest(BaseModel):
+    clauses: list = []
+    total_clauses: int = 0
+    compliant_count: int = 0
+    partial_count: int = 0
+    non_compliant_count: int = 0
+    unverifiable_count: int = 0
+    overall_score: float = 0.0
+    recommendation: Optional[str] = None
+    missing_clause_count: int = 0
+    contradiction_count: int = 0
+    house_rule_violation_count: int = 0
+    report_path: Optional[str] = None
+
+
 @router.patch("/runs/{run_id}/complete")
 def complete_run(
     run_id: int,
-    body: dict,
+    body: CompleteRunRequest,
     db: Session = Depends(get_db),
 ):
     run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    _store_results_in_db(run, body, db)
+    _store_results_in_db(run, body.model_dump(), db)
     return {"ok": True}
 
 

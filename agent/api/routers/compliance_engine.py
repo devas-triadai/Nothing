@@ -76,13 +76,16 @@ def _update_backend_progress(run_id: int, status: str, current: int = 0, total: 
         logger.warning("Failed to update backend progress: %s", e)
 
 
-def _update_backend_result(run_id: int, result: PipelineResult):
+def _update_backend_result(run_id: int, result: PipelineResult, report_path: Optional[str] = None):
     """Store final pipeline result in backend."""
     try:
+        payload = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+        if report_path:
+            payload["report_path"] = report_path
         token = _get_service_token()
         httpx.patch(
             f"{_ADMIN_BASE}/api/compliance/runs/{run_id}/complete",
-            json=result.model_dump() if hasattr(result, 'model_dump') else result,
+            json=payload,
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
@@ -166,32 +169,46 @@ async def ingest_bundle(
     ]
 
     doc_ids = {}
-    for key, bundle_role, sub_role, file_path in bundles:
-        if not os.path.isfile(file_path):
-            raise HTTPException(status_code=400, detail=f"File not found for {key}: {file_path}")
+    ingested_docs = []  # Track doc_ids for rollback on failure
+    try:
+        for key, bundle_role, sub_role, file_path in bundles:
+            if not os.path.isfile(file_path):
+                raise HTTPException(status_code=400, detail=f"File not found for {key}: {file_path}")
 
-        doc_id = str(uuid.uuid4())
-        filename = Path(file_path).name
+            doc_id = str(uuid.uuid4())
+            filename = Path(file_path).name
 
-        events = []
-        for event in ingest_document(
-            file_path=file_path,
-            filename=filename,
-            doc_id=doc_id,
-            uploaded_by_user_id=0,
-            token="",
-            source="compliance_upload",
-            document_type=sub_role,
-            extra_metadata={"bundle_role": bundle_role, "sub_role": sub_role},
-        ):
-            events.append(event)
+            events = []
+            for event in ingest_document(
+                file_path=file_path,
+                filename=filename,
+                doc_id=doc_id,
+                uploaded_by_user_id=0,
+                token="",
+                source="compliance_upload",
+                document_type=sub_role,
+                extra_metadata={"bundle_role": bundle_role, "sub_role": sub_role},
+            ):
+                events.append(event)
 
-        last = events[-1] if events else {}
-        if last.get("error"):
-            raise HTTPException(status_code=500, detail=f"Ingestion failed for {key}: {last['error']}")
+            last = events[-1] if events else {}
+            if last.get("error"):
+                raise HTTPException(status_code=500, detail=f"Ingestion failed for {key}: {last['error']}")
 
-        doc_ids[key] = doc_id
-        logger.info("Ingested %s -> doc_id=%s", key, doc_id)
+            doc_ids[key] = doc_id
+            ingested_docs.append(doc_id)
+            logger.info("Ingested %s -> doc_id=%s", key, doc_id)
+    except Exception:
+        # Rollback: delete all successfully ingested docs from vector store
+        from api.rag.vector_store import get_store
+        store = get_store()
+        for did in ingested_docs:
+            try:
+                store.delete_document(did)
+                logger.warning("Rolled back ingested doc_id=%s", did)
+            except Exception as rollback_err:
+                logger.warning("Rollback cleanup failed for doc_id=%s: %s", did, rollback_err)
+        raise
 
     return IngestBundleResponse(
         doc_id_sotr_com=doc_ids["sotr_commercial"],
@@ -212,9 +229,9 @@ async def run_pipeline(
 ):
     def _run():
         try:
-            result = _execute_pipeline(body)
+            result, report_path = _execute_pipeline(body)
             _store_pipeline_result(str(body.run_id), result)
-            _update_backend_result(body.run_id, result)
+            _update_backend_result(body.run_id, result, report_path)
         except Exception as e:
             logger.exception("Pipeline failed for run_id=%s: %s", body.run_id, e)
             _update_backend_progress(body.run_id, "failed", 0, 0, str(e))
@@ -352,9 +369,9 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
 
     # ── Stage 10: Report Generation ──
     _update_backend_progress(run_id, "generating_report", 0, 0, "Generating report...")
-    _generate_report_file(result, body)
+    report_path = _generate_report_file(result, body)
 
-    return result
+    return result, report_path
 
 
 def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest) -> str:
@@ -496,7 +513,12 @@ Does this clause violate any house rule or standard? Return ONLY valid JSON:
     try:
         raw = llm_engine.generate(messages, max_tokens=300, temperature=0.1)
         parsed = _parse_llm_json(raw) or {}
-        if parsed.get("violated"):
+        violated_raw = parsed.get("violated", False)
+        if isinstance(violated_raw, str):
+            violated = violated_raw.lower() in ("true", "1", "yes")
+        else:
+            violated = bool(violated_raw)
+        if violated:
             return HouseRuleFlag(
                 violated=True,
                 rule_reference=str(parsed.get("rule_reference", "")),
@@ -536,7 +558,12 @@ Are there any contradictory statements? Return ONLY valid JSON:
     try:
         raw = llm_engine.generate(messages, max_tokens=300, temperature=0.1)
         parsed = _parse_llm_json(raw) or {}
-        if parsed.get("has_contradiction"):
+        contra_raw = parsed.get("has_contradiction", False)
+        if isinstance(contra_raw, str):
+            has_contra = contra_raw.lower() in ("true", "1", "yes")
+        else:
+            has_contra = bool(contra_raw)
+        if has_contra:
             return [Contradiction(
                 between=["Vendor Commercial", "Vendor DPR"],
                 statement_a=str(parsed.get("statement_a", "")),
@@ -614,8 +641,8 @@ def _aggregate_results(clauses: List[ClauseResultData]) -> PipelineResult:
     )
 
 
-def _generate_report_file(result: PipelineResult, body: RunPipelineRequest):
-    """Generate and save the .docx compliance report."""
+def _generate_report_file(result: PipelineResult, body: RunPipelineRequest) -> Optional[str]:
+    """Generate and save the .docx compliance report. Returns the output path or None."""
     try:
         from api.generators.compliance_docx import generate_compliance_report
         safe_name = re.sub(r'[\\/:*?"<>|]', '_', body.reference_name)[:100] or "compliance_report"
@@ -623,19 +650,29 @@ def _generate_report_file(result: PipelineResult, body: RunPipelineRequest):
         output_path = str(_OUTPUTS_DIR / filename)
         generate_compliance_report(result, body.reference_name, output_path)
         logger.info("Compliance report generated: %s", output_path)
+        return output_path
     except Exception as e:
         logger.error("Failed to generate compliance report: %s", e)
+        return None
 
 
 def _parse_llm_json(raw: str) -> Optional[Dict]:
-    """Parse JSON from LLM response, handling markdown fences."""
+    """Parse JSON from LLM response, handling markdown fences and stray braces."""
     try:
         cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
         cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-        start = cleaned.find("{")
-        end = cleaned.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(cleaned[start:end])
+        # Find the outermost JSON object by tracking brace depth
+        depth = 0
+        start = -1
+        for i, ch in enumerate(cleaned):
+            if ch == '{':
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    return json.loads(cleaned[start:i + 1])
     except Exception:
         pass
     return None

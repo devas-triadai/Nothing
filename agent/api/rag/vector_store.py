@@ -525,6 +525,7 @@ class VectorStore:
         query: str,
         top_k: int = 5,
         doc_filter: Optional[List[str]] = None,
+        doc_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Convenience text search: embeds query internally, calls hybrid_search.
@@ -534,6 +535,7 @@ class VectorStore:
             query: Natural language search query
             top_k: Number of results to return
             doc_filter: Optional list of doc_ids to restrict search to
+            doc_type: Optional document type filter (metadata.document_type)
             
         Returns:
             List of dicts with keys: text, chunk_id, metadata
@@ -546,6 +548,7 @@ class VectorStore:
             query_embedding=query_embedding,
             top_k=top_k,
             doc_ids_filter=doc_filter,
+            doc_type=doc_type,
         )
         return [
             {

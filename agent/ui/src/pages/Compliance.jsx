@@ -102,6 +102,11 @@ export default function Compliance() {
   const [runProgress, setRunProgress] = useState(null);
 
   const pollRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const toggleClauseExpand = (id) => {
     setExpandedClauses(prev => ({ ...prev, [id]: !prev[id] }));
@@ -119,15 +124,18 @@ export default function Compliance() {
   const fetchRuns = useCallback(async () => {
     try {
       const res = await backendApi.get('/compliance/runs?limit=20');
-      setRuns(res.data || []);
+      if (mountedRef.current) setRuns(res.data || []);
     } catch (err) { console.error('Failed to fetch runs:', err); }
   }, []);
 
   const fetchStandards = useCallback(async () => {
     try {
       const res = await api.get('/compliance/standards');
-      setStandards(res.data || []);
-    } catch (err) { console.error('Failed to fetch standards:', err); }
+      if (mountedRef.current) setStandards(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch standards:', err);
+      if (mountedRef.current) setStandards([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -137,22 +145,29 @@ export default function Compliance() {
 
   // ── Poll Status ──
   const pollStatus = useCallback(async (runId) => {
+    if (pollRef.current) clearTimeout(pollRef.current); // cancel previous poll
     const check = async () => {
+      if (!mountedRef.current) return;
       try {
         const res = await backendApi.get(`/compliance/runs/${runId}/status`);
+        if (!mountedRef.current) return;
         setRunProgress(res.data);
         if (res.data.status === 'complete' || res.data.status === 'failed') {
           setPolling(false);
-          const detail = await backendApi.get(`/compliance/runs/${runId}?include_clauses=true`);
-          setRunDetails(detail.data);
-          setSelectedRun(detail.data);
+          if (res.data.status === 'complete') {
+            const detail = await backendApi.get(`/compliance/runs/${runId}?include_clauses=true`);
+            if (mountedRef.current) {
+              setRunDetails(detail.data);
+              setSelectedRun(detail.data);
+            }
+          }
           fetchRuns();
           return;
         }
         pollRef.current = setTimeout(check, 2000);
       } catch (err) {
         console.error('Poll error:', err);
-        setPolling(false);
+        if (mountedRef.current) setPolling(false);
       }
     };
     setPolling(true);
@@ -376,7 +391,7 @@ export default function Compliance() {
 
               <button onClick={handleCreateRun} disabled={!canStart || isLoading}
                 style={{
-                  ...S.submitBtn, opacity: (!canStart || isLoading) ? 0.5 : 1,
+                  opacity: (!canStart || isLoading) ? 0.5 : 1,
                   cursor: (!canStart || isLoading) ? 'not-allowed' : 'pointer',
                   background: '#4a8bff', color: '#fff', border: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
@@ -439,18 +454,22 @@ export default function Compliance() {
                         {runDetails.reference_name}
                       </h2>
                       <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: '4px 0 0' }}>
-                        Run #{runDetails.id} · {runDetails.total_clauses} clauses
+                        Run #{runDetails.id} · {runDetails.total_clauses ?? 0} clauses
                       </p>
                     </div>
                     <button onClick={() => {
-                      const url = backendApi.defaults.baseURL + `/compliance/runs/${runDetails.id}/report`;
                       backendApi.get(`/compliance/runs/${runDetails.id}/report`, { responseType: 'blob' }).then(res => {
                         const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                        const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
+                        a.href = url;
                         a.download = `${runDetails.reference_name.replace(/[\\/:*?"<>|]/g, '_')}_Compliance_Report.docx`;
                         a.click();
-                      }).catch(err => setError('Report not ready yet'));
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                      }).catch(err => {
+                        console.error('Report download failed:', err);
+                        setError(err.response?.data?.detail || err.message || 'Report not ready yet');
+                      });
                     }} style={{ ...S.actionBtn, background: '#22c55e' }}>
                       <Download size={16} />
                       Download .docx Report
@@ -482,10 +501,10 @@ export default function Compliance() {
                   {/* Counts Grid */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '16px' }}>
                     {[
-                      { label: 'COMPLIANT', count: runDetails.compliant_count, color: '#22c55e' },
-                      { label: 'PARTIAL', count: runDetails.partial_count, color: '#eab308' },
-                      { label: 'NON-COMPLIANT', count: runDetails.non_compliant_count, color: '#ef4444' },
-                      { label: 'UNVERIFIABLE', count: runDetails.unverifiable_count, color: '#9ca3af' },
+                      { label: 'COMPLIANT', count: runDetails.compliant_count ?? 0, color: '#22c55e' },
+                      { label: 'PARTIAL', count: runDetails.partial_count ?? 0, color: '#eab308' },
+                      { label: 'NON-COMPLIANT', count: runDetails.non_compliant_count ?? 0, color: '#ef4444' },
+                      { label: 'UNVERIFIABLE', count: runDetails.unverifiable_count ?? 0, color: '#9ca3af' },
                     ].map(item => (
                       <div key={item.label} style={{ textAlign: 'center', padding: '14px', background: isDark ? '#1e293b' : '#fff', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>
                         <span style={{ fontSize: '28px', fontWeight: 700, color: item.color, display: 'block' }}>{item.count}</span>
@@ -639,7 +658,6 @@ const styles = {
   content: { flex: 1, overflow: 'auto', padding: '24px' },
   panel: { maxWidth: '900px', margin: '0 auto' },
   panelTitle: { margin: '0 0 20px', fontSize: '18px', fontWeight: 600 },
-  submitBtn: {},
   actionBtn: { display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' },
   errorAlert: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' },
   closeBtn: { marginLeft: 'auto', background: 'transparent', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer' },
