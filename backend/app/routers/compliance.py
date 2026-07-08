@@ -166,37 +166,29 @@ class RunResponse(BaseModel):
 
 @router.post("/runs", response_model=RunResponse)
 async def create_run(
-    request: Request,
+    reference_name: str = Form(...),
+    selected_standards: str = Form("[]"),
+    sotr_commercial: Optional[UploadFile] = File(None),
+    sotr_technical: Optional[UploadFile] = File(None),
+    vendor_commercial: Optional[UploadFile] = File(None),
+    vendor_dpr: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await request.form()
-    reference_name = (form.get("reference_name") or "").strip()
+    reference_name = reference_name.strip()
     if not reference_name:
         raise HTTPException(status_code=400, detail="reference_name is required")
 
-    selected_standards_raw = form.get("selected_standards")
     standards_list = []
-    if selected_standards_raw:
-        try:
-            standards_list = json.loads(selected_standards_raw)
-            if not isinstance(standards_list, list):
-                standards_list = []
-        except (json.JSONDecodeError, TypeError):
-            pass
+    try:
+        parsed = json.loads(selected_standards)
+        if isinstance(parsed, list):
+            standards_list = parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
 
-    # Extract file fields from form — ignore non-file values (e.g. "null" strings from old frontend)
-    def _get_file(key: str) -> Optional[UploadFile]:
-        val = form.get(key)
-        return val if isinstance(val, UploadFile) and val.filename else None
-
-    sotr_commercial = _get_file("sotr_commercial")
-    sotr_technical = _get_file("sotr_technical")
-    vendor_commercial = _get_file("vendor_commercial")
-    vendor_dpr = _get_file("vendor_dpr")
-
-    has_p1 = sotr_commercial and vendor_commercial
-    has_p2 = sotr_technical and vendor_dpr
+    has_p1 = sotr_commercial is not None and vendor_commercial is not None
+    has_p2 = sotr_technical is not None and vendor_dpr is not None
     if not has_p1 and not has_p2:
         orphan1 = (sotr_commercial is None) != (vendor_commercial is None)
         orphan2 = (sotr_technical is None) != (vendor_dpr is None)
@@ -281,9 +273,9 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         # Step 1: Ingest files via agent
         ingest_resp = _agent_post("/ingest-bundle", IngestBundleRequest(
             sotr_commercial_path=saved_paths.get("sotr_commercial", ""),
-            sotr_technical_path=saved_paths.get("sotr_technical"),
-            vendor_commercial_path=saved_paths.get("vendor_commercial"),
-            vendor_dpr_path=saved_paths.get("vendor_dpr"),
+            sotr_technical_path=saved_paths.get("sotr_technical", ""),
+            vendor_commercial_path=saved_paths.get("vendor_commercial", ""),
+            vendor_dpr_path=saved_paths.get("vendor_dpr", ""),
             run_id=run_id,
         ).model_dump())
 
@@ -303,9 +295,9 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         _agent_post("/run-pipeline", RunPipelineRequest(
             run_id=run_id,
             doc_id_sotr_com=run.doc_id_sotr_com or "",
-            doc_id_sotr_tech=run.doc_id_sotr_tech,
-            doc_id_vendor_com=run.doc_id_vendor_com,
-            doc_id_vendor_dpr=run.doc_id_vendor_dpr,
+            doc_id_sotr_tech=run.doc_id_sotr_tech or "",
+            doc_id_vendor_com=run.doc_id_vendor_com or "",
+            doc_id_vendor_dpr=run.doc_id_vendor_dpr or "",
             selected_standards=standards_list,
             reference_name=reference_name,
         ).model_dump())
@@ -561,18 +553,18 @@ def complete_run(
 # ── Workaround: define IngestBundleRequest / RunPipelineRequest here for JSON serialization ──
 
 class IngestBundleRequest(BaseModel):
-    sotr_commercial_path: str
-    sotr_technical_path: str
-    vendor_commercial_path: str
-    vendor_dpr_path: str
+    sotr_commercial_path: str = ""
+    sotr_technical_path: str = ""
+    vendor_commercial_path: str = ""
+    vendor_dpr_path: str = ""
     run_id: int = 0
 
 
 class RunPipelineRequest(BaseModel):
     run_id: int = 0
-    doc_id_sotr_com: str
-    doc_id_sotr_tech: str
-    doc_id_vendor_com: str
-    doc_id_vendor_dpr: str
+    doc_id_sotr_com: str = ""
+    doc_id_sotr_tech: str = ""
+    doc_id_vendor_com: str = ""
+    doc_id_vendor_dpr: str = ""
     selected_standards: List[str] = []
     reference_name: str = ""
