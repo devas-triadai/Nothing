@@ -159,6 +159,7 @@ export default function Compliance() {
             if (mountedRef.current) {
               setRunDetails(detail.data);
               setSelectedRun(detail.data);
+              setActiveTab('results');
             }
           }
           fetchRuns();
