@@ -132,3 +132,64 @@ class StandardsDocument(BaseModel):
     filename: str
     category: str = ""
     description: str = ""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Backward-compatible aliases for Phase 1 models (legacy RAG
+#  import chain still references them via clause_scorer.py).
+#  These are stub classes so the import resolves at startup.
+#  The old evaluation code path is no longer used.
+# ═══════════════════════════════════════════════════════════════
+
+import typing as _typing
+
+
+class ClauseStatus(str, Enum):
+    PENDING = "pending"
+    COMPLIANT = "compliant"
+    PARTIAL = "partial"
+    NON_COMPLIANT = "non_compliant"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ClauseCategory(str, Enum):
+    GENERAL = "General"
+    TECHNICAL = "Technical"
+    COMMERCIAL = "Commercial"
+    SAFETY = "Safety"
+
+
+class ClauseScoreBase(BaseModel):
+    status: ClauseStatus = ClauseStatus.PENDING
+    confidence: float = 0.0
+    finding: str = ""
+    severity: Optional[str] = None
+    evidence: str = ""
+    citation: str = ""
+    recommendation: str = ""
+
+
+class ComplianceClauseBase(BaseModel):
+    clause_number: str = ""
+    clause_text: str = ""
+    category: ClauseCategory = ClauseCategory.GENERAL
+    acceptance_criterion: str = ""
+
+
+class ComplianceEvaluationResponse(BaseModel):
+    summary: str = ""
+    total_clauses: int = 0
+    compliant_count: int = 0
+    partial_count: int = 0
+    non_compliant_count: int = 0
+    not_applicable_count: int = 0
+    overall_score: float = 0.0
+    clauses: _typing.List["ClauseScoreResponse"] = []
+
+
+class ClauseScoreResponse(BaseModel):
+    clause: "ComplianceClauseBase" = Field(default_factory=lambda: ComplianceClauseBase())
+    score: "ClauseScoreBase" = Field(default_factory=lambda: ClauseScoreBase())
+
+ClauseScoreResponse.model_rebuild()
+ComplianceEvaluationResponse.model_rebuild()
