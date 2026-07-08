@@ -195,9 +195,6 @@ async def create_run(
     vendor_commercial = _get_file("vendor_commercial")
     vendor_dpr = _get_file("vendor_dpr")
 
-    if not sotr_commercial:
-        raise HTTPException(status_code=400, detail="SOTR Commercial file is required")
-
     has_p1 = sotr_commercial and vendor_commercial
     has_p2 = sotr_technical and vendor_dpr
     if not has_p1 and not has_p2:
