@@ -216,6 +216,7 @@ def chunk_text(
                 "category": category,
                 "description": description,
                 "source": source or "admin_upload",
+                "clearance_level": 1,
             }
             if document_type:
                 metadata["document_type"] = document_type

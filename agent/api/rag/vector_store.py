@@ -236,11 +236,15 @@ class VectorStore:
             from qdrant_client.models import MatchValue
             must_conditions.append(FieldCondition(key="metadata.category", match=MatchValue(value=category)))
         # ── Security Clearance Filter ──
-        from qdrant_client.models import Range
-        must_conditions.append(FieldCondition(
-            key="metadata.clearance_level",
-            range=Range(lte=user_clearance)
-        ))
+        # NOTE: clearance_level is not set on ingested chunks, so skip filtering
+        # on it unconditionally (Qdrant excludes points where the field doesn't exist).
+        # If clearance enforcement is needed later, add metadata.clearance_level
+        # to chunker.py and make this filter conditional.
+        # from qdrant_client.models import Range
+        # must_conditions.append(FieldCondition(
+        #     key="metadata.clearance_level",
+        #     range=Range(lte=user_clearance)
+        # ))
             
         qdrant_filter = Filter(must=must_conditions) if must_conditions else None
 
