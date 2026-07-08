@@ -31,6 +31,9 @@ def _get_paddle_ocr():
     # Disable oneDNN and PIR to prevent runtime crash
     os.environ.setdefault("FLAGS_use_mkldnn", "0")
     os.environ.setdefault("FLAGS_enable_pir_api", "0")
+    os.environ.setdefault("FLAGS_enable_pir_with_ptx", "0")
+    os.environ.setdefault("FLAGS_enable_pir_in_executor", "0")
+    os.environ.setdefault("FLAGS_use_gpu", "0")
     try:
         from paddleocr import PaddleOCR
         try:
