@@ -213,7 +213,7 @@ async def ingest_bundle(
         raise
 
     return IngestBundleResponse(
-        doc_id_sotr_com=doc_ids["sotr_commercial"],
+        doc_id_sotr_com=doc_ids.get("sotr_commercial"),
         doc_id_sotr_tech=doc_ids.get("sotr_technical"),
         doc_id_vendor_com=doc_ids.get("vendor_commercial"),
         doc_id_vendor_dpr=doc_ids.get("vendor_dpr"),
