@@ -178,8 +178,14 @@ async def create_run(
     if not reference_name.strip():
         raise HTTPException(status_code=400, detail="reference_name is required")
 
-    if not vendor_commercial and not vendor_dpr:
-        raise HTTPException(status_code=400, detail="At least one vendor file (Commercial or DPR) is required")
+    has_p1 = sotr_commercial and vendor_commercial
+    has_p2 = sotr_technical and vendor_dpr
+    if not has_p1 and not has_p2:
+        orphan1 = (sotr_commercial is None) != (vendor_commercial is None)
+        orphan2 = (sotr_technical is None) != (vendor_dpr is None)
+        if orphan1 or orphan2:
+            raise HTTPException(status_code=400, detail="SOTR Commercial & Vendor Commercial must be submitted together; SOTR Technical & Vendor DPR must be submitted together")
+        raise HTTPException(status_code=400, detail="Must upload SOTR Commercial + Vendor Commercial, or SOTR Technical + Vendor DPR, or all 4 files")
 
     standards_list = []
     if selected_standards:

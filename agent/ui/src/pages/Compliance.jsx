@@ -182,8 +182,15 @@ export default function Compliance() {
   const handleCreateRun = async () => {
     const missing = [];
     if (!refName.trim()) missing.push('Reference Name');
-    if (!sotrCom) missing.push('SOTR Commercial');
-    if (!vendorCom && !vendorDpr) missing.push('At least one Vendor file (Commercial or DPR)');
+    const pair1 = sotrCom && vendorCom;
+    const pair2 = sotrTech && vendorDpr;
+    if (!pair1 && !pair2) {
+      if ((sotrCom && !vendorCom) || (!sotrCom && vendorCom) || (sotrTech && !vendorDpr) || (!sotrTech && vendorDpr)) {
+        missing.push('SOTR & Vendor files must be paired together (Commercial pair or Technical/DPR pair)');
+      } else {
+        missing.push('Upload SOTR Commercial + Vendor Commercial, or SOTR Technical + Vendor DPR, or all 4 files');
+      }
+    }
     if (missing.length > 0) {
       setError(`Missing required fields: ${missing.join(', ')}`);
       return;
@@ -225,7 +232,7 @@ export default function Compliance() {
     );
   };
 
-  const canStart = refName.trim() && sotrCom && (vendorCom || vendorDpr);
+  const canStart = refName.trim() && ((sotrCom && vendorCom) || (sotrTech && vendorDpr));
 
   // ── Render ──
   const S = styles;
@@ -308,7 +315,7 @@ export default function Compliance() {
 
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 12px' }}>
-                  Stage 1: Reference & SOTR Documents
+                  Stage 1: SOTR Documents (Commercial paired with Vendor Commercial, Technical paired with Vendor DPR)
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
                   <label style={{ fontSize: '13px', fontWeight: 500, color: isDark ? '#cbd5e1' : '#475569' }}>
@@ -333,7 +340,7 @@ export default function Compliance() {
                   Stage 2: Vendor Submission Documents
                 </h3>
                 <p style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', margin: '-8px 0 12px' }}>
-                  At least one vendor file required (Commercial or DPR).
+                  SOTR Commercial requires Vendor Commercial; SOTR Technical requires Vendor DPR. 2 files (one pair) or all 4 files.
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                   <FileSlot label="Vendor Commercial" file={vendorCom} onChange={setVendorCom} isDark={isDark} />
@@ -378,8 +385,9 @@ export default function Compliance() {
                 <span style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>Required Checklist:</span>
                 {[
                   { label: 'Reference Name', ok: !!refName.trim() },
-                  { label: 'SOTR Commercial', ok: !!sotrCom },
-                  { label: 'At least one Vendor file', ok: !!(vendorCom || vendorDpr) },
+                  { label: 'Commercial Pair (SOTR + Vendor)', ok: !!(sotrCom && vendorCom) },
+                  { label: 'Technical Pair (SOTR + Vendor DPR)', ok: !!(sotrTech && vendorDpr) },
+                  { label: 'At least one pair complete', ok: !!((sotrCom && vendorCom) || (sotrTech && vendorDpr)) },
                 ].map(item => (
                   <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: item.ok ? '#22c55e' : '#ef4444' }}>
                     {item.ok ? <CheckCircle size={11} /> : <XCircle size={11} />}
