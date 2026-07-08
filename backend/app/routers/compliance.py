@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -166,17 +166,37 @@ class RunResponse(BaseModel):
 
 @router.post("/runs", response_model=RunResponse)
 async def create_run(
-    reference_name: str = Form(...),
-    sotr_commercial: UploadFile = File(...),
-    sotr_technical: Optional[UploadFile] = File(None),
-    vendor_commercial: Optional[UploadFile] = File(None),
-    vendor_dpr: Optional[UploadFile] = File(None),
-    selected_standards: Optional[str] = Form(None),
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not reference_name.strip():
+    form = await request.form()
+    reference_name = (form.get("reference_name") or "").strip()
+    if not reference_name:
         raise HTTPException(status_code=400, detail="reference_name is required")
+
+    selected_standards_raw = form.get("selected_standards")
+    standards_list = []
+    if selected_standards_raw:
+        try:
+            standards_list = json.loads(selected_standards_raw)
+            if not isinstance(standards_list, list):
+                standards_list = []
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Extract file fields from form — ignore non-file values (e.g. "null" strings from old frontend)
+    def _get_file(key: str) -> Optional[UploadFile]:
+        val = form.get(key)
+        return val if isinstance(val, UploadFile) and val.filename else None
+
+    sotr_commercial = _get_file("sotr_commercial")
+    sotr_technical = _get_file("sotr_technical")
+    vendor_commercial = _get_file("vendor_commercial")
+    vendor_dpr = _get_file("vendor_dpr")
+
+    if not sotr_commercial:
+        raise HTTPException(status_code=400, detail="SOTR Commercial file is required")
 
     has_p1 = sotr_commercial and vendor_commercial
     has_p2 = sotr_technical and vendor_dpr
@@ -186,15 +206,6 @@ async def create_run(
         if orphan1 or orphan2:
             raise HTTPException(status_code=400, detail="SOTR Commercial & Vendor Commercial must be submitted together; SOTR Technical & Vendor DPR must be submitted together")
         raise HTTPException(status_code=400, detail="Must upload SOTR Commercial + Vendor Commercial, or SOTR Technical + Vendor DPR, or all 4 files")
-
-    standards_list = []
-    if selected_standards:
-        try:
-            standards_list = json.loads(selected_standards)
-            if not isinstance(standards_list, list):
-                standards_list = []
-        except (json.JSONDecodeError, TypeError):
-            pass
 
     # Save files to compliance temp directory
     run_uuid = str(uuid.uuid4())
@@ -224,7 +235,7 @@ async def create_run(
     # Create DB record
     run = ComplianceRun(
         created_by=current_user.id,
-        reference_name=reference_name.strip(),
+        reference_name=reference_name,
         status="queued",
         progress={"stage": "queued", "current": 0, "total": 0, "message": "Run queued"},
         selected_standards=standards_list,
@@ -236,7 +247,7 @@ async def create_run(
     # Start background ingestion + pipeline
     def _background():
         try:
-            _run_pipeline(run.id, saved_paths, standards_list, reference_name.strip())
+            _run_pipeline(run.id, saved_paths, standards_list, reference_name)
         except Exception as e:
             logger.exception("Pipeline failed for run %s: %s", run.id, e)
             try:
