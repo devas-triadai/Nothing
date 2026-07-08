@@ -1,88 +1,36 @@
-/**
- * AGRA Compliance Module — Compliance Evaluation Page
- * Phase 5: SOTR vs Vendor Submission Evaluation UI
- * 
- * Features:
- * - Evaluation Setup: Select SOTR, upload vendor doc
- * - Clause Review: View and edit clause scores
- * - Summary Dashboard: Compliance statistics
- * - Report Generation: PDF export
- */
-
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck, FileText, Upload, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Download, Play, Loader2, ArrowLeft,
-  Check, AlertCircle, Minus, ChevronRight, ChevronLeft, Plus,
-  RefreshCw, FileCheck, BarChart3, PieChart, List, Filter,
-  Database, HardDrive
+  Check, AlertCircle, Minus, ChevronRight, ChevronLeft,
+  FileCheck, BarChart3, List, PieChart, BookOpen, HardDrive, Database
 } from 'lucide-react';
 import { getToken, getUser, getDashboardUrl } from '../utils/auth';
 import api, { backendApi } from '../utils/api';
 import { useTheme } from '../utils/ThemeContext';
 
-// ── SSE Upload Helper ──
-// Uploads a file via the agent SSE endpoint and returns the doc_id
-const uploadFileViaSSE = async (file, documentType) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  if (documentType) formData.append('document_type', documentType);
-
-  const res = await api.post('/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    responseType: 'text',
-    timeout: 180000,
-  });
-
-  const lines = res.data.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('data: ')) {
-      try {
-        const event = JSON.parse(trimmed.slice(6));
-        if (event.doc_id) return event.doc_id;
-      } catch {
-        // skip malformed SSE lines
-      }
-    }
-  }
-  throw new Error('Could not extract doc_id from upload response');
+// ── Verdict Color Map ──
+const VERDICT_STYLES = {
+  COMPLIANT: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e', icon: CheckCircle },
+  PARTIAL: { bg: 'rgba(234, 179, 8, 0.15)', text: '#eab308', icon: AlertTriangle },
+  NON_COMPLIANT: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', icon: XCircle },
+  UNVERIFIABLE: { bg: 'rgba(156, 163, 175, 0.15)', text: '#9ca3af', icon: Minus },
 };
 
-// ── Status Badge Component ──
+// ── Status Badge ──
 function StatusBadge({ status, confidence }) {
-  const styles = {
-    compliant: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e', icon: CheckCircle },
-    partial: { bg: 'rgba(234, 179, 8, 0.15)', text: '#eab308', icon: AlertTriangle },
-    non_compliant: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', icon: XCircle },
-    not_applicable: { bg: 'rgba(156, 163, 175, 0.15)', text: '#9ca3af', icon: Minus },
-    pending: { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', icon: Loader2 },
-  };
-
-  const style = styles[status] || styles.pending;
+  const style = VERDICT_STYLES[status] || { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', icon: Loader2 };
   const Icon = style.icon;
-
   return (
     <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '4px 10px',
-      borderRadius: '20px',
-      background: style.bg,
-      color: style.text,
-      fontSize: '12px',
-      fontWeight: 600,
-      textTransform: 'capitalize'
+      display: 'inline-flex', alignItems: 'center', gap: '4px',
+      padding: '4px 10px', borderRadius: '20px', background: style.bg, color: style.text,
+      fontSize: '12px', fontWeight: 600, textTransform: 'capitalize'
     }}>
       <Icon size={12} />
-      {status.replace('_', '-')}
-      {confidence !== undefined && (
-        <span style={{ opacity: 0.8, marginLeft: '4px' }}>
-          {(confidence * 100).toFixed(0)}%
-        </span>
-      )}
+      {status ? status.replace(/_/g, '-').toLowerCase() : 'pending'}
+      {confidence !== undefined && <span style={{ opacity: 0.8, marginLeft: '4px' }}>{(confidence * 100).toFixed(0)}%</span>}
     </span>
   );
 }
@@ -90,112 +38,141 @@ function StatusBadge({ status, confidence }) {
 // ── Progress Bar ──
 function ProgressBar({ percent, color = '#22c55e' }) {
   return (
-    <div style={{ width: '100%', height: '8px', background: 'var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
-      <div style={{
-        width: `${percent}%`,
-        height: '100%',
-        background: color,
-        borderRadius: '4px',
-        transition: 'width 0.3s ease'
-      }} />
+    <div style={{ width: '100%', height: '8px', background: 'var(--border, #e2e8f0)', borderRadius: '4px', overflow: 'hidden' }}>
+      <div style={{ width: `${percent}%`, height: '100%', background: color, borderRadius: '4px', transition: 'width 0.3s ease' }} />
     </div>
   );
 }
 
-// ── Main Compliance Page ──
+// ── File Upload Slot ──
+function FileSlot({ label, required, file, onChange, isDark, accept }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <label style={{ fontSize: '13px', fontWeight: 500, color: isDark ? '#cbd5e1' : '#475569' }}>
+        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+      </label>
+      <div style={{
+        padding: '12px', border: `2px dashed ${file ? '#4a8bff' : (isDark ? '#334155' : '#e2e8f0')}`,
+        borderRadius: '8px', background: file ? 'rgba(74,139,255,0.06)' : 'transparent',
+        transition: 'all 0.15s'
+      }}>
+        <input
+          type="file"
+          accept={accept || '.pdf,.doc,.docx,.txt,.xlsx,.pptx,.png,.jpg,.jpeg'}
+          onChange={(e) => onChange(e.target.files?.[0] || null)}
+          style={{ fontSize: '12px', width: '100%' }}
+        />
+        {file && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', padding: '6px 10px', background: 'rgba(74,139,255,0.1)', borderRadius: '6px' }}>
+            <FileText size={16} color="#4a8bff" />
+            <span style={{ fontSize: '12px', color: isDark ? '#e2e8f0' : '#1e293b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <button onClick={() => onChange(null)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ──
 export default function Compliance() {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  
-  // ── State ──
-  const [activeTab, setActiveTab] = useState('setup'); // setup, review, summary
-  const [evaluations, setEvaluations] = useState([]);
-  const [selectedEval, setSelectedEval] = useState(null);
-  const [evalDetails, setEvalDetails] = useState(null);
-  const [sotrDocs, setSotrDocs] = useState([]);
-  const [vendorFile, setVendorFile] = useState(null);
-  const [sotrSource, setSotrSource] = useState('database'); // 'database' | 'upload'
-  const [sotrFile, setSotrFile] = useState(null);
+
+  const [activeTab, setActiveTab] = useState('setup');
+  const [runs, setRuns] = useState([]);
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [runDetails, setRunDetails] = useState(null);
+  const [standards, setStandards] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedScores, setExpandedScores] = useState({});
   const [expandedClauses, setExpandedClauses] = useState({});
-  
-  const toggleEvidenceExpand = (scoreId) => {
-    setExpandedScores(prev => ({ ...prev, [scoreId]: !prev[scoreId] }));
-  };
-  
-  const toggleClauseExpand = (scoreId) => {
-    setExpandedClauses(prev => ({ ...prev, [scoreId]: !prev[scoreId] }));
-  };
-  
-  // Form state
-  const [formData, setFormData] = useState({
-    sotr_doc_id: '',
-    project_name: '',
-    vessel_name: '',
-    vendor_name: ''
-  });
+  const [polling, setPolling] = useState(false);
 
-  // ── Auth Check ──
+  // Form state
+  const [refName, setRefName] = useState('');
+  const [sotrCom, setSotrCom] = useState(null);
+  const [sotrTech, setSotrTech] = useState(null);
+  const [vendorCom, setVendorCom] = useState(null);
+  const [vendorDpr, setVendorDpr] = useState(null);
+  const [selectedStandards, setSelectedStandards] = useState([]);
+  const [runProgress, setRunProgress] = useState(null);
+
+  const pollRef = useRef(null);
+
+  const toggleClauseExpand = (id) => {
+    setExpandedClauses(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // ── Auth ──
   useEffect(() => {
     const token = getToken();
-    if (!token) {
-      navigate('/');
-      return;
-    }
-    
+    if (!token) { navigate('/'); return; }
     const user = getUser();
-    if (user?.role === 'super_admin' || user?.is_superadmin) {
-      setIsSuperAdmin(true);
-    }
+    if (user?.role === 'super_admin' || user?.is_superadmin) setIsSuperAdmin(true);
   }, [navigate]);
 
   // ── Fetch Data ──
-  const fetchEvaluations = useCallback(async () => {
+  const fetchRuns = useCallback(async () => {
     try {
-      const res = await backendApi.get('/compliance/evaluations?limit=20');
-      setEvaluations(res.data || []);
-    } catch (err) {
-      console.error('Failed to fetch evaluations:', err);
-    }
+      const res = await backendApi.get('/compliance/runs?limit=20');
+      setRuns(res.data || []);
+    } catch (err) { console.error('Failed to fetch runs:', err); }
   }, []);
 
-  const fetchSotrDocuments = useCallback(async () => {
+  const fetchStandards = useCallback(async () => {
     try {
-      // Get documents and filter for SOTR type
-      const res = await api.get('/documents?limit=100');
-      const docs = res.data?.documents || [];
-      // Filter for likely SOTR docs (based on filename/content type)
-      const sotrDocs = docs.filter(d => 
-        d.category?.toLowerCase().includes('standard') ||
-        d.filename?.toLowerCase().includes('sotr') ||
-        d.filename?.toLowerCase().includes('technical')
-      );
-      setSotrDocs(sotrDocs);
-    } catch (err) {
-      console.error('Failed to fetch SOTR docs:', err);
-    }
+      const res = await api.get('/compliance/standards');
+      setStandards(res.data || []);
+    } catch (err) { console.error('Failed to fetch standards:', err); }
   }, []);
 
   useEffect(() => {
-    fetchEvaluations();
-    fetchSotrDocuments();
-  }, [fetchEvaluations, fetchSotrDocuments]);
+    fetchRuns();
+    fetchStandards();
+  }, [fetchRuns, fetchStandards]);
 
-  // ── Handlers ──
-  const handleCreateEvaluation = async () => {
-    const hasDbSotr = sotrSource === 'database' && formData.sotr_doc_id;
-    const hasLocalSotr = sotrSource === 'upload' && sotrFile;
-    if (!hasDbSotr && !hasLocalSotr) {
-      setError('Please select or upload an SOTR document and a vendor submission');
-      return;
-    }
-    if (!vendorFile) {
-      setError('Please select a vendor submission document');
+  // ── Poll Status ──
+  const pollStatus = useCallback(async (runId) => {
+    const check = async () => {
+      try {
+        const res = await backendApi.get(`/compliance/runs/${runId}/status`);
+        setRunProgress(res.data);
+        if (res.data.status === 'complete' || res.data.status === 'failed') {
+          setPolling(false);
+          const detail = await backendApi.get(`/compliance/runs/${runId}?include_clauses=true`);
+          setRunDetails(detail.data);
+          setSelectedRun(detail.data);
+          fetchRuns();
+          return;
+        }
+        pollRef.current = setTimeout(check, 2000);
+      } catch (err) {
+        console.error('Poll error:', err);
+        setPolling(false);
+      }
+    };
+    setPolling(true);
+    check();
+  }, [fetchRuns]);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
+  }, []);
+
+  // ── Create Run ──
+  const handleCreateRun = async () => {
+    const missing = [];
+    if (!refName.trim()) missing.push('Reference Name');
+    if (!sotrCom) missing.push('SOTR Commercial');
+    if (!sotrTech) missing.push('SOTR Technical');
+    if (!vendorCom) missing.push('Vendor Commercial');
+    if (!vendorDpr) missing.push('Vendor DPR');
+    if (missing.length > 0) {
+      setError(`Missing required fields: ${missing.join(', ')}`);
       return;
     }
 
@@ -203,158 +180,75 @@ export default function Compliance() {
     setError(null);
 
     try {
-      // Step 1: Upload SOTR if local file
-      let sotrDocId = formData.sotr_doc_id;
-      if (sotrSource === 'upload' && sotrFile) {
-        sotrDocId = await uploadFileViaSSE(sotrFile, 'sotr');
-      }
+      const formData = new FormData();
+      formData.append('reference_name', refName.trim());
+      formData.append('sotr_commercial', sotrCom);
+      formData.append('sotr_technical', sotrTech);
+      formData.append('vendor_commercial', vendorCom);
+      formData.append('vendor_dpr', vendorDpr);
+      formData.append('selected_standards', JSON.stringify(selectedStandards));
 
-      // Step 2: Upload vendor document
-      const vendorDocId = await uploadFileViaSSE(vendorFile, 'vendor_submission');
-
-      // Step 3: Create evaluation
-      const evalRes = await backendApi.post('/compliance/evaluations', {
-        sotr_doc_id: sotrDocId,
-        vendor_doc_id: vendorDocId,
-        project_name: formData.project_name,
-        vessel_name: formData.vessel_name,
-        vendor_name: formData.vendor_name,
-        auto_start: true
+      const res = await backendApi.post('/compliance/runs', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
       });
 
-      setSelectedEval(evalRes.data);
-      setActiveTab('review');
-      fetchEvaluations();
+      setSelectedRun(res.data);
+      setRunDetails(null);
+      setActiveTab('progress');
+      pollStatus(res.data.id);
+      fetchRuns();
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to create evaluation');
+      setError(err.response?.data?.detail || err.message || 'Failed to create compliance run');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleRunEvaluation = async (evalId) => {
-    setIsLoading(true);
-    try {
-      await backendApi.post(`/compliance/evaluations/${evalId}/run`);
-      // Poll for completion
-      pollEvaluationStatus(evalId);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to run evaluation');
-      setIsLoading(false);
-    }
+  // ── Toggle Standard ──
+  const toggleStandard = (docId) => {
+    setSelectedStandards(prev =>
+      prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
+    );
   };
 
-  const pollEvaluationStatus = async (evalId) => {
-    const checkStatus = async () => {
-      try {
-        const res = await backendApi.get(`/compliance/evaluations/${evalId}`);
-        setEvalDetails(res.data);
-        
-        if (res.data.status === 'completed' || res.data.status === 'failed') {
-          setIsLoading(false);
-          return;
-        }
-        
-        // Continue polling
-        setTimeout(checkStatus, 3000);
-      } catch (err) {
-        console.error('Poll error:', err);
-        setIsLoading(false);
-      }
-    };
-    
-    checkStatus();
-  };
-
-  const handleScoreClause = async (evalId, clauseId, status, notes = '') => {
-    try {
-      await backendApi.post(`/compliance/evaluations/${evalId}/score`, {
-        clause_id: clauseId,
-        status: status,
-        notes: notes,
-        confidence: 1.0 // Manual override = high confidence
-      });
-      
-      // Refresh evaluation details
-      const res = await backendApi.get(`/compliance/evaluations/${evalId}?include_scores=true`);
-      setEvalDetails(res.data);
-    } catch (err) {
-      console.error('Failed to score clause:', err);
-    }
-  };
-
-  const handleGenerateReport = async (evalId) => {
-    try {
-      const res = await backendApi.get(`/compliance/evaluations/${evalId}/report?format=pdf`);
-      if (res.data?.download_url) {
-        window.open(res.data.download_url, '_blank');
-      }
-    } catch (err) {
-      console.error('Failed to generate report:', err);
-    }
-  };
+  const canStart = refName.trim() && sotrCom && sotrTech && vendorCom && vendorDpr;
 
   // ── Render ──
+  const S = styles;
+  const bg = isDark ? '#0f172a' : '#f1f5f9';
+
   return (
-    <div style={{ ...styles.layout, background: isDark ? '#0f172a' : '#f1f5f9' }}>
+    <div style={{ ...S.layout, background: bg }}>
       {/* ── Sidebar ── */}
-      <aside style={{ 
-        ...styles.sidebar, 
-        width: sidebarCollapsed ? '60px' : '260px',
-        background: isDark ? '#1e293b' : '#fff',
-        borderColor: isDark ? '#334155' : '#e2e8f0'
-      }}>
-        <div style={{ ...styles.sidebarHeader, flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: 'center', gap: sidebarCollapsed ? '6px' : '0', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-          <div style={styles.logoGroup}>
-            <div style={styles.logoIcon}><ShieldCheck size={20} color="#4a8bff" /></div>
-            {!sidebarCollapsed && (
-              <div>
-                <div style={{ ...styles.logoText, color: isDark ? '#fff' : '#1e293b' }}>AGRA</div>
-                <div style={styles.logoSub}>Compliance</div>
-              </div>
-            )}
+      <aside style={{ ...S.sidebar, width: sidebarCollapsed ? '60px' : '260px', background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+        <div style={{ ...S.sideHeader, flexDirection: sidebarCollapsed ? 'column' : 'row', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+          <div style={S.logoGroup}>
+            <div style={S.logoIcon}><ShieldCheck size={20} color="#4a8bff" /></div>
+            {!sidebarCollapsed && <div><div style={{ ...S.logoText, color: isDark ? '#fff' : '#1e293b' }}>AGRA</div><div style={S.logoSub}>Compliance</div></div>}
           </div>
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={styles.collapseBtn}>
-            {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-          </button>
+          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} style={S.collapseBtn}>{sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
         </div>
 
-        {/* Navigation Links */}
-        <div style={styles.navSection}>
-          <Link to="/" style={{ ...styles.navLink, color: isDark ? '#94a3b8' : '#64748b' }}>
-            <ArrowLeft size={15} />
-            {!sidebarCollapsed && <span>Back to Chat</span>}
-          </Link>
-          
+        <div style={S.navSection}>
+          <Link to="/" style={{ ...S.navLink, color: isDark ? '#94a3b8' : '#64748b' }}><ArrowLeft size={15} />{!sidebarCollapsed && <span>Back to Chat</span>}</Link>
           {isSuperAdmin && (
-            <a href={getDashboardUrl('/dashboard')} style={{ ...styles.navLink, color: isDark ? '#94a3b8' : '#64748b' }}>
-              <BarChart3 size={15} />
-              {!sidebarCollapsed && <span>Dashboard</span>}
+            <a href={getDashboardUrl('/dashboard')} style={{ ...S.navLink, color: isDark ? '#94a3b8' : '#64748b' }}>
+              <BarChart3 size={15} />{!sidebarCollapsed && <span>Dashboard</span>}
             </a>
           )}
         </div>
 
-        {/* Recent Evaluations */}
-        {!sidebarCollapsed && evaluations.length > 0 && (
-          <div style={styles.section}>
-            <div style={{ ...styles.sectionTitle, color: isDark ? '#64748b' : '#94a3b8' }}>
-              Recent Evaluations
-            </div>
-            {evaluations.slice(0, 5).map(evalItem => (
-              <div 
-                key={evalItem.id}
-                onClick={() => { setSelectedEval(evalItem); setActiveTab('review'); }}
-                style={{
-                  ...styles.evalItem,
-                  background: selectedEval?.id === evalItem.id ? (isDark ? '#334155' : '#e2e8f0') : 'transparent'
-                }}
-              >
+        {!sidebarCollapsed && runs.length > 0 && (
+          <div style={S.section}>
+            <div style={{ ...S.sectionTitle, color: isDark ? '#64748b' : '#94a3b8' }}>Recent Runs</div>
+            {runs.slice(0, 5).map(r => (
+              <div key={r.id} onClick={() => { setSelectedRun(r); setActiveTab('results'); backendApi.get(`/compliance/runs/${r.id}?include_clauses=true`).then(res => setRunDetails(res.data)).catch(() => {}); }}
+                style={{ ...S.evalItem, background: selectedRun?.id === r.id ? (isDark ? '#334155' : '#e2e8f0') : 'transparent' }}>
                 <FileText size={14} color={isDark ? '#94a3b8' : '#64748b'} />
-                <div style={styles.evalInfo}>
-                  <div style={{ fontSize: '11px', color: isDark ? '#e2e8f0' : '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {evalItem.vessel_name || `Eval #${evalItem.id}`}
-                  </div>
-                  <StatusBadge status={evalItem.status} />
+                <div style={S.evalInfo}>
+                  <div style={{ fontSize: '11px', color: isDark ? '#e2e8f0' : '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.reference_name || `Run #${r.id}`}</div>
+                  <StatusBadge status={r.status} />
                 </div>
               </div>
             ))}
@@ -363,504 +257,355 @@ export default function Compliance() {
       </aside>
 
       {/* ── Main Content ── */}
-      <main style={{ ...styles.main, background: isDark ? '#0f172a' : '#f1f5f9' }}>
-        {/* Header */}
-        <header style={{ ...styles.header, background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-          <div style={styles.headerTitle}>
+      <main style={{ ...S.main, background: bg }}>
+        <header style={{ ...S.header, background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+          <div style={S.headerTitle}>
             <FileCheck size={24} color="#4a8bff" />
             <div>
-              <h1 style={{ ...styles.title, color: isDark ? '#fff' : '#1e293b' }}>
-                Compliance Evaluation
-              </h1>
-              <p style={{ ...styles.subtitle, color: isDark ? '#94a3b8' : '#64748b' }}>
-                SOTR vs Vendor Submission Analysis
-              </p>
+              <h1 style={{ ...S.title, color: isDark ? '#fff' : '#1e293b' }}>Compliance Verification</h1>
+              <p style={{ ...S.subtitle, color: isDark ? '#94a3b8' : '#64748b' }}>SOTR vs Vendor Submission Analysis</p>
             </div>
           </div>
-          
-          {/* Tab Navigation */}
-          <div style={styles.tabs}>
-            {['setup', 'review', 'summary'].map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                style={{
-                  ...styles.tab,
-                  color: activeTab === tab ? '#4a8bff' : (isDark ? '#94a3b8' : '#64748b'),
-                  borderBottomColor: activeTab === tab ? '#4a8bff' : 'transparent'
-                }}
-              >
+          <div style={S.tabs}>
+            {['setup', 'progress', 'results'].map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)}
+                style={{ ...S.tab, color: activeTab === tab ? '#4a8bff' : (isDark ? '#94a3b8' : '#64748b'), borderBottomColor: activeTab === tab ? '#4a8bff' : 'transparent' }}>
                 {tab === 'setup' && <Upload size={16} />}
-                {tab === 'review' && <List size={16} />}
-                {tab === 'summary' && <PieChart size={16} />}
+                {tab === 'progress' && <Loader2 size={16} />}
+                {tab === 'results' && <List size={16} />}
                 <span style={{ textTransform: 'capitalize' }}>{tab}</span>
               </button>
             ))}
           </div>
         </header>
 
-        {/* Content Area */}
-        <div style={styles.content}>
+        <div style={S.content}>
           {error && (
-            <div style={styles.errorAlert}>
+            <div style={S.errorAlert}>
               <AlertCircle size={18} />
               {error}
-              <button onClick={() => setError(null)} style={styles.closeBtn}>×</button>
+              <button onClick={() => setError(null)} style={S.closeBtn}>×</button>
             </div>
           )}
 
           {/* ── SETUP TAB ── */}
           {activeTab === 'setup' && (
-            <div style={styles.panel}>
-              <h2 style={{ ...styles.panelTitle, color: isDark ? '#fff' : '#1e293b' }}>
-                New Evaluation
-              </h2>
-              
-              <div style={styles.formGrid}>
-                {/* SOTR Selection */}
-                <div style={styles.formGroup}>
-                  <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
-                    SOTR Document *
-                  </label>
-                  
-                  {/* Source Toggle */}
-                  <div style={styles.toggleGroup}>
-                    <button
-                      type="button"
-                      onClick={() => { setSotrSource('database'); setSotrFile(null); }}
-                      style={{
-                        ...styles.toggleBtn,
-                        background: sotrSource === 'database' ? '#4a8bff' : (isDark ? '#334155' : '#e2e8f0'),
-                        color: sotrSource === 'database' ? '#fff' : (isDark ? '#cbd5e1' : '#475569'),
-                      }}
-                    >
-                      <Database size={14} />
-                      From Database
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setSotrSource('upload'); setFormData({...formData, sotr_doc_id: ''}); }}
-                      style={{
-                        ...styles.toggleBtn,
-                        background: sotrSource === 'upload' ? '#4a8bff' : (isDark ? '#334155' : '#e2e8f0'),
-                        color: sotrSource === 'upload' ? '#fff' : (isDark ? '#cbd5e1' : '#475569'),
-                      }}
-                    >
-                      <HardDrive size={14} />
-                      Upload Local
-                    </button>
-                  </div>
+            <div style={S.panel}>
+              <h2 style={{ ...S.panelTitle, color: isDark ? '#fff' : '#1e293b' }}>New Compliance Run</h2>
 
-                  {sotrSource === 'database' ? (
-                    <>
-                      <select
-                        value={formData.sotr_doc_id}
-                        onChange={(e) => setFormData({...formData, sotr_doc_id: e.target.value})}
-                        style={{ ...styles.select, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
-                      >
-                        <option value="">Select SOTR...</option>
-                        {sotrDocs.map(doc => (
-                          <option key={doc.id} value={doc.id}>
-                            {doc.filename} ({doc.category})
-                          </option>
-                        ))}
-                      </select>
-                      {sotrDocs.length === 0 && (
-                        <p style={{ fontSize: '12px', color: '#eab308', marginTop: '4px' }}>
-                          No SOTR documents found in database. Switch to "Upload Local" to upload one.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <div style={{ ...styles.uploadArea, borderColor: isDark ? '#334155' : '#e2e8f0', marginBottom: 0 }}>
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.txt"
-                        onChange={(e) => setSotrFile(e.target.files?.[0] || null)}
-                        style={styles.fileInput}
-                      />
-                      {sotrFile && (
-                        <div style={styles.filePreview}>
-                          <FileText size={20} color="#4a8bff" />
-                          <span style={{ color: isDark ? '#fff' : '#1e293b' }}>{sotrFile.name}</span>
-                          <button
-                            onClick={() => setSotrFile(null)}
-                            style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 12px' }}>
+                  Stage 1: Reference & SOTR Documents
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 500, color: isDark ? '#cbd5e1' : '#475569' }}>
+                    Reference Name <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input type="text" value={refName}
+                    onChange={(e) => setRefName(e.target.value)}
+                    placeholder="e.g., OPV Construction - ABC Shipyard"
+                    style={{ padding: '10px 12px', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b', fontSize: '14px', outline: 'none' }}
+                  />
+                  {!refName.trim() && <span style={{ fontSize: '11px', color: '#eab308' }}>Required: enter a reference name for this compliance run</span>}
                 </div>
 
-                {/* Project Name */}
-                <div style={styles.formGroup}>
-                  <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
-                    Project Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.project_name}
-                    onChange={(e) => setFormData({...formData, project_name: e.target.value})}
-                    placeholder="e.g., OPV Construction Project"
-                    style={{ ...styles.input, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
-                  />
-                </div>
-
-                {/* Vessel Name */}
-                <div style={styles.formGroup}>
-                  <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
-                    Vessel Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.vessel_name}
-                    onChange={(e) => setFormData({...formData, vessel_name: e.target.value})}
-                    placeholder="e.g., ICGS Sarthi"
-                    style={{ ...styles.input, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
-                  />
-                </div>
-
-                {/* Vendor Name */}
-                <div style={styles.formGroup}>
-                  <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
-                    Vendor Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.vendor_name}
-                    onChange={(e) => setFormData({...formData, vendor_name: e.target.value})}
-                    placeholder="e.g., ABC Shipyard Ltd"
-                    style={{ ...styles.input, background: isDark ? '#334155' : '#fff', color: isDark ? '#fff' : '#1e293b' }}
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                  <FileSlot label="SOTR Commercial" required file={sotrCom} onChange={setSotrCom} isDark={isDark} />
+                  <FileSlot label="SOTR Technical" required file={sotrTech} onChange={setSotrTech} isDark={isDark} />
                 </div>
               </div>
 
-              {/* Vendor Document Upload */}
-              <div style={{ ...styles.uploadArea, borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                <label style={{ ...styles.label, color: isDark ? '#cbd5e1' : '#475569' }}>
-                  Vendor Submission Document *
-                </label>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  onChange={(e) => setVendorFile(e.target.files?.[0] || null)}
-                  style={styles.fileInput}
-                />
-                {vendorFile && (
-                  <div style={styles.filePreview}>
-                    <FileText size={20} color="#4a8bff" />
-                    <span style={{ color: isDark ? '#fff' : '#1e293b' }}>{vendorFile.name}</span>
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 12px' }}>
+                  Stage 2: Vendor Submission Documents
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                  <FileSlot label="Vendor Commercial" required file={vendorCom} onChange={setVendorCom} isDark={isDark} />
+                  <FileSlot label="Vendor DPR / Technical Response" required file={vendorDpr} onChange={setVendorDpr} isDark={isDark} />
+                </div>
+              </div>
+
+              {/* ── Standards Selector ── */}
+              <div style={{ marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 8px' }}>
+                  House Rules / Standards
+                </h3>
+                <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: '0 0 8px' }}>
+                  Select standards and house rules to check against (optional). Leave empty to skip standards check.
+                </p>
+                {standards.length === 0 ? (
+                  <p style={{ fontSize: '12px', color: '#eab308' }}>No standards documents found in knowledge base.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '160px', overflowY: 'auto', padding: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, borderRadius: '8px' }}>
+                    {standards.map(s => {
+                      const selected = selectedStandards.includes(s.doc_id);
+                      return (
+                        <button key={s.doc_id} onClick={() => toggleStandard(s.doc_id)}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '4px',
+                            padding: '4px 10px', borderRadius: '14px', border: `1px solid ${selected ? '#4a8bff' : (isDark ? '#475569' : '#d1d5db')}`,
+                            background: selected ? 'rgba(74,139,255,0.15)' : 'transparent',
+                            color: selected ? '#4a8bff' : (isDark ? '#94a3b8' : '#64748b'),
+                            fontSize: '11px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.12s'
+                          }}>
+                          {selected && <Check size={10} />}
+                          {s.filename || s.doc_id}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Submit Button */}
-              <button
-                onClick={handleCreateEvaluation}
-                disabled={isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile)}
+              {/* ── Validation Summary ── */}
+              <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '4px', padding: '10px 14px', background: isDark ? '#1e293b' : '#f8fafc', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>Required Checklist:</span>
+                {[
+                  { label: 'Reference Name', ok: !!refName.trim() },
+                  { label: 'SOTR Commercial', ok: !!sotrCom },
+                  { label: 'SOTR Technical', ok: !!sotrTech },
+                  { label: 'Vendor Commercial', ok: !!vendorCom },
+                  { label: 'Vendor DPR', ok: !!vendorDpr },
+                ].map(item => (
+                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: item.ok ? '#22c55e' : '#ef4444' }}>
+                    {item.ok ? <CheckCircle size={11} /> : <XCircle size={11} />}
+                    {item.label}
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={handleCreateRun} disabled={!canStart || isLoading}
                 style={{
-                  ...styles.submitBtn,
-                  opacity: isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile) ? 0.6 : 1,
-                  cursor: isLoading || !vendorFile || (sotrSource === 'database' ? !formData.sotr_doc_id : !sotrFile) ? 'not-allowed' : 'pointer'
-                }}
-              >
+                  ...S.submitBtn, opacity: (!canStart || isLoading) ? 0.5 : 1,
+                  cursor: (!canStart || isLoading) ? 'not-allowed' : 'pointer',
+                  background: '#4a8bff', color: '#fff', border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  padding: '12px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: 600, width: '100%'
+                }}>
                 {isLoading ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
-                {isLoading ? 'Uploading & Creating...' : 'Start Evaluation'}
+                {isLoading ? 'Creating & Starting...' : 'Start Compliance'}
               </button>
             </div>
           )}
 
-          {/* ── REVIEW TAB ── */}
-          {activeTab === 'review' && selectedEval && (
-            <div style={styles.panel}>
-              <div style={styles.reviewHeader}>
-                <div>
-                  <h2 style={{ ...styles.panelTitle, color: isDark ? '#fff' : '#1e293b' }}>
-                    Clause Review: {selectedEval.vessel_name || `Eval #${selectedEval.id}`}
-                  </h2>
-                  <div style={styles.metaRow}>
-                    <StatusBadge status={selectedEval.status} />
-                    {selectedEval.overall_score !== null && (
-                      <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                        Overall Score: {(selectedEval.overall_score * 100).toFixed(1)}%
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                {selectedEval.status !== 'completed' && selectedEval.status !== 'scoring' && (
-                  <button
-                    onClick={() => handleRunEvaluation(selectedEval.id)}
-                    disabled={isLoading}
-                    style={styles.actionBtn}
-                  >
-                    {isLoading ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
-                    Run Evaluation
-                  </button>
-                )}
-              </div>
-
-              {isLoading && (
-                <div style={styles.loadingOverlay}>
-                  <Loader2 size={32} color="#4a8bff" className="spin" />
-                  <p style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Processing compliance evaluation...
+          {/* ── PROGRESS TAB ── */}
+          {activeTab === 'progress' && (
+            <div style={S.panel}>
+              <h2 style={{ ...S.panelTitle, color: isDark ? '#fff' : '#1e293b' }}>Run Progress</h2>
+              {selectedRun && (
+                <div style={{ padding: '16px', background: isDark ? '#1e293b' : '#fff', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, marginBottom: '16px' }}>
+                  <p style={{ fontSize: '13px', color: isDark ? '#94a3b8' : '#64748b', margin: '0 0 4px' }}>
+                    Reference: <strong style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>{selectedRun.reference_name}</strong>
+                  </p>
+                  <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: '0 0 8px' }}>
+                    Run #{selectedRun.id}
                   </p>
                 </div>
               )}
-
-              {evalDetails?.clause_scores?.length > 0 ? (
-                <div style={styles.clauseList}>
-                  {evalDetails.clause_scores.map((score) => (
-                    <div 
-                      key={score.id} 
-                      style={{ ...styles.clauseCard, background: isDark ? '#1e293b' : '#fff' }}
-                    >
-                      <div style={styles.clauseHeader}>
-                        <div style={styles.clauseId}>
-                          <span style={{ fontWeight: 600, color: '#4a8bff' }}>
-                            {score.clause?.clause_number || 'N/A'}
-                          </span>
-                          <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontSize: '13px' }}>
-                            {score.clause?.clause_title || 'Untitled'}
-                          </span>
-                        </div>
-                        <StatusBadge status={score.status} confidence={score.confidence} />
-                      </div>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <p style={{ ...styles.clauseText, color: isDark ? '#cbd5e1' : '#475569', margin: 0 }}>
-                          {expandedClauses[score.id]
-                            ? score.clause?.clause_text
-                            : (score.clause?.clause_text?.length > 150
-                              ? `${score.clause.clause_text.substring(0, 150)}...`
-                              : score.clause?.clause_text)}
-                        </p>
-                        {score.clause?.clause_text?.length > 150 && (
-                          <button
-                            onClick={() => toggleClauseExpand(score.id)}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#4a8bff',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              alignSelf: 'flex-start',
-                              cursor: 'pointer',
-                              padding: '2px 0 6px'
-                            }}
-                          >
-                            {expandedClauses[score.id] ? 'Show less requirement' : 'Show full requirement'}
-                          </button>
-                        )}
-                      </div>
-
-                      {score.evidence_text && (
-                        <div style={{ ...styles.evidenceBox, background: isDark ? '#0f172a' : '#f8fafc' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <span style={{ fontSize: '11px', color: '#4a8bff', fontWeight: 600 }}>
-                              Evidence:
-                            </span>
-                            {score.evidence_text.length > 200 && (
-                              <button 
-                                onClick={() => toggleEvidenceExpand(score.id)}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#4a8bff',
-                                  fontSize: '11px',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                  padding: 0
-                                }}
-                              >
-                                {expandedScores[score.id] ? 'Show less' : 'Show more'}
-                              </button>
-                            )}
-                          </div>
-                          <p style={{ 
-                            fontSize: '12px', 
-                            color: isDark ? '#94a3b8' : '#64748b', 
-                            margin: 0,
-                            whiteSpace: 'pre-wrap'
-                          }}>
-                            {expandedScores[score.id] 
-                              ? score.evidence_text 
-                              : (score.evidence_text.length > 200 
-                                ? `${score.evidence_text.substring(0, 200)}...` 
-                                : score.evidence_text)}
-                          </p>
-                        </div>
-                      )}
-
-                      {score.gaps_identified && (
-                        <div style={{ ...styles.gapsBox, background: 'rgba(239, 68, 68, 0.1)' }}>
-                          <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>
-                            Gaps:
-                          </span>
-                          <p style={{ fontSize: '12px', color: '#ef4444', margin: 0 }}>
-                            {score.gaps_identified}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Manual Override */}
-                      <div style={styles.overrideRow}>
-                        <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                          Manual Override:
-                        </span>
-                        <div style={styles.statusButtons}>
-                          {['compliant', 'partial', 'non_compliant', 'not_applicable'].map(status => (
-                            <button
-                              key={status}
-                              onClick={() => handleScoreClause(selectedEval.id, score.clause_id, status)}
-                              style={{
-                                ...styles.statusBtn,
-                                background: score.status === status ? 
-                                  (status === 'compliant' ? '#22c55e' : 
-                                   status === 'partial' ? '#eab308' :
-                                   status === 'non_compliant' ? '#ef4444' : '#9ca3af') : 
-                                  (isDark ? '#334155' : '#e2e8f0'),
-                                color: score.status === status ? '#fff' : (isDark ? '#cbd5e1' : '#475569')
-                              }}
-                            >
-                              {status.replace('_', ' ')}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={styles.emptyState}>
-                  <FileText size={48} color={isDark ? '#334155' : '#cbd5e1'} />
-                  <p style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                    No clauses to review. Run the evaluation to analyze clauses.
+              {runProgress && (
+                <div style={{ padding: '24px', background: isDark ? '#1e293b' : '#fff', borderRadius: '12px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, textAlign: 'center' }}>
+                  <Loader2 size={32} color="#4a8bff" className="spin" style={{ marginBottom: '12px' }} />
+                  <p style={{ fontSize: '16px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#1e293b', margin: '0 0 4px' }}>
+                    {runProgress.progress?.message || runProgress.status}
                   </p>
+                  <p style={{ fontSize: '13px', color: isDark ? '#94a3b8' : '#64748b', margin: '0 0 16px', textTransform: 'capitalize' }}>
+                    Stage: {runProgress.status.replace(/_/g, ' ')}
+                  </p>
+                  <ProgressBar percent={runProgress.progress?.total > 0 ? (runProgress.progress.current / runProgress.progress.total * 100) : 50} color="#4a8bff" />
+                  {runProgress.progress?.total > 0 && (
+                    <p style={{ fontSize: '11px', color: isDark ? '#64748b' : '#94a3b8', marginTop: '8px' }}>
+                      {runProgress.progress.current} / {runProgress.progress.total}
+                    </p>
+                  )}
                 </div>
+              )}
+              {polling && (
+                <p style={{ fontSize: '12px', color: isDark ? '#64748b' : '#94a3b8', textAlign: 'center', marginTop: '12px' }}>
+                  Auto-refreshing every 2 seconds...
+                </p>
               )}
             </div>
           )}
 
-          {/* ── SUMMARY TAB ── */}
-          {activeTab === 'summary' && selectedEval && (
-            <div style={styles.panel}>
-              <h2 style={{ ...styles.panelTitle, color: isDark ? '#fff' : '#1e293b' }}>
-                Compliance Summary
-              </h2>
-
-              {selectedEval.status === 'completed' ? (
+          {/* ── RESULTS TAB ── */}
+          {activeTab === 'results' && (
+            <div style={S.panel}>
+              {runDetails && runDetails.status === 'complete' ? (
                 <>
-                  {/* Overall Score */}
-                  <div style={{ ...styles.scoreCard, background: isDark ? '#1e293b' : '#fff' }}>
-                    <div style={styles.scoreHeader}>
+                  {/* Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                    <div>
+                      <h2 style={{ ...S.panelTitle, color: isDark ? '#fff' : '#1e293b', margin: 0 }}>
+                        {runDetails.reference_name}
+                      </h2>
+                      <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: '4px 0 0' }}>
+                        Run #{runDetails.id} · {runDetails.total_clauses} clauses
+                      </p>
+                    </div>
+                    <button onClick={() => {
+                      const url = backendApi.defaults.baseURL + `/compliance/runs/${runDetails.id}/report`;
+                      backendApi.get(`/compliance/runs/${runDetails.id}/report`, { responseType: 'blob' }).then(res => {
+                        const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `${runDetails.reference_name.replace(/[\\/:*?"<>|]/g, '_')}_Compliance_Report.docx`;
+                        a.click();
+                      }).catch(err => setError('Report not ready yet'));
+                    }} style={{ ...S.actionBtn, background: '#22c55e' }}>
+                      <Download size={16} />
+                      Download .docx Report
+                    </button>
+                  </div>
+
+                  {/* Score Card */}
+                  <div style={{ padding: '20px', background: isDark ? '#1e293b' : '#fff', borderRadius: '12px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                       <div>
-                        <h3 style={{ margin: 0, color: isDark ? '#fff' : '#1e293b' }}>
-                          Overall Compliance Score
-                        </h3>
-                        <p style={{ margin: '4px 0 0', color: isDark ? '#94a3b8' : '#64748b' }}>
-                          {selectedEval.total_clauses} clauses evaluated
+                        <h3 style={{ margin: 0, fontSize: '16px', color: isDark ? '#e2e8f0' : '#1e293b' }}>Overall Score</h3>
+                        <p style={{ margin: '2px 0 0', fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                          {runDetails.total_clauses} clauses evaluated
                         </p>
                       </div>
-                      <div style={styles.bigScore}>
-                        <span style={{ 
-                          fontSize: '48px', 
-                          fontWeight: 700, 
-                          color: selectedEval.overall_score >= 0.8 ? '#22c55e' : 
-                                 selectedEval.overall_score >= 0.6 ? '#eab308' : '#ef4444'
-                        }}>
-                          {(selectedEval.overall_score * 100).toFixed(0)}%
-                        </span>
-                      </div>
+                      <span style={{ fontSize: '42px', fontWeight: 700, color: runDetails.overall_score >= 80 ? '#22c55e' : runDetails.overall_score >= 60 ? '#eab308' : '#ef4444' }}>
+                        {runDetails.overall_score?.toFixed(0)}%
+                      </span>
                     </div>
-                    <ProgressBar 
-                      percent={selectedEval.overall_score * 100} 
-                      color={selectedEval.overall_score >= 0.8 ? '#22c55e' : 
-                             selectedEval.overall_score >= 0.6 ? '#eab308' : '#ef4444'}
-                    />
+                    <ProgressBar percent={runDetails.overall_score || 0}
+                      color={runDetails.overall_score >= 80 ? '#22c55e' : runDetails.overall_score >= 60 ? '#eab308' : '#ef4444'} />
+                    <p style={{ marginTop: '8px', fontSize: '13px', fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}>
+                      Recommendation: <span style={{ color: runDetails.recommendation === 'APPROVE' ? '#22c55e' : runDetails.recommendation === 'APPROVE WITH CONDITIONS' ? '#eab308' : runDetails.recommendation === 'REVISE AND RESUBMIT' ? '#f97316' : '#ef4444' }}>
+                        {runDetails.recommendation || 'N/A'}
+                      </span>
+                    </p>
                   </div>
 
                   {/* Counts Grid */}
-                  <div style={styles.countsGrid}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '16px' }}>
                     {[
-                      { label: 'Compliant', count: selectedEval.compliant_count || 0, color: '#22c55e' },
-                      { label: 'Partial', count: selectedEval.partial_count || 0, color: '#eab308' },
-                      { label: 'Non-Compliant', count: selectedEval.non_compliant_count || 0, color: '#ef4444' },
-                      { label: 'Not Applicable', count: selectedEval.not_applicable_count || 0, color: '#9ca3af' },
+                      { label: 'COMPLIANT', count: runDetails.compliant_count, color: '#22c55e' },
+                      { label: 'PARTIAL', count: runDetails.partial_count, color: '#eab308' },
+                      { label: 'NON-COMPLIANT', count: runDetails.non_compliant_count, color: '#ef4444' },
+                      { label: 'UNVERIFIABLE', count: runDetails.unverifiable_count, color: '#9ca3af' },
                     ].map(item => (
-                      <div key={item.label} style={{ ...styles.countCard, background: isDark ? '#1e293b' : '#fff' }}>
-                        <span style={{ fontSize: '32px', fontWeight: 700, color: item.color }}>
-                          {item.count}
-                        </span>
-                        <span style={{ fontSize: '13px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                          {item.label}
-                        </span>
+                      <div key={item.label} style={{ textAlign: 'center', padding: '14px', background: isDark ? '#1e293b' : '#fff', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>
+                        <span style={{ fontSize: '28px', fontWeight: 700, color: item.color, display: 'block' }}>{item.count}</span>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{item.label}</span>
                       </div>
                     ))}
                   </div>
 
-                  {/* Recommendation */}
-                  <div style={{ 
-                    ...styles.recommendationBox, 
-                    background: selectedEval.recommendation === 'accept' ? 'rgba(34, 197, 94, 0.1)' :
-                                selectedEval.recommendation === 'conditional' ? 'rgba(234, 179, 8, 0.1)' :
-                                'rgba(239, 68, 68, 0.1)',
-                    borderColor: selectedEval.recommendation === 'accept' ? '#22c55e' :
-                                selectedEval.recommendation === 'conditional' ? '#eab308' :
-                                '#ef4444'
-                  }}>
-                    <h4 style={{ 
-                      margin: '0 0 8px', 
-                      color: selectedEval.recommendation === 'accept' ? '#22c55e' :
-                            selectedEval.recommendation === 'conditional' ? '#eab308' :
-                            '#ef4444'
-                    }}>
-                      Recommendation: {selectedEval.recommendation?.toUpperCase()}
-                    </h4>
-                    <p style={{ margin: 0, color: isDark ? '#94a3b8' : '#64748b' }}>
-                      {selectedEval.recommendation === 'accept' 
-                        ? 'Vendor submission meets all SOTR requirements.'
-                        : selectedEval.recommendation === 'conditional'
-                        ? 'Vendor submission meets most requirements with minor gaps.'
-                        : 'Vendor submission has significant non-compliance issues.'}
-                    </p>
-                  </div>
+                  {/* Alerts */}
+                  {runDetails.missing_clause_count > 0 && (
+                    <div style={{ padding: '10px 14px', background: 'rgba(156,163,175,0.12)', borderRadius: '8px', marginBottom: '10px', border: '1px solid rgba(156,163,175,0.3)' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#9ca3af', fontWeight: 600 }}>
+                        {runDetails.missing_clause_count} clause(s) with no vendor evidence
+                      </p>
+                    </div>
+                  )}
+                  {runDetails.contradiction_count > 0 && (
+                    <div style={{ padding: '10px 14px', background: 'rgba(234,179,8,0.1)', borderRadius: '8px', marginBottom: '10px', border: '1px solid rgba(234,179,8,0.3)' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#eab308', fontWeight: 600 }}>
+                        {runDetails.contradiction_count} contradiction(s) detected between vendor files
+                      </p>
+                    </div>
+                  )}
+                  {runDetails.house_rule_violation_count > 0 && (
+                    <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.1)', borderRadius: '8px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.3)' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
+                        {runDetails.house_rule_violation_count} house rule violation(s) detected
+                      </p>
+                    </div>
+                  )}
 
-                  {/* Generate Report Button */}
-                  <button
-                    onClick={() => handleGenerateReport(selectedEval.id)}
-                    style={styles.reportBtn}
-                  >
-                    <Download size={18} />
-                    Generate PDF Report
-                  </button>
+                  {/* Clause List */}
+                  {runDetails.clauses?.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {runDetails.clauses.map((clause) => {
+                        const vs = VERDICT_STYLES[clause.verdict] || VERDICT_STYLES.UNVERIFIABLE;
+                        return (
+                          <div key={clause.id} style={{ padding: '14px', background: isDark ? '#1e293b' : '#fff', borderRadius: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontWeight: 600, color: '#4a8bff', fontSize: '13px' }}>{clause.clause_id}</span>
+                                <span style={{ fontSize: '11px', color: isDark ? '#64748b' : '#94a3b8' }}>({clause.source_file})</span>
+                              </div>
+                              <StatusBadge status={clause.verdict} />
+                            </div>
+
+                            <p style={{ fontSize: '12px', color: isDark ? '#cbd5e1' : '#475569', margin: '0 0 6px', lineHeight: 1.4 }}>
+                              {expandedClauses[clause.id] ? clause.requirement_text : (clause.requirement_text?.length > 120 ? `${clause.requirement_text.substring(0, 120)}...` : clause.requirement_text)}
+                            </p>
+                            {clause.requirement_text?.length > 120 && (
+                              <button onClick={() => toggleClauseExpand(clause.id)} style={{ background: 'transparent', border: 'none', color: '#4a8bff', fontSize: '10px', fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: '6px' }}>
+                                {expandedClauses[clause.id] ? 'Show less' : 'Show full requirement'}
+                              </button>
+                            )}
+
+                            {/* Finding */}
+                            {clause.finding && (
+                              <div style={{ padding: '8px 10px', background: isDark ? '#0f172a' : '#f8fafc', borderRadius: '6px', marginBottom: '6px', fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', lineHeight: 1.4 }}>
+                                <span style={{ fontWeight: 600, color: '#4a8bff', fontSize: '10px', display: 'block', marginBottom: '2px' }}>FINDING:</span>
+                                {clause.finding}
+                              </div>
+                            )}
+
+                            {/* Severity + Recommendation */}
+                            <div style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
+                              {clause.severity && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: clause.severity === 'Critical' ? 'rgba(239,68,68,0.15)' : clause.severity === 'Major' ? 'rgba(249,115,22,0.15)' : 'rgba(234,179,8,0.15)', color: clause.severity === 'Critical' ? '#ef4444' : clause.severity === 'Major' ? '#f97316' : '#eab308', fontWeight: 600 }}>
+                                  {clause.severity}
+                                </span>
+                              )}
+                              {clause.recommendation && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'rgba(74,139,255,0.1)', color: '#4a8bff', fontWeight: 500 }}>
+                                  {clause.recommendation}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* House Rule Flag */}
+                            {clause.house_rule_flag?.violated && (
+                              <div style={{ marginTop: '6px', padding: '8px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                                <span style={{ fontSize: '10px', fontWeight: 700, color: '#ef4444' }}>HOUSE RULE VIOLATION</span>
+                                <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#ef4444' }}>
+                                  {clause.house_rule_flag.rule_reference && <><strong>{clause.house_rule_flag.rule_reference}</strong>: </>}
+                                  {clause.house_rule_flag.note}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Contradictions */}
+                            {clause.contradictions?.length > 0 && (
+                              <div style={{ marginTop: '6px', padding: '8px 10px', background: 'rgba(234,179,8,0.08)', borderRadius: '6px', border: '1px solid rgba(234,179,8,0.2)' }}>
+                                <span style={{ fontSize: '10px', fontWeight: 700, color: '#eab308' }}>CONTRADICTION</span>
+                                {clause.contradictions.map((c, i) => (
+                                  <p key={i} style={{ margin: '2px 0 0', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                                    {c.note}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                      <FileText size={48} color={isDark ? '#334155' : '#cbd5e1'} />
+                      <p>No clause results available.</p>
+                    </div>
+                  )}
                 </>
               ) : (
-                <div style={styles.emptyState}>
+                <div style={{ textAlign: 'center', padding: '40px', color: isDark ? '#94a3b8' : '#64748b' }}>
                   <PieChart size={48} color={isDark ? '#334155' : '#cbd5e1'} />
-                  <p style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                    Summary will be available after evaluation is completed.
-                  </p>
+                  <p>Select a completed run from the sidebar or create a new one.</p>
+                  <button onClick={() => setActiveTab('setup')} style={S.actionBtn}>
+                    <Upload size={16} />
+                    New Compliance Run
+                  </button>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* No Selection State */}
-          {!selectedEval && activeTab !== 'setup' && (
-            <div style={styles.emptyState}>
-              <FileCheck size={48} color={isDark ? '#334155' : '#cbd5e1'} />
-              <p style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                Select an evaluation from the sidebar or create a new one.
-              </p>
-              <button onClick={() => setActiveTab('setup')} style={styles.actionBtn}>
-                <Plus size={16} />
-                New Evaluation
-              </button>
             </div>
           )}
         </div>
@@ -869,409 +614,33 @@ export default function Compliance() {
   );
 }
 
-// ── Styles ──
 const styles = {
-  layout: {
-    display: 'flex',
-    height: '100vh',
-    overflow: 'hidden',
-  },
-  sidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    borderRight: '1px solid',
-    transition: 'width 0.2s ease',
-    overflow: 'hidden',
-  },
-  sidebarHeader: {
-    padding: '14px 12px 10px',
-    borderBottom: '1px solid',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  logoGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '9px',
-  },
-  logoIcon: {
-    width: 34,
-    height: 34,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: '9px',
-    background: 'rgba(74,139,255,0.12)',
-    flexShrink: 0,
-  },
-  logoText: {
-    fontSize: '15px',
-    fontWeight: 800,
-    letterSpacing: '1.5px',
-  },
-  logoSub: {
-    fontSize: '9px',
-    color: '#64748b',
-    fontWeight: 500,
-    letterSpacing: '0.3px',
-  },
-  collapseBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: '#64748b',
-    padding: '4px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    display: 'flex',
-    opacity: 0.7,
-  },
-  navSection: {
-    padding: '10px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  navLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '9px',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    fontSize: '13px',
-    textDecoration: 'none',
-    transition: 'background 0.15s',
-  },
-  section: {
-    padding: '10px',
-    flex: 1,
-    overflowY: 'auto',
-  },
-  sectionTitle: {
-    fontSize: '10px',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    padding: '0 8px 8px',
-  },
-  evalItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    transition: 'background 0.15s',
-  },
-  evalInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    flex: 1,
-    minWidth: 0,
-  },
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
-  header: {
-    padding: '16px 24px',
-    borderBottom: '1px solid',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  title: {
-    margin: 0,
-    fontSize: '20px',
-    fontWeight: 600,
-  },
-  subtitle: {
-    margin: '2px 0 0',
-    fontSize: '13px',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '4px',
-  },
-  tab: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '8px 16px',
-    border: 'none',
-    background: 'transparent',
-    fontSize: '13px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    borderBottom: '2px solid',
-    transition: 'all 0.15s',
-  },
-  content: {
-    flex: 1,
-    overflow: 'auto',
-    padding: '24px',
-  },
-  panel: {
-    maxWidth: '900px',
-    margin: '0 auto',
-  },
-  panelTitle: {
-    margin: '0 0 24px',
-    fontSize: '18px',
-    fontWeight: 600,
-  },
-  formGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '16px',
-    marginBottom: '20px',
-  },
-  formGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  toggleGroup: {
-    display: 'flex',
-    gap: '0',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid #e2e8f0',
-  },
-  toggleBtn: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    padding: '8px 12px',
-    border: 'none',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-  },
-  label: {
-    fontSize: '13px',
-    fontWeight: 500,
-  },
-  select: {
-    padding: '10px 12px',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-    fontSize: '14px',
-    outline: 'none',
-  },
-  input: {
-    padding: '10px 12px',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-    fontSize: '14px',
-    outline: 'none',
-  },
-  uploadArea: {
-    padding: '20px',
-    border: '2px dashed',
-    borderRadius: '8px',
-    marginBottom: '20px',
-  },
-  fileInput: {
-    marginTop: '8px',
-  },
-  filePreview: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    marginTop: '12px',
-    padding: '8px 12px',
-    background: 'rgba(74,139,255,0.1)',
-    borderRadius: '6px',
-  },
-  submitBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '12px 24px',
-    background: '#4a8bff',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  errorAlert: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '12px 16px',
-    background: 'rgba(239, 68, 68, 0.1)',
-    color: '#ef4444',
-    borderRadius: '8px',
-    marginBottom: '16px',
-    fontSize: '14px',
-  },
-  closeBtn: {
-    marginLeft: 'auto',
-    background: 'transparent',
-    border: 'none',
-    color: '#ef4444',
-    fontSize: '18px',
-    cursor: 'pointer',
-  },
-  reviewHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '20px',
-  },
-  metaRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    marginTop: '8px',
-  },
-  actionBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '8px 16px',
-    background: '#4a8bff',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontWeight: 500,
-    cursor: 'pointer',
-  },
-  loadingOverlay: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '40px',
-    gap: '16px',
-  },
-  clauseList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  clauseCard: {
-    padding: '16px',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-  },
-  clauseHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '12px',
-  },
-  clauseId: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  clauseText: {
-    fontSize: '14px',
-    lineHeight: 1.5,
-    margin: '0 0 12px',
-  },
-  evidenceBox: {
-    padding: '10px 12px',
-    borderRadius: '6px',
-    marginBottom: '10px',
-  },
-  gapsBox: {
-    padding: '10px 12px',
-    borderRadius: '6px',
-    marginBottom: '10px',
-  },
-  overrideRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    paddingTop: '12px',
-    borderTop: '1px solid #e2e8f0',
-  },
-  statusButtons: {
-    display: 'flex',
-    gap: '6px',
-  },
-  statusBtn: {
-    padding: '4px 10px',
-    borderRadius: '4px',
-    border: 'none',
-    fontSize: '11px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    textTransform: 'capitalize',
-  },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '60px 20px',
-    gap: '16px',
-  },
-  scoreCard: {
-    padding: '24px',
-    borderRadius: '12px',
-    border: '1px solid #e2e8f0',
-    marginBottom: '20px',
-  },
-  scoreHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '16px',
-  },
-  bigScore: {
-    textAlign: 'center',
-  },
-  countsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
-    gap: '12px',
-    marginBottom: '20px',
-  },
-  countCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: '16px',
-    borderRadius: '8px',
-    border: '1px solid #e2e8f0',
-  },
-  recommendationBox: {
-    padding: '16px',
-    borderRadius: '8px',
-    border: '2px solid',
-    marginBottom: '20px',
-  },
-  reportBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '12px 24px',
-    background: '#22c55e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
+  layout: { display: 'flex', height: '100vh', overflow: 'hidden' },
+  sidebar: { display: 'flex', flexDirection: 'column', borderRight: '1px solid', transition: 'width 0.2s ease', overflow: 'hidden' },
+  sideHeader: { padding: '14px 12px 10px', borderBottom: '1px solid', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  logoGroup: { display: 'flex', alignItems: 'center', gap: '9px' },
+  logoIcon: { width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '9px', background: 'rgba(74,139,255,0.12)', flexShrink: 0 },
+  logoText: { fontSize: '15px', fontWeight: 800, letterSpacing: '1.5px' },
+  logoSub: { fontSize: '9px', color: '#64748b', fontWeight: 500, letterSpacing: '0.3px' },
+  collapseBtn: { background: 'transparent', border: 'none', color: '#64748b', padding: '4px', borderRadius: '6px', cursor: 'pointer', display: 'flex', opacity: 0.7 },
+  navSection: { padding: '10px', display: 'flex', flexDirection: 'column', gap: '4px' },
+  navLink: { display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', textDecoration: 'none' },
+  section: { padding: '10px', flex: 1, overflowY: 'auto' },
+  sectionTitle: { fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', padding: '0 8px 8px' },
+  evalItem: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', borderRadius: '6px', cursor: 'pointer' },
+  evalInfo: { display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: 0 },
+  main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  header: { padding: '16px 24px', borderBottom: '1px solid', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  headerTitle: { display: 'flex', alignItems: 'center', gap: '12px' },
+  title: { margin: 0, fontSize: '20px', fontWeight: 600 },
+  subtitle: { margin: '2px 0 0', fontSize: '13px' },
+  tabs: { display: 'flex', gap: '4px' },
+  tab: { display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 500, cursor: 'pointer', borderBottom: '2px solid' },
+  content: { flex: 1, overflow: 'auto', padding: '24px' },
+  panel: { maxWidth: '900px', margin: '0 auto' },
+  panelTitle: { margin: '0 0 20px', fontSize: '18px', fontWeight: 600 },
+  submitBtn: {},
+  actionBtn: { display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' },
+  errorAlert: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' },
+  closeBtn: { marginLeft: 'auto', background: 'transparent', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer' },
 };

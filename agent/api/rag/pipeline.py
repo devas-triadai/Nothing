@@ -273,6 +273,7 @@ def ingest_document(
     source: Optional[str] = None,
     document_type: Optional[str] = None,
     content_hash: Optional[str] = None,
+    extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Full ingestion pipeline: OCR → chunk → embed → store.
@@ -317,6 +318,7 @@ def ingest_document(
         source=source or "admin_upload",
         document_type=document_type,
         content_hash=content_hash,
+        extra_metadata=extra_metadata,
     )
     if not chunks:
         yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}

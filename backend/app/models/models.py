@@ -124,6 +124,7 @@ class Document(Base):
     expiry_date = Column(DateTime, nullable=True)
     full_text = Column(Text, nullable=True)  # Extracted text content for full-text search
     folder_id = Column(Integer, ForeignKey("document_folders.id"), nullable=True, index=True)
+    doc_type = Column(String(50), nullable=True, index=True)  # standard, sotr, submission, etc.
     # --------------------------------
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -295,56 +296,58 @@ class EntitySearchLog(Base):
     cleared_entities = Column(JSON, nullable=True)  # List of entity IDs user had clearance to see
 
 
-class ComplianceEvaluation(Base):
-    """Compliance evaluation: SOTR vs Vendor Submission."""
-    __tablename__ = "compliance_evaluations"
+class ComplianceRun(Base):
+    """Compliance run: SOTR vs Vendor submission evaluation (rebuild spec)."""
+    __tablename__ = "compliance_runs"
 
     id = Column(Integer, primary_key=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    sotr_doc_id = Column(String(100), nullable=False)
-    vendor_doc_id = Column(String(100), nullable=False)
-    project_name = Column(String(200), nullable=True)
-    vessel_name = Column(String(200), nullable=True)
-    vendor_name = Column(String(200), nullable=True)
-    status = Column(String(20), default="pending")
+    reference_name = Column(String(200), nullable=False)
+    status = Column(String(30), default="queued")
+    progress = Column(JSON, nullable=True)
+    doc_id_sotr_com = Column(String(100), nullable=True)
+    doc_id_sotr_tech = Column(String(100), nullable=True)
+    doc_id_vendor_com = Column(String(100), nullable=True)
+    doc_id_vendor_dpr = Column(String(100), nullable=True)
+    selected_standards = Column(JSON, nullable=True)
     overall_score = Column(Float, nullable=True)
     compliant_count = Column(Integer, default=0)
     partial_count = Column(Integer, default=0)
     non_compliant_count = Column(Integer, default=0)
-    not_applicable_count = Column(Integer, default=0)
+    unverifiable_count = Column(Integer, default=0)
     total_clauses = Column(Integer, default=0)
-    recommendation = Column(String(20), nullable=True)
-    report_pdf_path = Column(String(500), nullable=True)
-    agent_eval_id = Column(String(100), nullable=True)
+    recommendation = Column(String(50), nullable=True)
+    report_docx_path = Column(String(500), nullable=True)
+    result_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    scores = relationship("ClauseScore", back_populates="evaluation", cascade="all, delete-orphan")
+    clauses = relationship("ClauseResult", back_populates="run", cascade="all, delete-orphan")
 
 
-class ClauseScore(Base):
-    """Individual clause scoring result within a compliance evaluation."""
-    __tablename__ = "clause_scores"
+class ClauseResult(Base):
+    """Individual clause evaluation result within a compliance run."""
+    __tablename__ = "clause_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    evaluation_id = Column(Integer, ForeignKey("compliance_evaluations.id", ondelete="CASCADE"), nullable=False)
-    clause_number = Column(String(50), nullable=True)
-    clause_title = Column(String(200), nullable=True)
-    clause_text = Column(Text, nullable=True)
-    category = Column(String(50), nullable=True)
-    subcategory = Column(String(50), nullable=True)
-    is_mandatory = Column(Boolean, default=True)
-    is_critical = Column(Boolean, default=False)
-    status = Column(String(20), default="pending")
-    confidence = Column(Float, nullable=True)
-    evidence_text = Column(Text, nullable=True)
-    gaps_identified = Column(Text, nullable=True)
-    vendor_response_summary = Column(Text, nullable=True)
+    run_id = Column(Integer, ForeignKey("compliance_runs.id", ondelete="CASCADE"), nullable=False)
+    clause_id = Column(String(50), nullable=False)  # e.g. SOTR-C-12, SOTR-T-5
+    source_file = Column(String(50), nullable=False)  # "SOTR Commercial" or "SOTR Technical"
+    source_doc_id = Column(String(100), nullable=True)
+    requirement_text = Column(Text, nullable=True)
+    applicable_standards = Column(JSON, nullable=True)
+    technical_parameters = Column(JSON, nullable=True)
+    acceptance_criterion = Column(Text, nullable=True)
+    verdict = Column(String(20), nullable=True)
+    finding = Column(Text, nullable=True)
+    house_rule_flag = Column(JSON, nullable=True)
     recommendation = Column(String(50), nullable=True)
-    ai_notes = Column(Text, nullable=True)
-    manually_overridden = Column(Boolean, default=False)
+    severity = Column(String(20), nullable=True)
+    citations = Column(JSON, nullable=True)
+    contradictions = Column(JSON, nullable=True)
+    is_missing = Column(Boolean, default=False)
+    historical_notes = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    evaluation = relationship("ComplianceEvaluation", back_populates="scores")
+    run = relationship("ComplianceRun", back_populates="clauses")
 
 
 # Create GIN index for trigram search on entity_normalized

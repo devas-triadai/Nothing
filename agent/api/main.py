@@ -206,7 +206,7 @@ app.include_router(drawing.router,    prefix="/api/agent", tags=["Drawing"])
 app.include_router(drawing_enhanced.router, prefix="/api/agent", tags=["Drawing Enhanced"])
 app.include_router(sessions.router,   prefix="/api/agent", tags=["Sessions"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
-app.include_router(compliance_engine.router, prefix="/api/compliance", tags=["Compliance Engine"])
+app.include_router(compliance_engine.router, prefix="/api/agent/compliance", tags=["Compliance Engine"])
 
 
 # ── Health & Root ──

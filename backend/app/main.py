@@ -21,7 +21,7 @@ def _run_migrations():
     """Add columns that were added to models after the SQLite DB was first created."""
     import sqlalchemy as sa
     from sqlalchemy import inspect
-    from app.models.models import DocumentFolder, ComplianceEvaluation, ClauseScore
+    from app.models.models import DocumentFolder, ComplianceRun, ClauseResult
 
     inspector = inspect(engine)
     doc_columns = {c["name"] for c in inspector.get_columns("documents")}
@@ -33,6 +33,7 @@ def _run_migrations():
             ("expiry_date", sa.DateTime()),
             ("full_text", sa.Text()),
             ("folder_id", sa.Integer()),
+            ("doc_type", sa.String(50)),
         ):
             if col_name not in doc_columns:
                 conn.execute(sa.text(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type.compile(dialect=engine.dialect)}"))
@@ -43,48 +44,52 @@ def _run_migrations():
             DocumentFolder.__table__.create(engine)
             print("  [migrate] Created table `document_folders`")
 
-        # ── Compliance evaluations migration ──
+        # ── Drop old compliance tables, create new ones ──
         table_names = inspector.get_table_names()
-        if "compliance_evaluations" not in table_names:
-            ComplianceEvaluation.__table__.create(engine)
-            print("  [migrate] Created table `compliance_evaluations`")
-            # clause_scores depends on compliance_evaluations FK, so create both
-            ClauseScore.__table__.create(engine)
-            print("  [migrate] Created table `clause_scores`")
-        else:
-            _migrate_missing_columns(conn, inspector, "compliance_evaluations", ComplianceEvaluation)
 
-        # ── Clause scores migration ──
-        if "clause_scores" not in table_names:
-            ClauseScore.__table__.create(engine)
-            print("  [migrate] Created table `clause_scores`")
+        # Drop old tables (rebuild spec replaces them)
+        for old_table in ("clause_scores", "compliance_evaluations"):
+            if old_table in table_names:
+                conn.execute(sa.text(f"DROP TABLE IF EXISTS {old_table}"))
+                print(f"  [migrate] Dropped old table `{old_table}`")
+
+        # Create new compliance tables if they don't exist
+        if "compliance_runs" not in table_names:
+            ComplianceRun.__table__.create(engine)
+            print("  [migrate] Created table `compliance_runs`")
         else:
-            _migrate_missing_columns(conn, inspector, "clause_scores", ClauseScore)
+            _migrate_missing_columns(conn, inspector, "compliance_runs", ComplianceRun)
+
+        if "clause_results" not in table_names:
+            ClauseResult.__table__.create(engine)
+            print("  [migrate] Created table `clause_results`")
+        else:
+            _migrate_missing_columns(conn, inspector, "clause_results", ClauseResult)
 
         conn.commit()
 
-    # ── Reset stuck compliance evaluations ──
-    _reset_stuck_evaluations()
+    # ── Reset stuck compliance runs ──
+    _reset_stuck_runs()
 
 
-def _reset_stuck_evaluations():
-    """Reset any evaluations stuck in 'running' status on startup."""
+def _reset_stuck_runs():
+    """Reset any runs stuck in a non-terminal status on startup."""
     try:
-        from app.models.models import ComplianceEvaluation
+        from app.models.models import ComplianceRun
         db = SessionLocal()
-        stuck = db.query(ComplianceEvaluation).filter(
-            ComplianceEvaluation.status == "running"
+        stuck = db.query(ComplianceRun).filter(
+            ComplianceRun.status.in_(["running", "queued", "ingesting", "parsing_clauses", "evaluating"])
         ).all()
-        for eval_ in stuck:
-            eval_.status = "failed"
+        for run in stuck:
+            run.status = "failed"
             logger = logging.getLogger("agra.backend.migrate")
-            logger.warning("Reset stuck evaluation #%s (was 'running')", eval_.id)
+            logger.warning("Reset stuck compliance run #%s (was '%s')", run.id, run.status)
         if stuck:
             db.commit()
         db.close()
     except Exception as exc:
         logger = logging.getLogger("agra.backend.migrate")
-        logger.warning("Could not reset stuck evaluations: %s", exc)
+        logger.warning("Could not reset stuck runs: %s", exc)
 
 
 def _migrate_missing_columns(conn, inspector, table_name: str, model_class):
