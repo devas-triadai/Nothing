@@ -62,11 +62,11 @@ def _get_easy_ocr():
     try:
         import easyocr
         try:
-            _easy_ocr = easyocr.Reader(["en"], gpu=False)
-            logger.info("EasyOCR engine initialised (CPU mode).")
+            _easy_ocr = easyocr.Reader(["en"], gpu=True)
+            logger.info("EasyOCR engine initialised (GPU mode).")
         except Exception:
             _easy_ocr = easyocr.Reader(["en"])
-            logger.info("EasyOCR engine initialised.")
+            logger.info("EasyOCR engine initialised (fallback).")
     except ImportError:
         logger.warning("EasyOCR not installed.")
         _easy_ocr = False

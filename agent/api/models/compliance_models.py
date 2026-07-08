@@ -97,7 +97,7 @@ class IngestBundleRequest(BaseModel):
 
 
 class IngestBundleResponse(BaseModel):
-    doc_id_sotr_com: str
+    doc_id_sotr_com: Optional[str] = None
     doc_id_sotr_tech: Optional[str] = None
     doc_id_vendor_com: Optional[str] = None
     doc_id_vendor_dpr: Optional[str] = None
@@ -105,7 +105,7 @@ class IngestBundleResponse(BaseModel):
 
 class RunPipelineRequest(BaseModel):
     run_id: int = 0
-    doc_id_sotr_com: str = ""
+    doc_id_sotr_com: Optional[str] = None
     doc_id_sotr_tech: Optional[str] = None
     doc_id_vendor_com: Optional[str] = None
     doc_id_vendor_dpr: Optional[str] = None
