@@ -285,7 +285,7 @@ def ingest_document(
     yield {"stage": "ocr", "progress": 0, "message": "Extracting text…"}
     pages = ocr.extract_document(file_path)
     if not pages:
-        yield {"stage": "ocr", "progress": 100, "message": "No text extracted.", "error": "No text extracted from document"}
+        yield {"stage": "ocr", "progress": 100, "message": "No text extracted.", "error": "No text extracted from document. If this is a scanned PDF, ensure PaddleOCR, EasyOCR, or Tesseract is installed and working. Try converting the document to a text-based PDF or DOCX."}
         return
     yield {"stage": "ocr", "progress": 100, "message": f"Extracted {len(pages)} pages."}
 

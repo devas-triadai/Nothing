@@ -35,6 +35,8 @@ docx2txt>=0.8
 paddlepaddle>=2.6.0
 paddleocr>=2.9.0
 pytesseract>=0.3.10         # Tesseract 5 Python wrapper (system binary required)
+easyocr>=1.7.0              # Fallback OCR engine
+pypdf>=5.4.0               # Pure-Python PDF text extraction fallback
 
 # --- Tokenization / Chunking ---
 tiktoken>=0.8.0               # cl100k_base tokenizer for chunking
