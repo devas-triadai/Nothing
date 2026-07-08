@@ -285,7 +285,7 @@ def ingest_document(
     yield {"stage": "ocr", "progress": 0, "message": "Extracting text…"}
     pages = ocr.extract_document(file_path)
     if not pages:
-        yield {"stage": "ocr", "progress": 100, "message": "No text extracted.", "error": True}
+        yield {"stage": "ocr", "progress": 100, "message": "No text extracted.", "error": "No text extracted from document"}
         return
     yield {"stage": "ocr", "progress": 100, "message": f"Extracted {len(pages)} pages."}
 
@@ -321,7 +321,7 @@ def ingest_document(
         extra_metadata=extra_metadata,
     )
     if not chunks:
-        yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": True}
+        yield {"stage": "chunking", "progress": 100, "message": "No chunks produced.", "error": "No chunks produced from document"}
         return
     yield {"stage": "chunking", "progress": 100, "message": f"Created {len(chunks)} chunks."}
 
