@@ -168,15 +168,18 @@ class RunResponse(BaseModel):
 async def create_run(
     reference_name: str = Form(...),
     sotr_commercial: UploadFile = File(...),
-    sotr_technical: UploadFile = File(...),
-    vendor_commercial: UploadFile = File(...),
-    vendor_dpr: UploadFile = File(...),
+    sotr_technical: Optional[UploadFile] = File(None),
+    vendor_commercial: Optional[UploadFile] = File(None),
+    vendor_dpr: Optional[UploadFile] = File(None),
     selected_standards: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     if not reference_name.strip():
         raise HTTPException(status_code=400, detail="reference_name is required")
+
+    if not vendor_commercial and not vendor_dpr:
+        raise HTTPException(status_code=400, detail="At least one vendor file (Commercial or DPR) is required")
 
     standards_list = []
     if selected_standards:
@@ -201,6 +204,8 @@ async def create_run(
 
     saved_paths = {}
     for key, uf in file_map.items():
+        if not uf:
+            continue
         if not uf.filename:
             raise HTTPException(status_code=400, detail=f"Missing file: {key}")
         ext = Path(uf.filename).suffix or ""
@@ -254,16 +259,17 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         if not run:
             return
 
+        file_count = len(saved_paths)
         run.status = "ingesting"
-        run.progress = {"stage": "ingesting", "current": 0, "total": 4, "message": "Ingesting files..."}
+        run.progress = {"stage": "ingesting", "current": 0, "total": file_count, "message": "Ingesting files..."}
         db.commit()
 
-        # Step 1: Ingest all 4 files via agent
+        # Step 1: Ingest files via agent
         ingest_resp = _agent_post("/ingest-bundle", IngestBundleRequest(
-            sotr_commercial_path=saved_paths["sotr_commercial"],
-            sotr_technical_path=saved_paths["sotr_technical"],
-            vendor_commercial_path=saved_paths["vendor_commercial"],
-            vendor_dpr_path=saved_paths["vendor_dpr"],
+            sotr_commercial_path=saved_paths.get("sotr_commercial", ""),
+            sotr_technical_path=saved_paths.get("sotr_technical"),
+            vendor_commercial_path=saved_paths.get("vendor_commercial"),
+            vendor_dpr_path=saved_paths.get("vendor_dpr"),
             run_id=run_id,
         ).model_dump())
 
@@ -283,9 +289,9 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         _agent_post("/run-pipeline", RunPipelineRequest(
             run_id=run_id,
             doc_id_sotr_com=run.doc_id_sotr_com or "",
-            doc_id_sotr_tech=run.doc_id_sotr_tech or "",
-            doc_id_vendor_com=run.doc_id_vendor_com or "",
-            doc_id_vendor_dpr=run.doc_id_vendor_dpr or "",
+            doc_id_sotr_tech=run.doc_id_sotr_tech,
+            doc_id_vendor_com=run.doc_id_vendor_com,
+            doc_id_vendor_dpr=run.doc_id_vendor_dpr,
             selected_standards=standards_list,
             reference_name=reference_name,
         ).model_dump())

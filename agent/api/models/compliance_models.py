@@ -90,25 +90,25 @@ class ProgressUpdate(BaseModel):
 
 class IngestBundleRequest(BaseModel):
     sotr_commercial_path: str
-    sotr_technical_path: str
-    vendor_commercial_path: str
-    vendor_dpr_path: str
+    sotr_technical_path: Optional[str] = None
+    vendor_commercial_path: Optional[str] = None
+    vendor_dpr_path: Optional[str] = None
     run_id: int = 0
 
 
 class IngestBundleResponse(BaseModel):
     doc_id_sotr_com: str
-    doc_id_sotr_tech: str
-    doc_id_vendor_com: str
-    doc_id_vendor_dpr: str
+    doc_id_sotr_tech: Optional[str] = None
+    doc_id_vendor_com: Optional[str] = None
+    doc_id_vendor_dpr: Optional[str] = None
 
 
 class RunPipelineRequest(BaseModel):
     run_id: int = 0
-    doc_id_sotr_com: str
-    doc_id_sotr_tech: str
-    doc_id_vendor_com: str
-    doc_id_vendor_dpr: str
+    doc_id_sotr_com: str = ""
+    doc_id_sotr_tech: Optional[str] = None
+    doc_id_vendor_com: Optional[str] = None
+    doc_id_vendor_dpr: Optional[str] = None
     selected_standards: List[str] = []
     reference_name: str = ""
 
@@ -157,6 +157,8 @@ class ClauseCategory(str, Enum):
     TECHNICAL = "Technical"
     COMMERCIAL = "Commercial"
     SAFETY = "Safety"
+    QUALITY = "Quality"
+    ENVIRONMENTAL = "Environmental"
 
 
 class ClauseScoreBase(BaseModel):
@@ -164,16 +166,23 @@ class ClauseScoreBase(BaseModel):
     confidence: float = 0.0
     finding: str = ""
     severity: Optional[str] = None
-    evidence: str = ""
+    evidence_text: str = ""
+    vendor_response_summary: str = ""
+    gaps_identified: Optional[str] = None
+    deviation_notes: Optional[str] = None
+    is_missing: bool = False
     citation: str = ""
     recommendation: str = ""
 
 
 class ComplianceClauseBase(BaseModel):
     clause_number: str = ""
+    clause_title: str = ""
     clause_text: str = ""
     category: ClauseCategory = ClauseCategory.GENERAL
-    acceptance_criterion: str = ""
+    is_mandatory: bool = False
+    is_critical: bool = False
+    acceptance_criteria: str = ""
 
 
 class ComplianceEvaluationResponse(BaseModel):

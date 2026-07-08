@@ -183,9 +183,7 @@ export default function Compliance() {
     const missing = [];
     if (!refName.trim()) missing.push('Reference Name');
     if (!sotrCom) missing.push('SOTR Commercial');
-    if (!sotrTech) missing.push('SOTR Technical');
-    if (!vendorCom) missing.push('Vendor Commercial');
-    if (!vendorDpr) missing.push('Vendor DPR');
+    if (!vendorCom && !vendorDpr) missing.push('At least one Vendor file (Commercial or DPR)');
     if (missing.length > 0) {
       setError(`Missing required fields: ${missing.join(', ')}`);
       return;
@@ -198,9 +196,9 @@ export default function Compliance() {
       const formData = new FormData();
       formData.append('reference_name', refName.trim());
       formData.append('sotr_commercial', sotrCom);
-      formData.append('sotr_technical', sotrTech);
-      formData.append('vendor_commercial', vendorCom);
-      formData.append('vendor_dpr', vendorDpr);
+      if (sotrTech) formData.append('sotr_technical', sotrTech);
+      if (vendorCom) formData.append('vendor_commercial', vendorCom);
+      if (vendorDpr) formData.append('vendor_dpr', vendorDpr);
       formData.append('selected_standards', JSON.stringify(selectedStandards));
 
       const res = await backendApi.post('/compliance/runs', formData, {
@@ -227,7 +225,7 @@ export default function Compliance() {
     );
   };
 
-  const canStart = refName.trim() && sotrCom && sotrTech && vendorCom && vendorDpr;
+  const canStart = refName.trim() && sotrCom && (vendorCom || vendorDpr);
 
   // ── Render ──
   const S = styles;
@@ -326,7 +324,7 @@ export default function Compliance() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                   <FileSlot label="SOTR Commercial" required file={sotrCom} onChange={setSotrCom} isDark={isDark} />
-                  <FileSlot label="SOTR Technical" required file={sotrTech} onChange={setSotrTech} isDark={isDark} />
+                  <FileSlot label="SOTR Technical" file={sotrTech} onChange={setSotrTech} isDark={isDark} />
                 </div>
               </div>
 
@@ -334,9 +332,12 @@ export default function Compliance() {
                 <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 12px' }}>
                   Stage 2: Vendor Submission Documents
                 </h3>
+                <p style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', margin: '-8px 0 12px' }}>
+                  At least one vendor file required (Commercial or DPR).
+                </p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                  <FileSlot label="Vendor Commercial" required file={vendorCom} onChange={setVendorCom} isDark={isDark} />
-                  <FileSlot label="Vendor DPR / Technical Response" required file={vendorDpr} onChange={setVendorDpr} isDark={isDark} />
+                  <FileSlot label="Vendor Commercial" file={vendorCom} onChange={setVendorCom} isDark={isDark} />
+                  <FileSlot label="Vendor DPR / Technical Response" file={vendorDpr} onChange={setVendorDpr} isDark={isDark} />
                 </div>
               </div>
 
@@ -378,9 +379,7 @@ export default function Compliance() {
                 {[
                   { label: 'Reference Name', ok: !!refName.trim() },
                   { label: 'SOTR Commercial', ok: !!sotrCom },
-                  { label: 'SOTR Technical', ok: !!sotrTech },
-                  { label: 'Vendor Commercial', ok: !!vendorCom },
-                  { label: 'Vendor DPR', ok: !!vendorDpr },
+                  { label: 'At least one Vendor file', ok: !!(vendorCom || vendorDpr) },
                 ].map(item => (
                   <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: item.ok ? '#22c55e' : '#ef4444' }}>
                     {item.ok ? <CheckCircle size={11} /> : <XCircle size={11} />}

@@ -172,6 +172,8 @@ async def ingest_bundle(
     ingested_docs = []  # Track doc_ids for rollback on failure
     try:
         for key, bundle_role, sub_role, file_path in bundles:
+            if not file_path:
+                continue
             if not os.path.isfile(file_path):
                 raise HTTPException(status_code=400, detail=f"File not found for {key}: {file_path}")
 
@@ -212,9 +214,9 @@ async def ingest_bundle(
 
     return IngestBundleResponse(
         doc_id_sotr_com=doc_ids["sotr_commercial"],
-        doc_id_sotr_tech=doc_ids["sotr_technical"],
-        doc_id_vendor_com=doc_ids["vendor_commercial"],
-        doc_id_vendor_dpr=doc_ids["vendor_dpr"],
+        doc_id_sotr_tech=doc_ids.get("sotr_technical"),
+        doc_id_vendor_com=doc_ids.get("vendor_commercial"),
+        doc_id_vendor_dpr=doc_ids.get("vendor_dpr"),
     )
 
 
@@ -256,7 +258,7 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     _update_backend_progress(run_id, "parsing_clauses", 0, 0, "Retrieving SOTR documents...")
 
     sotr_com_chunks = store.get_chunks_by_doc(body.doc_id_sotr_com) or []
-    sotr_tech_chunks = store.get_chunks_by_doc(body.doc_id_sotr_tech) or []
+    sotr_tech_chunks = store.get_chunks_by_doc(body.doc_id_sotr_tech) if body.doc_id_sotr_tech else []
 
     sotr_com_text = "\n\n".join(c.get("text", "") for c in sotr_com_chunks if c.get("text"))
     sotr_tech_text = "\n\n".join(c.get("text", "") for c in sotr_tech_chunks if c.get("text"))
@@ -308,8 +310,8 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
                 standard_texts[std_id] = std_text
 
     # ── Stage 4: Vendor Evidence Retrieval ──
-    vendor_chunks_com = store.get_chunks_by_doc(body.doc_id_vendor_com) or []
-    vendor_chunks_dpr = store.get_chunks_by_doc(body.doc_id_vendor_dpr) or []
+    vendor_chunks_com = store.get_chunks_by_doc(body.doc_id_vendor_com) if body.doc_id_vendor_com else []
+    vendor_chunks_dpr = store.get_chunks_by_doc(body.doc_id_vendor_dpr) if body.doc_id_vendor_dpr else []
     vendor_com_text = "\n\n".join(c.get("text", "") for c in vendor_chunks_com if c.get("text"))
     vendor_dpr_text = "\n\n".join(c.get("text", "") for c in vendor_chunks_dpr if c.get("text"))
     combined_vendor_text = vendor_com_text + "\n\n" + vendor_dpr_text
