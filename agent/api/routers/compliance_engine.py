@@ -467,8 +467,9 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
 
     # ── Stage 8: Historical Feedback ──
     _update_backend_progress(run_id, "evaluating", total, total, "Checking historical feedback...")
+    historical_runs = _fetch_historical_runs(exclude_run_id=run_id)
     for clause in all_clauses:
-        history = _query_historical_feedback(clause)
+        history = _compare_clause_history(clause, historical_runs)
         if history:
             clause.historical_notes = history
 
@@ -808,32 +809,78 @@ Are there any contradictory statements? Return ONLY valid JSON:
     return []
 
 
-def _query_historical_feedback(clause: ClauseResultData) -> List:
-    """Query prior compliance runs for historical context on this clause area."""
-    from api.models.compliance_models import HistoricalNote
+def _fetch_historical_runs(exclude_run_id: str = "", max_runs: int = 5) -> List[Dict]:
+    """Fetch recent compliance runs with their clause results for historical comparison.
+    Returns list of run dicts with 'clauses' key populated.
+    """
     try:
         token = _get_service_token()
+        # First get list of recent runs
         resp = httpx.get(
-            f"{_ADMIN_BASE}/api/compliance/runs?limit=5",
+            f"{_ADMIN_BASE}/api/compliance/runs?limit={max_runs + 1}",
             headers={"Authorization": f"Bearer {token}"},
             timeout=10,
         )
-        if resp.status_code == 200:
-            runs = resp.json()
-            notes = []
-            for run in runs[:3]:
-                rid = run.get("id")
-                if rid and str(rid) != clause.source_doc_id:
-                    notes.append(HistoricalNote(
-                        run_id=rid,
-                        reference_name=run.get("reference_name", ""),
-                        previous_verdict=None,
-                        note=f"Previous compliance run #{rid}: {run.get('reference_name', 'N/A')}",
-                    ))
-            return notes
-    except Exception:
-        pass
+        if resp.status_code != 200:
+            return []
+        runs_meta = resp.json()
+        # Filter out current run
+        run_ids = [str(r["id"]) for r in runs_meta if str(r.get("id")) != exclude_run_id][:max_runs]
+        if not run_ids:
+            return []
+        # Fetch full runs with clauses via batch endpoint
+        batch_resp = httpx.get(
+            f"{_ADMIN_BASE}/api/compliance/runs/batch?ids={','.join(run_ids)}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        if batch_resp.status_code == 200:
+            return batch_resp.json()
+    except Exception as e:
+        logger.warning("Failed to fetch historical runs: %s", e)
     return []
+
+
+def _compare_clause_history(clause: ClauseResultData, historical_runs: List[Dict]) -> List:
+    """Compare current clause against historical runs to detect trends."""
+    from api.models.compliance_models import HistoricalNote
+    notes = []
+    for run in historical_runs:
+        run_id = run.get("id")
+        ref_name = run.get("reference_name", "")
+        clauses = run.get("clauses", [])
+        # Find matching clause by clause_id
+        match = next((c for c in clauses if c.get("clause_id") == clause.clause_id), None)
+        if match:
+            prev_verdict = match.get("verdict")
+            curr_verdict = clause.verdict.value if clause.verdict else None
+            # Determine trend
+            if prev_verdict and curr_verdict:
+                verdict_order = {"COMPLIANT": 3, "PARTIAL": 2, "NON_COMPLIANT": 1, "UNVERIFIABLE": 0}
+                prev_score = verdict_order.get(prev_verdict, 0)
+                curr_score = verdict_order.get(curr_verdict, 0)
+                if curr_score > prev_score:
+                    trend = "improved"
+                    note = f"Improved from {prev_verdict} in run #{run_id}"
+                elif curr_score < prev_score:
+                    trend = "declined"
+                    note = f"Declined from {prev_verdict} in run #{run_id}"
+                else:
+                    trend = "stable"
+                    note = f"Consistent {curr_verdict} across runs"
+            elif prev_verdict and not curr_verdict:
+                trend = "new"
+                note = f"Previously {prev_verdict} in run #{run_id}"
+            else:
+                trend = "new"
+                note = f"First evaluation (run #{run_id} had no verdict)"
+            notes.append(HistoricalNote(
+                run_id=run_id,
+                reference_name=ref_name,
+                previous_verdict=prev_verdict,
+                note=note,
+            ))
+    return notes
 
 
 def _aggregate_results(clauses: List[ClauseResultData]) -> PipelineResult:

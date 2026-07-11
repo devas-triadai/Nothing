@@ -49,6 +49,7 @@ class HistoricalNote(BaseModel):
     reference_name: str = ""
     previous_verdict: Optional[str] = None
     note: str = ""
+    trend: Optional[str] = None  # "improved", "declined", "stable", "new"
 
 
 class ClauseResultData(BaseModel):

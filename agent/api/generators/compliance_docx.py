@@ -258,7 +258,8 @@ def generate_compliance_report(
                     p = doc.add_paragraph()
                     run = p.add_run(f"{clause.clause_id} (Run #{note.run_id}): ")
                     run.bold = True
-                    doc.add_paragraph(f"  {note.note}", style='List Bullet')
+                    trend_str = f" [{note.trend.upper()}]" if note.trend else ""
+                    doc.add_paragraph(f"  {note.note}{trend_str}", style='List Bullet')
 
     # ── Standards Reference Appendix ──
     if selected_standard_names:

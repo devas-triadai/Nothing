@@ -548,6 +548,30 @@ def list_runs(
     return [RunResponse.from_orm(r) for r in runs]
 
 
+# ── Batch Get Runs (for historical feedback) ──
+
+@router.get("/runs/batch", response_model=List[RunResponse])
+def batch_get_runs(
+    ids: str = "",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_agent),
+):
+    """Fetch multiple runs with their clause results in one request.
+    Used by the agent for historical feedback comparison.
+    Query param: ids=1,2,3 (comma-separated run IDs).
+    """
+    if not ids:
+        return []
+    try:
+        id_list = [int(x.strip()) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run IDs")
+    if not id_list or len(id_list) > 10:
+        raise HTTPException(status_code=400, detail="Provide 1-10 run IDs")
+    runs = db.query(ComplianceRun).filter(ComplianceRun.id.in_(id_list)).all()
+    return [RunResponse.from_orm(r, include_clauses=True) for r in runs]
+
+
 # ── Get Run ──
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
