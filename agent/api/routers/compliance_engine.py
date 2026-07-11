@@ -1004,16 +1004,16 @@ async def list_standards(
         )
         seen_ids = set()
         for r in results:
-            doc_id = r.get("doc_id", "")
+            meta = r.get("metadata", {})
+            doc_id = meta.get("doc_id", "")
             if doc_id in seen_ids:
                 continue
             seen_ids.add(doc_id)
-            meta = r.get("metadata", {})
             standards.append(StandardsDocument(
                 doc_id=doc_id,
                 filename=meta.get("filename", doc_id),
                 category=meta.get("category", ""),
-                description=meta.get("description", ""),
+                description=meta.get("summary", meta.get("description", "")),
             ))
     except Exception as e:
         logger.warning("Failed to query standards: %s", e)

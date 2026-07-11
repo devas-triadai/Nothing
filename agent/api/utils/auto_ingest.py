@@ -63,6 +63,12 @@ def _already_indexed(filename: str) -> bool:
                     if text_raw.startswith("gAAAA"):
                         logger.warning("Detected undecryptable document '%s' (key mismatch). Triggering re-ingest.", filename)
                         return False
+
+                # Migration: if document_type is missing, force re-ingest so it gets set
+                meta = pt.payload.get("metadata", {})
+                if not meta.get("document_type"):
+                    logger.info("Document '%s' missing document_type — triggering re-ingest.", filename)
+                    return False
             
             return True # Exists and looks readable
     except Exception as e:
@@ -156,7 +162,7 @@ def _ingest_file(file_path: Path) -> bool:
         logger.warning("LLM cross-reference extraction failed: %s", e)
 
     # 3. Chunk (with category metadata)
-    chunks = chunk_pages(pages, doc_id, filename, category=category, description=summary)
+    chunks = chunk_pages(pages, doc_id, filename, category=category, description=summary, document_type="standard")
     if not chunks:
         logger.warning("No chunks from %s — skipping.", filename)
         return
