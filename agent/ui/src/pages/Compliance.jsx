@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck, FileText, Upload, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Download, Play, Loader2, ArrowLeft,
   Check, AlertCircle, Minus, ChevronRight, ChevronLeft,
-  FileCheck, BarChart3, List, PieChart, BookOpen, HardDrive, Database
+  FileCheck, BarChart3, List, PieChart, BookOpen, HardDrive, Database,
+  Archive, FolderOpen, File
 } from 'lucide-react';
 import { getToken, getUser, getDashboardUrl } from '../utils/auth';
 import api, { backendApi } from '../utils/api';
@@ -74,6 +75,115 @@ function FileSlot({ label, required, file, onChange, isDark, accept }) {
   );
 }
 
+// ── ZIP Upload Slot ──
+function ZipFileSlot({ label, required, file, onChange, isDark }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <label style={{ fontSize: '13px', fontWeight: 500, color: isDark ? '#cbd5e1' : '#475569' }}>
+        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+      </label>
+      <div style={{
+        padding: '12px', border: `2px dashed ${file ? '#8b5cf6' : (isDark ? '#334155' : '#e2e8f0')}`,
+        borderRadius: '8px', background: file ? 'rgba(139,92,246,0.06)' : 'transparent',
+        transition: 'all 0.15s'
+      }}>
+        <input
+          type="file"
+          accept=".zip"
+          onChange={(e) => onChange(e.target.files?.[0] || null)}
+          style={{ fontSize: '12px', width: '100%' }}
+        />
+        {file && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', padding: '6px 10px', background: 'rgba(139,92,246,0.1)', borderRadius: '6px' }}>
+            <Archive size={16} color="#8b5cf6" />
+            <span style={{ fontSize: '12px', color: isDark ? '#e2e8f0' : '#1e293b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <button onClick={() => onChange(null)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: 0 }}>×</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ZIP File Preview ──
+function ZipFilePreview({ files, onToggle, onSelectAll, onDeselectAll, isDark }) {
+  if (!files || files.length === 0) return null;
+
+  const selectedCount = files.filter(f => f.selected).length;
+
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const getFileIcon = (filename) => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (['pdf'].includes(ext)) return <FileText size={14} color="#ef4444" />;
+    if (['doc', 'docx'].includes(ext)) return <FileText size={14} color="#3b82f6" />;
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileText size={14} color="#22c55e" />;
+    if (['ppt', 'pptx'].includes(ext)) return <FileText size={14} color="#f97316" />;
+    return <File size={14} color={isDark ? '#94a3b8' : '#64748b'} />;
+  };
+
+  return (
+    <div style={{
+      marginTop: '12px', padding: '12px', borderRadius: '8px',
+      background: isDark ? '#1e293b' : '#f8fafc',
+      border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <FolderOpen size={16} color="#8b5cf6" />
+          <span style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#1e293b' }}>
+            Extracted Files ({selectedCount} of {files.length} selected)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={onSelectAll} style={{
+            padding: '3px 8px', borderRadius: '4px', border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`,
+            background: 'transparent', color: isDark ? '#94a3b8' : '#64748b',
+            fontSize: '10px', fontWeight: 500, cursor: 'pointer'
+          }}>Select All</button>
+          <button onClick={onDeselectAll} style={{
+            padding: '3px 8px', borderRadius: '4px', border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`,
+            background: 'transparent', color: isDark ? '#94a3b8' : '#64748b',
+            fontSize: '10px', fontWeight: 500, cursor: 'pointer'
+          }}>Deselect All</button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+        {files.map((f, idx) => (
+          <div key={idx} onClick={() => onToggle(idx)} style={{
+            display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px',
+            borderRadius: '6px', cursor: 'pointer', transition: 'background 0.1s',
+            background: f.selected ? 'rgba(139,92,246,0.08)' : 'transparent',
+            border: `1px solid ${f.selected ? 'rgba(139,92,246,0.2)' : 'transparent'}`
+          }}>
+            <div style={{
+              width: '16px', height: '16px', borderRadius: '3px',
+              border: `2px solid ${f.selected ? '#8b5cf6' : (isDark ? '#475569' : '#d1d5db')}`,
+              background: f.selected ? '#8b5cf6' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.1s'
+            }}>
+              {f.selected && <Check size={10} color="#fff" />}
+            </div>
+            {getFileIcon(f.filename)}
+            <span style={{
+              fontSize: '12px', flex: 1,
+              color: f.selected ? (isDark ? '#e2e8f0' : '#1e293b') : (isDark ? '#64748b' : '#94a3b8')
+            }}>{f.filename}</span>
+            <span style={{ fontSize: '10px', color: isDark ? '#64748b' : '#94a3b8' }}>
+              {formatSize(f.size)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──
 export default function Compliance() {
   const navigate = useNavigate();
@@ -97,8 +207,10 @@ export default function Compliance() {
   const [sotrCom, setSotrCom] = useState(null);
   const [sotrTech, setSotrTech] = useState(null);
   const [vendorCom, setVendorCom] = useState(null);
+  const [vendorComFiles, setVendorComFiles] = useState([]);
   const [vendorDpr, setVendorDpr] = useState(null);
   const [selectedStandards, setSelectedStandards] = useState([]);
+  const [standardRelevance, setStandardRelevance] = useState([]);
   const [runProgress, setRunProgress] = useState(null);
 
   const pollRef = useRef(null);
@@ -138,6 +250,40 @@ export default function Compliance() {
     }
   }, []);
 
+  // ── Fetch Standards Relevance ──
+  const relevanceTimerRef = useRef(null);
+
+  const fetchRelevance = useCallback(async (comFile, techFile) => {
+    if (!comFile && !techFile) {
+      setStandardRelevance([]);
+      return;
+    }
+    try {
+      const formData = new FormData();
+      if (comFile) formData.append('sotr_commercial', comFile);
+      if (techFile) formData.append('sotr_technical', techFile);
+      const res = await backendApi.post('/compliance/standards/relevance', formData, { timeout: 60000 });
+      if (!mountedRef.current) return;
+      const rel = res.data || [];
+      setStandardRelevance(rel);
+      // Auto-select recommended standards
+      const recommendedIds = rel.filter(r => r.recommended).map(r => r.doc_id);
+      if (recommendedIds.length > 0) {
+        setSelectedStandards(prev => [...new Set([...prev, ...recommendedIds])]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch relevance:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (relevanceTimerRef.current) clearTimeout(relevanceTimerRef.current);
+    relevanceTimerRef.current = setTimeout(() => {
+      fetchRelevance(sotrCom, sotrTech);
+    }, 800);
+    return () => { if (relevanceTimerRef.current) clearTimeout(relevanceTimerRef.current); };
+  }, [sotrCom, sotrTech, fetchRelevance]);
+
   useEffect(() => {
     fetchRuns();
     fetchStandards();
@@ -152,16 +298,21 @@ export default function Compliance() {
         const res = await backendApi.get(`/compliance/runs/${runId}/status`);
         if (!mountedRef.current) return;
         setRunProgress(res.data);
-        if (res.data.status === 'complete' || res.data.status === 'failed') {
-          setPolling(false);
-          if (res.data.status === 'complete') {
-            const detail = await backendApi.get(`/compliance/runs/${runId}?include_clauses=true`);
-            if (mountedRef.current) {
-              setRunDetails(detail.data);
-              setSelectedRun(detail.data);
-              setActiveTab('results');
+          if (res.data.status === 'complete' || res.data.status === 'failed') {
+            setPolling(false);
+            if (res.data.status === 'complete') {
+              const detail = await backendApi.get(`/compliance/runs/${runId}?include_clauses=true`);
+              if (mountedRef.current) {
+                setRunDetails(detail.data);
+                setSelectedRun(detail.data);
+                setActiveTab('results');
+                if (detail.data.vendor_commercial_files) {
+                  setVendorComFiles(detail.data.vendor_commercial_files);
+                } else {
+                  fetchZipContents(runId);
+                }
+              }
             }
-          }
           fetchRuns();
           return;
         }
@@ -218,6 +369,7 @@ export default function Compliance() {
       setActiveTab('progress');
       pollStatus(res.data.id);
       fetchRuns();
+      if (vendorCom) fetchZipContents(res.data.id);
     } catch (err) {
       const detail = err.response?.data?.detail;
       const msg = Array.isArray(detail) ? detail.map(d => d.msg || String(d)).join('; ') : (detail || err.message || 'Failed to create compliance run');
@@ -233,6 +385,67 @@ export default function Compliance() {
       prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
     );
   };
+
+  // ── ZIP File Handlers ──
+  const handleVendorComChange = (file) => {
+    setVendorCom(file);
+    setVendorComFiles([]);
+  };
+
+  const handleToggleVendorFile = async (idx) => {
+    const file = vendorComFiles[idx];
+    if (!file || !runDetails?.id) return;
+    try {
+      await backendApi.patch(`/compliance/runs/${runDetails.id}/toggle-file`, {
+        filename: file.filename,
+        selected: !file.selected
+      });
+      setVendorComFiles(prev => prev.map((f, i) => i === idx ? { ...f, selected: !f.selected } : f));
+    } catch (err) {
+      console.error('Failed to toggle file:', err);
+      setError('Failed to toggle file selection');
+    }
+  };
+
+  const handleSelectAllVendorFiles = async () => {
+    if (!runDetails?.id) return;
+    try {
+      await Promise.all(vendorComFiles.filter(f => !f.selected).map(f =>
+        backendApi.patch(`/compliance/runs/${runDetails.id}/toggle-file`, { filename: f.filename, selected: true })
+      ));
+      setVendorComFiles(prev => prev.map(f => ({ ...f, selected: true })));
+    } catch (err) {
+      console.error('Failed to select all files:', err);
+    }
+  };
+
+  const handleDeselectAllVendorFiles = async () => {
+    if (!runDetails?.id) return;
+    const selectedFiles = vendorComFiles.filter(f => f.selected);
+    if (selectedFiles.length <= 1) return; // Keep at least 1 selected
+    try {
+      await Promise.all(selectedFiles.slice(0, -1).map(f =>
+        backendApi.patch(`/compliance/runs/${runDetails.id}/toggle-file`, { filename: f.filename, selected: false })
+      ));
+      setVendorComFiles(prev => prev.map((f, i) => {
+        const lastSelectedIdx = prev.findIndex(x => x.selected);
+        return { ...f, selected: prev.indexOf(f) === lastSelectedIdx };
+      }));
+    } catch (err) {
+      console.error('Failed to deselect all files:', err);
+    }
+  };
+
+  const fetchZipContents = useCallback(async (runId) => {
+    try {
+      const res = await backendApi.get(`/compliance/runs/${runId}/zip-contents`);
+      if (mountedRef.current && res.data?.files) {
+        setVendorComFiles(res.data.files);
+      }
+    } catch (err) {
+      console.error('Failed to fetch ZIP contents:', err);
+    }
+  }, []);
 
   const canStart = refName.trim() && ((sotrCom && vendorCom) || (sotrTech && vendorDpr));
 
@@ -265,7 +478,7 @@ export default function Compliance() {
           <div style={S.section}>
             <div style={{ ...S.sectionTitle, color: isDark ? '#64748b' : '#94a3b8' }}>Recent Runs</div>
             {runs.slice(0, 5).map(r => (
-              <div key={r.id} onClick={() => { setSelectedRun(r); setActiveTab('results'); backendApi.get(`/compliance/runs/${r.id}?include_clauses=true`).then(res => setRunDetails(res.data)).catch(() => {}); }}
+              <div key={r.id} onClick={() => { setSelectedRun(r); setActiveTab('results'); backendApi.get(`/compliance/runs/${r.id}?include_clauses=true`).then(res => { setRunDetails(res.data); if (res.data.vendor_commercial_files) { setVendorComFiles(res.data.vendor_commercial_files); } else { fetchZipContents(r.id); } }).catch(() => {}); }}
                 style={{ ...S.evalItem, background: selectedRun?.id === r.id ? (isDark ? '#334155' : '#e2e8f0') : 'transparent' }}>
                 <FileText size={14} color={isDark ? '#94a3b8' : '#64748b'} />
                 <div style={S.evalInfo}>
@@ -342,42 +555,155 @@ export default function Compliance() {
                   Stage 2: Vendor Submission Documents
                 </h3>
                 <p style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', margin: '-8px 0 12px' }}>
-                  SOTR Commercial requires Vendor Commercial; SOTR Technical requires Vendor DPR. 2 files (one pair) or all 4 files.
+                  SOTR Commercial requires Vendor Commercial ZIP; SOTR Technical requires Vendor DPR. 2 files (one pair) or all 4 files.
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                  <FileSlot label="Vendor Commercial" file={vendorCom} onChange={setVendorCom} isDark={isDark} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', alignItems: 'start' }}>
+                  <div>
+                    <ZipFileSlot label="Vendor Commercial (ZIP)" file={vendorCom} onChange={handleVendorComChange} isDark={isDark} />
+                    <ZipFilePreview
+                      files={vendorComFiles}
+                      onToggle={handleToggleVendorFile}
+                      onSelectAll={handleSelectAllVendorFiles}
+                      onDeselectAll={handleDeselectAllVendorFiles}
+                      isDark={isDark}
+                    />
+                  </div>
                   <FileSlot label="Vendor DPR / Technical Response" file={vendorDpr} onChange={setVendorDpr} isDark={isDark} />
                 </div>
               </div>
 
               {/* ── Standards Selector ── */}
               <div style={{ marginBottom: '20px' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 8px' }}>
-                  House Rules / Standards
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: 0 }}>
+                    House Rules / Standards
+                  </h3>
+                  {standards.length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button onClick={() => setSelectedStandards(standards.map(s => s.doc_id))} style={{
+                        padding: '3px 8px', borderRadius: '4px', border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`,
+                        background: 'transparent', color: isDark ? '#94a3b8' : '#64748b',
+                        fontSize: '10px', fontWeight: 500, cursor: 'pointer'
+                      }}>Select All</button>
+                      <button onClick={() => setSelectedStandards([])} style={{
+                        padding: '3px 8px', borderRadius: '4px', border: `1px solid ${isDark ? '#475569' : '#d1d5db'}`,
+                        background: 'transparent', color: isDark ? '#94a3b8' : '#64748b',
+                        fontSize: '10px', fontWeight: 500, cursor: 'pointer'
+                      }}>Deselect All</button>
+                    </div>
+                  )}
+                </div>
                 <p style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', margin: '0 0 8px' }}>
-                  Select standards and house rules to check against (optional). Leave empty to skip standards check.
+                  Select standards to check against. Relevant standards are auto-selected when you upload SOTR documents.
                 </p>
+                {standardRelevance.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', background: 'rgba(34,197,94,0.06)', borderRadius: '6px', marginBottom: '8px', border: '1px solid rgba(34,197,94,0.15)' }}>
+                    <CheckCircle size={13} color="#22c55e" />
+                    <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: 500 }}>
+                      {standardRelevance.filter(r => r.recommended).length} of {standards.length} standards auto-selected based on content analysis
+                    </span>
+                  </div>
+                )}
                 {standards.length === 0 ? (
                   <p style={{ fontSize: '12px', color: '#eab308' }}>No standards documents found in knowledge base.</p>
                 ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '160px', overflowY: 'auto', padding: '8px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, borderRadius: '8px' }}>
-                    {standards.map(s => {
-                      const selected = selectedStandards.includes(s.doc_id);
-                      return (
-                        <button key={s.doc_id} onClick={() => toggleStandard(s.doc_id)}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '4px',
-                            padding: '4px 10px', borderRadius: '14px', border: `1px solid ${selected ? '#4a8bff' : (isDark ? '#475569' : '#d1d5db')}`,
-                            background: selected ? 'rgba(74,139,255,0.15)' : 'transparent',
-                            color: selected ? '#4a8bff' : (isDark ? '#94a3b8' : '#64748b'),
-                            fontSize: '11px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.12s'
-                          }}>
-                          {selected && <Check size={10} />}
-                          {s.filename || s.doc_id}
-                        </button>
-                      );
-                    })}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '260px', overflowY: 'auto', padding: '6px', border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, borderRadius: '8px', background: isDark ? '#0f172a' : '#fafbfc' }}>
+                    {(() => {
+                      const getCat = (fname) => {
+                        const f = (fname || '').replace(/\.txt$/i, '');
+                        if (/^ICG_/i.test(f) || f.includes('ICG')) return 'ICG';
+                        if (/^IMO_/i.test(f) || f.includes('IMO') || f.includes('SOLAS') || f.includes('MARPOL') || f.includes('STCW')) return 'IMO';
+                        if (/^SAMPLE_/i.test(f)) return 'SAMPLE';
+                        return 'Other';
+                      };
+                      const catOrder = { ICG: 0, IMO: 1, SAMPLE: 2, Other: 3 };
+                      const sorted = [...standards].sort((a, b) => {
+                        const catA = catOrder[getCat(a.filename)] ?? 3;
+                        const catB = catOrder[getCat(b.filename)] ?? 3;
+                        if (catA !== catB) return catA - catB;
+                        const relA = standardRelevance.find(r => r.doc_id === a.doc_id);
+                        const relB = standardRelevance.find(r => r.doc_id === b.doc_id);
+                        return (relB?.score || 0) - (relA?.score || 0);
+                      });
+                      let lastSection = null;
+                      return sorted.map(s => {
+                        const selected = selectedStandards.includes(s.doc_id);
+                        const rel = standardRelevance.find(r => r.doc_id === s.doc_id);
+                        const isRecommended = rel?.recommended;
+                        const fname = (s.filename || s.doc_id).replace(/\.txt$/i, '');
+                        const category = getCat(s.filename);
+                        const showDivider = category !== lastSection;
+                        lastSection = category;
+                        return (
+                          <React.Fragment key={s.doc_id}>
+                            {showDivider && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', marginTop: '2px' }}>
+                                <span style={{ fontSize: '9px', fontWeight: 700, color: isDark ? '#64748b' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{category}</span>
+                                <div style={{ flex: 1, height: '1px', background: isDark ? '#1e293b' : '#e2e8f0' }} />
+                              </div>
+                            )}
+                            <div onClick={() => toggleStandard(s.doc_id)}
+                              title={rel?.reasons?.length ? `Relevance: ${rel.reasons.join('; ')}` : ''}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px',
+                                borderRadius: '6px', cursor: 'pointer', transition: 'all 0.12s',
+                                border: `1px solid ${selected ? '#4a8bff' : 'transparent'}`,
+                                background: selected ? 'rgba(74,139,255,0.08)' : isRecommended ? 'rgba(34,197,94,0.04)' : 'transparent',
+                              }}
+                              onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = isDark ? '#1e293b' : '#f1f5f9'; }}
+                              onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = isRecommended ? 'rgba(34,197,94,0.04)' : 'transparent'; }}
+                            >
+                              <div style={{
+                                width: '16px', height: '16px', borderRadius: '3px',
+                                border: `2px solid ${selected ? '#4a8bff' : (isDark ? '#475569' : '#d1d5db')}`,
+                                background: selected ? '#4a8bff' : 'transparent',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                flexShrink: 0, transition: 'all 0.1s'
+                              }}>
+                                {selected && <Check size={10} color="#fff" />}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  fontSize: '12px', color: isDark ? '#e2e8f0' : '#1e293b',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                                }}>
+                                  {fname}
+                                </div>
+                                {s.description && (
+                                  <div style={{
+                                    fontSize: '10px', color: isDark ? '#64748b' : '#94a3b8',
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px'
+                                  }}>
+                                    {s.description}
+                                  </div>
+                                )}
+                              </div>
+                              {isRecommended && (
+                                <span style={{
+                                  fontSize: '9px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px',
+                                  background: 'rgba(34,197,94,0.12)', color: '#22c55e',
+                                  textTransform: 'uppercase', letterSpacing: '0.3px', flexShrink: 0
+                                }}>
+                                  Recommended
+                                </span>
+                              )}
+                              {rel && rel.score > 0 && (
+                                <div style={{
+                                  width: '32px', height: '4px', borderRadius: '2px', flexShrink: 0,
+                                  background: isDark ? '#1e293b' : '#e2e8f0', overflow: 'hidden'
+                                }}>
+                                  <div style={{
+                                    height: '100%', borderRadius: '2px',
+                                    width: `${Math.min(rel.score, 100)}%`,
+                                    background: rel.score >= 50 ? '#22c55e' : rel.score >= 25 ? '#eab308' : '#94a3b8'
+                                  }} />
+                                </div>
+                              )}
+                            </div>
+                          </React.Fragment>
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </div>
@@ -522,6 +848,22 @@ export default function Compliance() {
                     ))}
                   </div>
 
+                  {/* Vendor Commercial Files Preview */}
+                  {vendorComFiles.length > 0 && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 600, color: isDark ? '#e2e8f0' : '#334155', margin: '0 0 8px' }}>
+                        Vendor Commercial Files
+                      </h4>
+                      <ZipFilePreview
+                        files={vendorComFiles}
+                        onToggle={handleToggleVendorFile}
+                        onSelectAll={handleSelectAllVendorFiles}
+                        onDeselectAll={handleDeselectAllVendorFiles}
+                        isDark={isDark}
+                      />
+                    </div>
+                  )}
+
                   {/* Alerts */}
                   {runDetails.missing_clause_count > 0 && (
                     <div style={{ padding: '10px 14px', background: 'rgba(156,163,175,0.12)', borderRadius: '8px', marginBottom: '10px', border: '1px solid rgba(156,163,175,0.3)' }}>
@@ -556,6 +898,11 @@ export default function Compliance() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span style={{ fontWeight: 600, color: '#4a8bff', fontSize: '13px' }}>{clause.clause_id}</span>
                                 <span style={{ fontSize: '11px', color: isDark ? '#64748b' : '#94a3b8' }}>({clause.source_file})</span>
+                                {clause.source_file_detail && (
+                                  <span style={{ fontSize: '10px', color: '#8b5cf6', background: 'rgba(139,92,246,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                                    {clause.source_file_detail}
+                                  </span>
+                                )}
                               </div>
                               <StatusBadge status={clause.verdict} />
                             </div>

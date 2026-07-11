@@ -30,6 +30,7 @@ from api.models.compliance_models import (
     Contradiction, ProgressUpdate, RunStatusEnum,
     IngestBundleRequest, IngestBundleResponse,
     RunPipelineRequest, StandardsDocument,
+    StandardRelevance, RelevanceRequest,
 )
 
 logger = logging.getLogger("agra.compliance_engine")
@@ -151,7 +152,7 @@ async def ingest_file(
 
 
 # ═══════════════════════════════════════════════════════════════
-#  ENDPOINT: INGEST BUNDLE (all 4 files)
+#  ENDPOINT: INGEST BUNDLE (all files)
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/ingest-bundle", response_model=IngestBundleResponse)
@@ -161,16 +162,26 @@ async def ingest_bundle(
 ):
     from api.rag.pipeline import ingest_document
 
+    # Build bundles list: SOTR files + DPR (single) + all vendor commercial files
     bundles = [
         ("sotr_commercial", "SOTR", "commercial", body.sotr_commercial_path),
         ("sotr_technical", "SOTR", "technical", body.sotr_technical_path),
-        ("vendor_commercial", "SUBMISSION", "commercial", body.vendor_commercial_path),
         ("vendor_dpr", "SUBMISSION", "dpr", body.vendor_dpr_path),
     ]
 
+    # Collect vendor commercial paths (support both single and multi-file)
+    vendor_com_paths = []
+    if body.vendor_commercial_paths:
+        vendor_com_paths = body.vendor_commercial_paths
+    elif body.vendor_commercial_path:
+        vendor_com_paths = [body.vendor_commercial_path]
+
     doc_ids = {}
+    vendor_commercial_doc_ids = []
     ingested_docs = []  # Track doc_ids for rollback on failure
+
     try:
+        # Ingest SOTR + DPR files
         for key, bundle_role, sub_role, file_path in bundles:
             if not file_path:
                 continue
@@ -200,6 +211,47 @@ async def ingest_bundle(
             doc_ids[key] = doc_id
             ingested_docs.append(doc_id)
             logger.info("Ingested %s -> doc_id=%s", key, doc_id)
+
+        # Ingest all vendor commercial files (from ZIP or single)
+        for idx, vc_path in enumerate(vendor_com_paths):
+            if not vc_path:
+                continue
+            if not os.path.isfile(vc_path):
+                logger.warning("Vendor commercial file not found, skipping: %s", vc_path)
+                continue
+
+            doc_id = str(uuid.uuid4())
+            filename = Path(vc_path).name
+            file_label = f"vendor_commercial_{idx}" if len(vendor_com_paths) > 1 else "vendor_commercial"
+
+            events = []
+            for event in ingest_document(
+                file_path=vc_path,
+                filename=filename,
+                doc_id=doc_id,
+                uploaded_by_user_id=0,
+                token="",
+                source="compliance_upload",
+                document_type="commercial",
+                extra_metadata={
+                    "bundle_role": "SUBMISSION",
+                    "sub_role": "commercial",
+                    "zip_file_index": idx,
+                    "zip_file_label": file_label,
+                },
+            ):
+                events.append(event)
+
+            last = events[-1] if events else {}
+            if last.get("error"):
+                raise HTTPException(status_code=500, detail=f"Ingestion failed for vendor commercial [{filename}]: {last['error']}")
+
+            if idx == 0:
+                doc_ids["vendor_commercial"] = doc_id  # Primary doc_id for backward compat
+            vendor_commercial_doc_ids.append(doc_id)
+            ingested_docs.append(doc_id)
+            logger.info("Ingested vendor commercial %d/%d: %s -> doc_id=%s", idx + 1, len(vendor_com_paths), filename, doc_id)
+
     except Exception:
         # Rollback: delete all successfully ingested docs from vector store
         from api.rag.vector_store import get_store
@@ -217,6 +269,7 @@ async def ingest_bundle(
         doc_id_sotr_tech=doc_ids.get("sotr_technical"),
         doc_id_vendor_com=doc_ids.get("vendor_commercial"),
         doc_id_vendor_dpr=doc_ids.get("vendor_dpr"),
+        vendor_commercial_doc_ids=vendor_commercial_doc_ids,
     )
 
 
@@ -310,11 +363,28 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
                 standard_texts[std_id] = std_text
 
     # ── Stage 4: Vendor Evidence Retrieval ──
-    vendor_chunks_com = store.get_chunks_by_doc(body.doc_id_vendor_com) if body.doc_id_vendor_com else []
+    # Collect ALL vendor commercial doc IDs (primary + additional from ZIP)
+    all_vendor_com_doc_ids = []
+    if body.doc_id_vendor_com:
+        all_vendor_com_doc_ids.append(body.doc_id_vendor_com)
+    if body.doc_id_vendor_com_others:
+        for did in body.doc_id_vendor_com_others:
+            if did not in all_vendor_com_doc_ids:
+                all_vendor_com_doc_ids.append(did)
+
+    # Retrieve chunks from all vendor commercial files
+    vendor_chunks_com = []
+    for vc_doc_id in all_vendor_com_doc_ids:
+        chunks = store.get_chunks_by_doc(vc_doc_id) or []
+        vendor_chunks_com.extend(chunks)
     vendor_chunks_dpr = store.get_chunks_by_doc(body.doc_id_vendor_dpr) if body.doc_id_vendor_dpr else []
+
     vendor_com_text = "\n\n".join(c.get("text", "") for c in vendor_chunks_com if c.get("text"))
     vendor_dpr_text = "\n\n".join(c.get("text", "") for c in vendor_chunks_dpr if c.get("text"))
     combined_vendor_text = vendor_com_text + "\n\n" + vendor_dpr_text
+
+    logger.info("Vendor evidence: %d com chunks from %d files, %d dpr chunks",
+                len(vendor_chunks_com), len(all_vendor_com_doc_ids), len(vendor_chunks_dpr))
 
     # ── Stage 5-7: Clause Evaluation, Missing Detection, Contradictions ──
     evaluated = 0
@@ -323,7 +393,8 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
         _update_backend_progress(run_id, "evaluating", evaluated, total, f"Evaluating clause {clause.clause_id}...")
 
         # RAG search across both vendor files for this clause
-        vendor_evidence = _search_vendor_for_clause(store, clause.requirement_text, body, clause_id=clause.clause_id)
+        vendor_evidence, source_files = _search_vendor_for_clause(store, clause.requirement_text, body, clause_id=clause.clause_id)
+        clause.source_file_detail = ", ".join(source_files) if source_files else ""
         std_evidence = ""
         for std_id, std_text in standard_texts.items():
             if clause.requirement_text.lower()[:50] in std_text.lower():
@@ -377,10 +448,24 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     return result, report_path
 
 
-def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest, clause_id: str = "") -> str:
-    """Search across both vendor files for evidence relevant to a clause."""
+def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest, clause_id: str = "") -> tuple:
+    """Search across all vendor files (commercial ZIP files + DPR) for evidence relevant to a clause.
+    Returns (evidence_text, source_file_names).
+    """
     evidence_parts = []
-    vendor_doc_ids = [body.doc_id_vendor_com, body.doc_id_vendor_dpr]
+    source_files = []
+
+    # Collect ALL vendor doc IDs: primary com + additional com from ZIP + DPR
+    vendor_doc_ids = []
+    if body.doc_id_vendor_com:
+        vendor_doc_ids.append(body.doc_id_vendor_com)
+    if body.doc_id_vendor_com_others:
+        for did in body.doc_id_vendor_com_others:
+            if did not in vendor_doc_ids:
+                vendor_doc_ids.append(did)
+    if body.doc_id_vendor_dpr:
+        vendor_doc_ids.append(body.doc_id_vendor_dpr)
+
     for vid in vendor_doc_ids:
         if not vid:
             continue
@@ -392,14 +477,29 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
             )
             for r in results:
                 txt = r.get("text", "")
+                meta = r.get("metadata", {})
                 if txt:
                     evidence_parts.append(txt)
+                    fname = meta.get("filename", meta.get("zip_file_label", ""))
+                    if fname and fname not in source_files:
+                        source_files.append(fname)
         except Exception as exc:
             logger.warning("Vector search failed for %s (doc=%s): %s", clause_id, vid[:8] if vid else "?", exc)
-    result = "\n\n---\n\n".join(evidence_parts[:5])
+
+    # Deduplicate evidence (same text from different chunks)
+    seen = set()
+    unique_parts = []
+    for part in evidence_parts:
+        # Use first 100 chars as dedup key
+        key = part[:100].strip()
+        if key not in seen:
+            seen.add(key)
+            unique_parts.append(part)
+
+    result = "\n\n---\n\n".join(unique_parts[:8])  # Allow more evidence from multiple files
     if not result.strip():
         logger.debug("No vendor evidence found for clause %s (query=%s…)", clause_id, requirement[:80])
-    return result
+    return result, source_files
 
 
 def _evaluate_clause_llm(clause: ClauseResultData, vendor_text: str, standards_text: str, llm_engine) -> tuple:
@@ -682,6 +782,205 @@ def _parse_llm_json(raw: str) -> Optional[Dict]:
     except Exception:
         pass
     return None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STANDARDS RELEVANCE SCORING
+# ═══════════════════════════════════════════════════════════════
+
+# Mapping: filename patterns → domain tags for relevance scoring
+_FILENAME_TAG_MAP = {
+    "safety": ["safety", "fire", "lifesaving", "emergency", "alarm", "rescue", "survival"],
+    "electrical": ["electrical", "power", "wiring", "cable", "switchboard", "generator", "sld", "single line"],
+    "navigation": ["navigation", "bridge", "radar", "compass", "gps", "communication", "gmdss"],
+    "structural": ["structural", "hull", "frame", "steel", "welding", "plate", "thickness"],
+    "propulsion": ["propulsion", "engine", "machinery", "main engine", "gearbox", "shaft", "propeller"],
+    "environmental": ["environmental", "marpol", "emission", "pollution", "waste", "oil", "sewage", "ballast", "garbage"],
+    "classification": ["classification", "irs", "dnv", "abs", "bv", "lr", "nk", "rules", "notation"],
+    "solas": ["solas", "safety of life at sea", "convention"],
+    "stcw": ["stcw", "seafarer", "training", "certification", "watchkeeping"],
+    "marpol": ["marpol", "marine pollution", "annex"],
+    "port_state": ["port state", "psc", "inspection", "detention", "deficiency"],
+    "sop": ["sop", "standard operating", "procedure", "operations"],
+    "ga_drawing": ["ga drawing", "general arrangement", "layout", "deck", "plan"],
+    "technical_spec": ["technical spec", "specification", "requirement", "statement of technical"],
+    "commercial": ["commercial", "price", "cost", "payment", "delivery", "warranty", "bid", "tender"],
+    "quality": ["quality", "inspection", "testing", "commissioning", "iso", "certification"],
+}
+
+# Mapping: SOTR clause category → relevant standard domain tags
+_CATEGORY_TAG_MAP = {
+    "Technical": ["electrical", "navigation", "structural", "propulsion", "technical_spec", "ga_drawing", "classification"],
+    "Safety": ["safety", "solas", "port_state"],
+    "Environmental": ["environmental", "marpol"],
+    "Quality": ["quality", "classification", "port_state"],
+    "Commercial": ["commercial"],
+    "General": ["sop", "technical_spec"],
+}
+
+
+def _score_standards_relevance(
+    sotr_text: str,
+    sotr_categories: Dict[str, int],
+    standards: List[StandardsDocument],
+) -> List[StandardRelevance]:
+    """Score each standard's relevance to the given SOTR content.
+
+    Uses three signals:
+      1. Filename pattern matching → domain tags
+      2. SOTR clause category distribution → domain tag preferences
+      3. Direct keyword overlap between SOTR text and standard filenames
+    """
+    sotr_lower = sotr_text.lower() if sotr_text else ""
+
+    # Build a set of domain tags present in the SOTR text
+    sotr_tags: set = set()
+    for tag, keywords in _FILENAME_TAG_MAP.items():
+        for kw in keywords:
+            if kw in sotr_lower:
+                sotr_tags.add(tag)
+                break
+
+    # Build preferred tags from clause categories
+    preferred_tags: set = set()
+    total_clauses = sum(sotr_categories.values()) or 1
+    for cat, count in sotr_categories.items():
+        weight = count / total_clauses
+        if weight >= 0.15 and cat in _CATEGORY_TAG_MAP:
+            preferred_tags.update(_CATEGORY_TAG_MAP[cat])
+        elif cat in _CATEGORY_TAG_MAP:
+            preferred_tags.update(_CATEGORY_TAG_MAP[cat][:2])
+
+    all_query_tags = sotr_tags | preferred_tags
+
+    results: List[StandardRelevance] = []
+    for std in standards:
+        fname_lower = std.filename.lower()
+        score = 0.0
+        reasons: List[str] = []
+
+        # Signal 1: filename tag match
+        matched_tags = set()
+        for tag, keywords in _FILENAME_TAG_MAP.items():
+            for kw in keywords:
+                if kw in fname_lower:
+                    matched_tags.add(tag)
+                    break
+
+        # Score overlap between query tags and standard tags
+        overlap = all_query_tags & matched_tags
+        if overlap:
+            tag_score = len(overlap) / max(len(all_query_tags), 1) * 60
+            score += tag_score
+            reasons.append(f"matches: {', '.join(sorted(overlap)[:3])}")
+
+        # Signal 2: direct keyword in filename from SOTR text
+        sotr_words = set(re.findall(r'\b[a-z]{4,}\b', sotr_lower))
+        fname_words = set(re.findall(r'\b[a-z]{4,}\b', fname_lower))
+        common = sotr_words & fname_words - {"the", "and", "with", "from", "that", "this", "shall", "must", "file", "standard", "compliance"}
+        if common:
+            kw_score = min(len(common) * 5, 30)
+            score += kw_score
+            reasons.append(f"keywords: {', '.join(sorted(common)[:3])}")
+
+        # Signal 3: category alignment bonus
+        for cat, cat_tags in _CATEGORY_TAG_MAP.items():
+            cat_count = sotr_categories.get(cat, 0)
+            if cat_count > 0 and (cat_tags & matched_tags):
+                bonus = min(cat_count / total_clauses * 15, 15)
+                score += bonus
+                break
+
+        score = min(round(score, 1), 100.0)
+        recommended = score >= 25.0
+
+        results.append(StandardRelevance(
+            doc_id=std.doc_id,
+            filename=std.filename,
+            score=score,
+            reasons=reasons,
+            recommended=recommended,
+        ))
+
+    results.sort(key=lambda x: x.score, reverse=True)
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ENDPOINT: STANDARDS RELEVANCE
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/standards/relevance", response_model=List[StandardRelevance])
+async def compute_standards_relevance(
+    body: RelevanceRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Compute relevance scores for each standard against uploaded SOTR content."""
+    standards = await list_standards(user=user)
+    return _score_standards_relevance(
+        sotr_text=body.sotr_text,
+        sotr_categories=body.sotr_categories,
+        standards=standards,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ENDPOINT: STANDARDS RELEVANCE FROM FILES
+# ═══════════════════════════════════════════════════════════════
+
+class RelevanceFromFilesRequest(BaseModel):
+    file_paths: List[str] = []
+
+
+@router.post("/standards/relevance-from-files", response_model=List[StandardRelevance])
+async def compute_standards_relevance_from_files(
+    body: RelevanceFromFilesRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Extract text from SOTR files and compute standards relevance scores."""
+    import tempfile
+    from api.rag.ocr import extract_pdf, extract_docx
+
+    all_text_parts: List[str] = []
+    categories: Dict[str, int] = {}
+
+    for fp in body.file_paths:
+        if not os.path.exists(fp):
+            continue
+        ext = Path(fp).suffix.lower()
+        try:
+            if ext == '.pdf':
+                pages = extract_pdf(fp)
+                for p in pages:
+                    all_text_parts.append(p.get("text", ""))
+            elif ext in ('.docx', '.doc'):
+                pages = extract_docx(fp)
+                for p in pages:
+                    all_text_parts.append(p.get("text", ""))
+            elif ext == '.txt':
+                all_text_parts.append(Path(fp).read_text(encoding='utf-8', errors='ignore'))
+        except Exception as e:
+            logger.warning("Failed to extract text from %s: %s", fp, e)
+
+    combined_text = "\n".join(all_text_parts)
+
+    if combined_text:
+        try:
+            from api.rag.sotr_parser import extract_clauses
+            clauses = extract_clauses(combined_text)
+            if clauses:
+                for c in clauses:
+                    cat = c.category.value if hasattr(c.category, 'value') else str(c.category)
+                    categories[cat] = categories.get(cat, 0) + 1
+        except Exception as e:
+            logger.warning("SOTR parsing for relevance failed: %s", e)
+
+    standards = await list_standards(user=user)
+    return _score_standards_relevance(
+        sotr_text=combined_text,
+        sotr_categories=categories,
+        standards=standards,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict
 from enum import Enum
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,7 @@ class ClauseResultData(BaseModel):
     clause_id: str = ""
     source_file: str = ""
     source_doc_id: str = ""
+    source_file_detail: str = ""  # Specific file from ZIP (e.g., "proposal.pdf")
     requirement_text: str = ""
     applicable_standards: List[str] = []
     technical_parameters: Optional[str] = None
@@ -91,7 +92,8 @@ class ProgressUpdate(BaseModel):
 class IngestBundleRequest(BaseModel):
     sotr_commercial_path: str
     sotr_technical_path: Optional[str] = None
-    vendor_commercial_path: Optional[str] = None
+    vendor_commercial_path: Optional[str] = None  # Backward compat: single file
+    vendor_commercial_paths: List[str] = []  # Multiple files from ZIP
     vendor_dpr_path: Optional[str] = None
     run_id: int = 0
 
@@ -99,15 +101,17 @@ class IngestBundleRequest(BaseModel):
 class IngestBundleResponse(BaseModel):
     doc_id_sotr_com: Optional[str] = None
     doc_id_sotr_tech: Optional[str] = None
-    doc_id_vendor_com: Optional[str] = None
+    doc_id_vendor_com: Optional[str] = None  # Primary vendor commercial doc_id
     doc_id_vendor_dpr: Optional[str] = None
+    vendor_commercial_doc_ids: List[str] = []  # All vendor commercial doc IDs (from ZIP)
 
 
 class RunPipelineRequest(BaseModel):
     run_id: int = 0
     doc_id_sotr_com: Optional[str] = None
     doc_id_sotr_tech: Optional[str] = None
-    doc_id_vendor_com: Optional[str] = None
+    doc_id_vendor_com: Optional[str] = None  # Primary vendor commercial doc_id
+    doc_id_vendor_com_others: List[str] = []  # Additional vendor commercial doc IDs from ZIP
     doc_id_vendor_dpr: Optional[str] = None
     selected_standards: List[str] = []
     reference_name: str = ""
@@ -132,6 +136,20 @@ class StandardsDocument(BaseModel):
     filename: str
     category: str = ""
     description: str = ""
+
+
+class StandardRelevance(BaseModel):
+    doc_id: str
+    filename: str
+    score: float = 0.0
+    reasons: List[str] = []
+    recommended: bool = False
+
+
+class RelevanceRequest(BaseModel):
+    sotr_text: str = ""
+    sotr_categories: Dict[str, int] = {}
+    sotr_keywords: List[str] = []
 
 
 # ═══════════════════════════════════════════════════════════════

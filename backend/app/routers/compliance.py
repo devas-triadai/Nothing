@@ -35,6 +35,7 @@ from app.database import get_db
 from app.models.models import ComplianceRun, ClauseResult, User
 from app.routers.auth import get_current_user
 from app.utils.security import create_access_token
+from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger("agra.backend.compliance")
 
@@ -690,7 +691,7 @@ def toggle_file(
     if selected_count == 0:
         raise HTTPException(status_code=400, detail="At least one file must be selected for evaluation")
 
-    run.vendor_commercial_files = run.vendor_commercial_files  # Ensure JSON is marked dirty
+    flag_modified(run, 'vendor_commercial_files')
     db.commit()
 
     return {
@@ -772,3 +773,43 @@ class RunPipelineRequest(BaseModel):
     doc_id_vendor_dpr: str = ""
     selected_standards: List[str] = []
     reference_name: str = ""
+
+
+# ── Standards Relevance ──
+
+@router.post("/standards/relevance")
+async def compute_standards_relevance(
+    sotr_commercial: Optional[UploadFile] = File(None),
+    sotr_technical: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Accept SOTR files, extract text via agent, and return standards relevance scores."""
+    tmp_dir = Path(_COMPLIANCE_DIR) / "_relevance_tmp" / str(uuid.uuid4())
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    file_paths = []
+    try:
+        for upload_file, label in [(sotr_commercial, "sotr_com"), (sotr_technical, "sotr_tech")]:
+            if upload_file is None:
+                continue
+            safe_name = _sanitize_filename(upload_file.filename or label)
+            dest = tmp_dir / safe_name
+            content = await upload_file.read()
+            dest.write_bytes(content)
+            file_paths.append(str(dest))
+
+        if not file_paths:
+            return []
+
+        result = _agent_post("standards/relevance-from-files", {
+            "file_paths": file_paths,
+        })
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Relevance computation failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Relevance computation failed: {e}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
