@@ -319,6 +319,10 @@ class ComplianceRun(Base):
     recommendation = Column(String(50), nullable=True)
     report_docx_path = Column(String(500), nullable=True)
     result_json = Column(JSON, nullable=True)
+    # ZIP upload support for vendor commercial
+    vendor_commercial_zip_path = Column(String(500), nullable=True)  # Original ZIP path
+    vendor_commercial_files = Column(JSON, nullable=True)  # [{path, filename, size, selected}]
+    vendor_commercial_doc_ids = Column(JSON, nullable=True)  # List of doc_ids from ingested ZIP files
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     clauses = relationship("ClauseResult", back_populates="run", cascade="all, delete-orphan")
@@ -331,8 +335,9 @@ class ClauseResult(Base):
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(Integer, ForeignKey("compliance_runs.id", ondelete="CASCADE"), nullable=False)
     clause_id = Column(String(50), nullable=False)  # e.g. SOTR-C-12, SOTR-T-5
-    source_file = Column(String(50), nullable=False)  # "SOTR Commercial" or "SOTR Technical"
+    source_file = Column(String(50), nullable=False)  # "SOTR Commercial", "SOTR Technical", "Vendor Commercial"
     source_doc_id = Column(String(100), nullable=True)
+    source_file_detail = Column(String(200), nullable=True)  # Specific file from ZIP (e.g., "proposal.pdf")
     requirement_text = Column(Text, nullable=True)
     applicable_standards = Column(JSON, nullable=True)
     technical_parameters = Column(JSON, nullable=True)

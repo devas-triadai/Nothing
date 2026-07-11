@@ -1,12 +1,14 @@
 """
 AGRA Backend — Compliance Run Router (Rebuild Spec)
-4-endpoint structure:
-  POST   /api/compliance/runs              — Create run (multipart: 4 files + reference name + standards)
+Endpoints:
+  POST   /api/compliance/runs              — Create run (multipart: files + reference name + standards)
   GET    /api/compliance/runs               — List runs
   GET    /api/compliance/runs/{id}          — Get run with clause results
   GET    /api/compliance/runs/{id}/status   — Get progress
   GET    /api/compliance/runs/{id}/result   — Get full JSON result
   GET    /api/compliance/runs/{id}/report   — Stream .docx report
+  GET    /api/compliance/runs/{id}/zip-contents — List files extracted from vendor commercial ZIP
+  PATCH  /api/compliance/runs/{id}/toggle-file  — Enable/disable a file from ZIP evaluation
   PATCH  /api/compliance/runs/{id}/progress — Internal: agent updates progress
   PATCH  /api/compliance/runs/{id}/complete — Internal: agent stores result
 """
@@ -18,6 +20,7 @@ import re
 import shutil
 import threading
 import uuid
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -87,6 +90,7 @@ class ClauseResultResponse(BaseModel):
     clause_id: str
     source_file: str
     source_doc_id: Optional[str] = None
+    source_file_detail: Optional[str] = None
     requirement_text: Optional[str] = None
     verdict: Optional[str] = None
     finding: Optional[str] = None
@@ -114,6 +118,7 @@ class RunResponse(BaseModel):
     missing_clause_count: int = 0
     contradiction_count: int = 0
     house_rule_violation_count: int = 0
+    vendor_commercial_files: Optional[list] = None
     created_at: str
     updated_at: str
     clauses: List[ClauseResultResponse] = []
@@ -128,6 +133,7 @@ class RunResponse(BaseModel):
                     clause_id=cr.clause_id,
                     source_file=cr.source_file,
                     source_doc_id=cr.source_doc_id,
+                    source_file_detail=cr.source_file_detail,
                     requirement_text=cr.requirement_text,
                     verdict=cr.verdict,
                     finding=cr.finding,
@@ -156,11 +162,22 @@ class RunResponse(BaseModel):
             missing_clause_count=result.get("missing_clause_count", 0) if isinstance(result, dict) else 0,
             contradiction_count=result.get("contradiction_count", 0) if isinstance(result, dict) else 0,
             house_rule_violation_count=result.get("house_rule_violation_count", 0) if isinstance(result, dict) else 0,
+            vendor_commercial_files=run.vendor_commercial_files,
             created_at=run.created_at.isoformat() if run.created_at else "",
             updated_at=run.updated_at.isoformat() if run.updated_at else "",
             clauses=clauses,
         )
 
+
+# ── Constants ──
+
+MAX_ZIP_SIZE_MB = 50
+MAX_ZIP_SIZE_BYTES = MAX_ZIP_SIZE_MB * 1024 * 1024
+
+ALLOWED_VENDOR_ZIP_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".txt", ".xlsx", ".xls",
+    ".pptx", ".ppt", ".csv", ".rtf", ".odt",
+}
 
 # ── Create Compliance Run ──
 
@@ -187,39 +204,128 @@ async def create_run(
     except (json.JSONDecodeError, TypeError):
         pass
 
-    has_p1 = sotr_commercial is not None and vendor_commercial is not None
+    # Validate pairing: vendor_commercial can be ZIP or single file
+    # For validation, treat any vendor_commercial upload as "present"
+    has_vendor_com = vendor_commercial is not None
+    has_p1 = sotr_commercial is not None and has_vendor_com
     has_p2 = sotr_technical is not None and vendor_dpr is not None
     if not has_p1 and not has_p2:
-        orphan1 = (sotr_commercial is None) != (vendor_commercial is None)
+        orphan1 = (sotr_commercial is None) != has_vendor_com
         orphan2 = (sotr_technical is None) != (vendor_dpr is None)
         if orphan1 or orphan2:
             raise HTTPException(status_code=400, detail="SOTR Commercial & Vendor Commercial must be submitted together; SOTR Technical & Vendor DPR must be submitted together")
-        raise HTTPException(status_code=400, detail="Must upload SOTR Commercial + Vendor Commercial, or SOTR Technical + Vendor DPR, or all 4 files")
+        raise HTTPException(status_code=400, detail="Must upload SOTR Commercial + Vendor Commercial (ZIP), or SOTR Technical + Vendor DPR, or all files")
 
     # Save files to compliance temp directory
     run_uuid = str(uuid.uuid4())
     run_dir = _COMPLIANCE_DIR / run_uuid
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    file_map = {
-        "sotr_commercial": sotr_commercial,
-        "sotr_technical": sotr_technical,
-        "vendor_commercial": vendor_commercial,
-        "vendor_dpr": vendor_dpr,
-    }
-
     saved_paths = {}
-    for key, uf in file_map.items():
-        if not uf:
-            continue
-        if not uf.filename:
-            raise HTTPException(status_code=400, detail=f"Missing file: {key}")
-        ext = Path(uf.filename).suffix or ""
-        safe_name = f"{key}{ext}"
-        dest = run_dir / safe_name
-        content = await uf.read()
+    vendor_commercial_files = []
+    vendor_commercial_zip_path = None
+
+    # Save SOTR Commercial
+    if sotr_commercial:
+        if not sotr_commercial.filename:
+            raise HTTPException(status_code=400, detail="Missing file: sotr_commercial")
+        ext = Path(sotr_commercial.filename).suffix or ""
+        dest = run_dir / f"sotr_commercial{ext}"
+        content = await sotr_commercial.read()
         dest.write_bytes(content)
-        saved_paths[key] = str(dest)
+        saved_paths["sotr_commercial"] = str(dest)
+
+    # Save SOTR Technical
+    if sotr_technical:
+        if not sotr_technical.filename:
+            raise HTTPException(status_code=400, detail="Missing file: sotr_technical")
+        ext = Path(sotr_technical.filename).suffix or ""
+        dest = run_dir / f"sotr_technical{ext}"
+        content = await sotr_technical.read()
+        dest.write_bytes(content)
+        saved_paths["sotr_technical"] = str(dest)
+
+    # Save Vendor DPR
+    if vendor_dpr:
+        if not vendor_dpr.filename:
+            raise HTTPException(status_code=400, detail="Missing file: vendor_dpr")
+        ext = Path(vendor_dpr.filename).suffix or ""
+        dest = run_dir / f"vendor_dpr{ext}"
+        content = await vendor_dpr.read()
+        dest.write_bytes(content)
+        saved_paths["vendor_dpr"] = str(dest)
+
+    # Save + Extract Vendor Commercial (ZIP or single file)
+    if vendor_commercial:
+        if not vendor_commercial.filename:
+            raise HTTPException(status_code=400, detail="Missing file: vendor_commercial")
+
+        vc_content = await vendor_commercial.read()
+        vc_filename = vendor_commercial.filename
+        vc_ext = Path(vc_filename).suffix.lower()
+
+        if vc_ext == ".zip":
+            # ── ZIP path: validate size, extract, list files ──
+            if len(vc_content) > MAX_ZIP_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"ZIP file exceeds {MAX_ZIP_SIZE_MB}MB limit ({len(vc_content) / (1024*1024):.1f}MB)"
+                )
+
+            zip_path = run_dir / "vendor_commercial.zip"
+            zip_path.write_bytes(vc_content)
+            vendor_commercial_zip_path = str(zip_path)
+
+            # Extract ZIP
+            extract_dir = run_dir / "vendor_commercial_extracted"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    # Check for nested ZIPs
+                    for info in zf.infolist():
+                        if info.filename.lower().endswith('.zip'):
+                            raise HTTPException(status_code=400, detail="Nested ZIP files are not supported")
+
+                    zf.extractall(extract_dir)
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to extract ZIP: {str(e)}")
+
+            # List extracted files
+            for f_path in sorted(extract_dir.rglob("*")):
+                if f_path.is_file():
+                    f_ext = f_path.suffix.lower()
+                    if f_ext in ALLOWED_VENDOR_ZIP_EXTENSIONS:
+                        rel_path = f_path.relative_to(extract_dir)
+                        file_info = {
+                            "path": str(f_path),
+                            "filename": str(rel_path),
+                            "size": f_path.stat().st_size,
+                            "selected": True,
+                        }
+                        vendor_commercial_files.append(file_info)
+
+            if not vendor_commercial_files:
+                raise HTTPException(status_code=400, detail="ZIP contains no supported files (PDF, DOCX, XLSX, TXT, etc.)")
+
+            # Store first file as the primary vendor_commercial path for backward compat
+            saved_paths["vendor_commercial"] = vendor_commercial_files[0]["path"]
+
+        else:
+            # ── Single file path (backward compatible) ──
+            dest = run_dir / f"vendor_commercial{vc_ext}"
+            dest.write_bytes(vc_content)
+            saved_paths["vendor_commercial"] = str(dest)
+            vendor_commercial_files = [{
+                "path": str(dest),
+                "filename": vc_filename,
+                "size": len(vc_content),
+                "selected": True,
+            }]
 
     # Create DB record
     run = ComplianceRun(
@@ -228,6 +334,8 @@ async def create_run(
         status="queued",
         progress={"stage": "queued", "current": 0, "total": 0, "message": "Run queued"},
         selected_standards=standards_list,
+        vendor_commercial_zip_path=vendor_commercial_zip_path,
+        vendor_commercial_files=vendor_commercial_files if vendor_commercial_files else None,
     )
     db.add(run)
     db.commit()
@@ -265,24 +373,39 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
         if not run:
             return
 
-        file_count = len(saved_paths)
+        # Collect vendor commercial file paths (may be multiple from ZIP)
+        vendor_com_files = []
+        if run.vendor_commercial_files:
+            for f_info in run.vendor_commercial_files:
+                if f_info.get("selected", True) and f_info.get("path"):
+                    vendor_com_files.append(f_info["path"])
+        elif saved_paths.get("vendor_commercial"):
+            vendor_com_files = [saved_paths["vendor_commercial"]]
+
+        file_count = len(saved_paths) + max(0, len(vendor_com_files) - 1)  # -1 because first is already in saved_paths
         run.status = "ingesting"
         run.progress = {"stage": "ingesting", "current": 0, "total": file_count, "message": "Ingesting files..."}
         db.commit()
 
         # Step 1: Ingest files via agent
-        ingest_resp = _agent_post("/ingest-bundle", IngestBundleRequest(
+        # Send both old field (for backward compat) and new field (for multi-file ZIP)
+        ingest_payload = IngestBundleRequest(
             sotr_commercial_path=saved_paths.get("sotr_commercial", ""),
             sotr_technical_path=saved_paths.get("sotr_technical", ""),
-            vendor_commercial_path=saved_paths.get("vendor_commercial", ""),
+            vendor_commercial_paths=vendor_com_files,
             vendor_dpr_path=saved_paths.get("vendor_dpr", ""),
             run_id=run_id,
-        ).model_dump())
+        ).model_dump()
+        # Add backward-compat field for agent
+        ingest_payload["vendor_commercial_path"] = vendor_com_files[0] if vendor_com_files else ""
+        ingest_resp = _agent_post("/ingest-bundle", ingest_payload)
 
         run.doc_id_sotr_com = ingest_resp.get("doc_id_sotr_com")
         run.doc_id_sotr_tech = ingest_resp.get("doc_id_sotr_tech")
         run.doc_id_vendor_com = ingest_resp.get("doc_id_vendor_com")
         run.doc_id_vendor_dpr = ingest_resp.get("doc_id_vendor_dpr")
+        # Store additional vendor commercial doc IDs (from ZIP)
+        run.vendor_commercial_doc_ids = ingest_resp.get("vendor_commercial_doc_ids")
         run.status = "parsing_clauses"
         run.progress = {"stage": "parsing_clauses", "current": 0, "total": 0, "message": "Parsing clauses..."}
         db.commit()
@@ -297,6 +420,7 @@ def _run_pipeline(run_id: int, saved_paths: dict, standards_list: list, referenc
             doc_id_sotr_com=run.doc_id_sotr_com or "",
             doc_id_sotr_tech=run.doc_id_sotr_tech or "",
             doc_id_vendor_com=run.doc_id_vendor_com or "",
+            doc_id_vendor_com_others=ingest_resp.get("vendor_commercial_doc_ids") or [],
             doc_id_vendor_dpr=run.doc_id_vendor_dpr or "",
             selected_standards=standards_list,
             reference_name=reference_name,
@@ -380,6 +504,7 @@ def _store_results_in_db(run: ComplianceRun, agent_result: dict, db: Session):
             clause_id=cd.get("clause_id", ""),
             source_file=cd.get("source_file", ""),
             source_doc_id=cd.get("source_doc_id", ""),
+            source_file_detail=cd.get("source_file_detail"),
             requirement_text=cd.get("requirement_text", ""),
             applicable_standards=cd.get("applicable_standards"),
             technical_parameters=cd.get("technical_parameters"),
@@ -502,6 +627,79 @@ def download_report(
     )
 
 
+# ── Get ZIP Contents ──
+
+@router.get("/runs/{run_id}/zip-contents")
+def get_zip_contents(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return list of files extracted from the vendor commercial ZIP."""
+    run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    files = run.vendor_commercial_files or []
+    has_zip = run.vendor_commercial_zip_path is not None
+
+    return {
+        "run_id": run.id,
+        "has_zip": has_zip,
+        "zip_path": run.vendor_commercial_zip_path,
+        "files": files,
+        "total_files": len(files),
+        "selected_count": sum(1 for f in files if f.get("selected", True)),
+    }
+
+
+# ── Toggle File Selection ──
+
+class ToggleFileRequest(BaseModel):
+    filename: str
+    selected: bool
+
+
+@router.patch("/runs/{run_id}/toggle-file")
+def toggle_file(
+    run_id: int,
+    body: ToggleFileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Enable or disable a file from the vendor commercial ZIP evaluation."""
+    run = db.query(ComplianceRun).filter(ComplianceRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if not run.vendor_commercial_files:
+        raise HTTPException(status_code=400, detail="No vendor commercial files found for this run")
+
+    updated = False
+    for f_info in run.vendor_commercial_files:
+        if f_info.get("filename") == body.filename:
+            f_info["selected"] = body.selected
+            updated = True
+            break
+
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"File '{body.filename}' not found in ZIP contents")
+
+    # Check at least one file is selected
+    selected_count = sum(1 for f in run.vendor_commercial_files if f.get("selected", True))
+    if selected_count == 0:
+        raise HTTPException(status_code=400, detail="At least one file must be selected for evaluation")
+
+    run.vendor_commercial_files = run.vendor_commercial_files  # Ensure JSON is marked dirty
+    db.commit()
+
+    return {
+        "ok": True,
+        "files": run.vendor_commercial_files,
+        "selected_count": selected_count,
+    }
+
+
 # ── Internal: Update Progress (called by agent) ──
 
 class ProgressUpdateRequest(BaseModel):
@@ -560,7 +758,7 @@ def complete_run(
 class IngestBundleRequest(BaseModel):
     sotr_commercial_path: str = ""
     sotr_technical_path: str = ""
-    vendor_commercial_path: str = ""
+    vendor_commercial_paths: List[str] = []  # Multiple files from ZIP
     vendor_dpr_path: str = ""
     run_id: int = 0
 
@@ -570,6 +768,7 @@ class RunPipelineRequest(BaseModel):
     doc_id_sotr_com: str = ""
     doc_id_sotr_tech: str = ""
     doc_id_vendor_com: str = ""
+    doc_id_vendor_com_others: List[str] = []  # Additional vendor commercial doc IDs from ZIP
     doc_id_vendor_dpr: str = ""
     selected_standards: List[str] = []
     reference_name: str = ""
