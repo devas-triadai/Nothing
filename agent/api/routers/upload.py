@@ -318,15 +318,47 @@ async def admin_ingest(
 
 
 @router.get("/documents")
-async def list_documents():
+async def list_documents(user: dict = Depends(get_current_user)):
     """
-    List all documents currently available in the Agent's vector store.
-    Used by the UI to populate the context selector.
+    List documents available to the current user based on RBAC.
+    Super Admin: All documents
+    Admin/Officer: Documents with clearance <= Confidential (2)
+    Viewer: Documents with clearance <= Unclassified (1)
     """
     from api.rag.vector_store import get_store
+    from api.utils.auth_check import filter_documents_by_access
     store = get_store()
     docs = store.list_unique_documents()
-    return {"documents": docs}
+    # Filter documents based on user's role and clearance level
+    filtered_docs = filter_documents_by_access(user, docs)
+    return {"documents": filtered_docs}
+
+
+@router.patch("/documents/{doc_id}/clearance")
+async def update_document_clearance(
+    doc_id: str,
+    clearance_level: int = Form(..., ge=1, le=4),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Update the clearance level for an existing document.
+    Only superadmins can modify document classification.
+    
+    Args:
+        clearance_level: 1=Unclassified, 2=Confidential, 3=Secret, 4=Top Secret
+    """
+    from api.utils.auth_check import is_superadmin
+    if not is_superadmin(user):
+        raise HTTPException(status_code=403, detail="Super Admin access required")
+    
+    store = get_store()
+    # Update clearance_level in all chunks belonging to this doc_id
+    updated_count = store.update_document_metadata(doc_id, {"clearance_level": clearance_level})
+    
+    if updated_count == 0:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    return {"doc_id": doc_id, "clearance_level": clearance_level, "chunks_updated": updated_count}
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -349,6 +381,7 @@ async def chat_upload(
     request: Request,
     file: UploadFile = File(...),
     document_type: Optional[str] = Form(None),
+    clearance_level: int = Form(1),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -361,6 +394,9 @@ async def chat_upload(
       - 'saved' once the file is on disk
       - per-stage progress
       - final 'done' with doc_id, filename, chunks, pages
+    
+    Args:
+        clearance_level: Document classification (1=Unclassified, 2=Confidential, 3=Secret, 4=Top Secret)
     """
 
     # ── Validate file ──
@@ -440,6 +476,9 @@ async def chat_upload(
 
         # ── Run the full ingestion pipeline (OCR/chunk/embed/store) ──
         try:
+            extra_md = {}
+            if clearance_level and clearance_level != 1:
+                extra_md["clearance_level"] = clearance_level
             for event in ingest_document(
                 file_path=str(saved_path),
                 filename=safe_name,
@@ -451,6 +490,7 @@ async def chat_upload(
                 source="chat_upload",
                 document_type=eff_doc_type,
                 content_hash=content_hash,
+                extra_metadata=extra_md or None,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as ex:

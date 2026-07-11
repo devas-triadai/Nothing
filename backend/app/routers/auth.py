@@ -100,7 +100,12 @@ def login(
             detail="Account is not active"
         )
 
-    access_token = create_access_token(data={"sub": user.username, "role": user.role})
+    access_token = create_access_token(data={
+        "sub": user.username,
+        "role": user.role,
+        "clearance_level": user.clearance_level,
+        "is_superadmin": user.is_superadmin,
+    })
 
     # Update last login
     user.last_login = datetime.utcnow()

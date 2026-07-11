@@ -565,11 +565,24 @@ class VectorStore:
                     "document_type": meta.get("document_type", ""),
                     "page_count": meta.get("page_count", 0),
                     "chunks": 0,
+                    "clearance_level": meta.get("clearance_level", 1),
                 }
             if doc_id:
                 unique_docs[doc_id]["chunks"] += 1
 
         return list(unique_docs.values())
+
+    def update_document_metadata(self, doc_id: str, metadata_updates: Dict[str, Any]) -> int:
+        """
+        Update metadata fields for all chunks belonging to a document.
+        Returns the number of chunks updated.
+        """
+        updated_count = 0
+        for pid, meta in self._chunk_meta.items():
+            if meta.get("doc_id") == doc_id:
+                meta.update(metadata_updates)
+                updated_count += 1
+        return updated_count
 
     def get_doc_id_by_content_hash(self, content_hash: str) -> Optional[str]:
         """
@@ -597,6 +610,7 @@ class VectorStore:
                     "chunks": sum(1 for m in self._chunk_meta.values() if m.get("doc_id") == doc_id),
                     "category": meta.get("category", "General"),
                     "document_type": meta.get("document_type"),
+                    "clearance_level": meta.get("clearance_level", 1),
                 }
         return None
 

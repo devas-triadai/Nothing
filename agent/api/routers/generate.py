@@ -927,6 +927,20 @@ async def generate_ppt(
         auth_h = request.headers.get("authorization", "")
         auth_header_token = auth_h.replace("Bearer ", "") if auth_h else ""
 
+    # ── RBAC Check: Verify user can access all requested documents ──
+    from api.utils.auth_check import can_access_document
+    if body.doc_ids:
+        store = get_store()
+        for did in body.doc_ids:
+            doc_meta = store.get_document_metadata(did)
+            if doc_meta:
+                doc_clearance = doc_meta.get("clearance_level", 1)
+                if not can_access_document(user, doc_clearance):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Access denied: Document '{did}' requires clearance level {doc_clearance}"
+                    )
+
     job_id = str(uuid.uuid4())
     _ppt_jobs[job_id] = {"status": "pending"}
 
@@ -965,6 +979,18 @@ async def generate_summary(
     target_doc_ids = body.doc_ids if body.doc_ids else ([body.doc_id] if body.doc_id else [])
     if not target_doc_ids:
         raise HTTPException(status_code=400, detail="Must provide at least one doc_id.")
+
+    # ── RBAC Check: Verify user can access all requested documents ──
+    from api.utils.auth_check import can_access_document, get_user_clearance, is_superadmin
+    for did in target_doc_ids:
+        doc_meta = store.get_document_metadata(did)
+        if doc_meta:
+            doc_clearance = doc_meta.get("clearance_level", 1)
+            if not can_access_document(user, doc_clearance):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access denied: Document '{did}' requires clearance level {doc_clearance}"
+                )
 
     chunks = []
     filenames = []
@@ -1211,7 +1237,19 @@ async def generate_quiz(
     if request:
         ah = request.headers.get("authorization", "")
         auth_tok = ah.replace("Bearer ", "") if ah else ""
+
+    # ── RBAC Check: Verify user can access the requested document ──
+    from api.utils.auth_check import can_access_document
     store = get_store()
+    doc_meta = store.get_document_metadata(body.doc_id)
+    if doc_meta:
+        doc_clearance = doc_meta.get("clearance_level", 1)
+        if not can_access_document(user, doc_clearance):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Access denied: Document '{body.doc_id}' requires clearance level {doc_clearance}"
+            )
+
     chunks = store.get_chunks_by_doc(body.doc_id)
 
     if not chunks:

@@ -6,7 +6,7 @@ Reads the shared SECRET_KEY from backend/.env so both services stay in sync.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -90,3 +90,70 @@ async def get_current_user(
         )
 
     return payload
+
+
+# ── RBAC Helper Functions ──
+
+# Clearance levels: 1=Unclassified, 2=Confidential, 3=Secret, 4=Top Secret
+CLEARANCE_LEVELS = {1: "Unclassified", 2: "Confidential", 3: "Secret", 4: "Top Secret"}
+
+
+def get_user_clearance(user: dict) -> int:
+    """Extract clearance level from JWT payload. Defaults to 1 (Unclassified)."""
+    return user.get("clearance_level", 1)
+
+
+def get_user_role(user: dict) -> str:
+    """Extract role from JWT payload. Defaults to 'viewer'."""
+    return user.get("role", "viewer")
+
+
+def is_superadmin(user: dict) -> bool:
+    """Check if user is superadmin from JWT payload."""
+    return user.get("is_superadmin", False)
+
+
+def can_access_document(user: dict, doc_clearance: int) -> bool:
+    """Check if user can access a document based on clearance level."""
+    # Super admins can access everything
+    if is_superadmin(user):
+        return True
+    # Check clearance level
+    user_clearance = get_user_clearance(user)
+    return user_clearance >= doc_clearance
+
+
+def filter_documents_by_access(user: dict, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter a list of documents based on user's role and clearance level.
+    
+    - Super Admin: Can see all documents
+    - Admin: Can see documents with clearance <= 2 (Confidential)
+    - Officer: Can see documents with clearance <= 2 (Confidential)
+    - Viewer: Can see documents with clearance <= 1 (Unclassified)
+    """
+    if is_superadmin(user):
+        return documents  # Super admins see everything
+    
+    role = get_user_role(user)
+    user_clearance = get_user_clearance(user)
+    
+    # Role-based clearance limits
+    role_clearance_limits = {
+        "super_admin": 4,  # Top Secret
+        "admin": 2,        # Confidential
+        "officer": 2,      # Confidential
+        "viewer": 1,       # Unclassified
+    }
+    
+    max_clearance = role_clearance_limits.get(role, 1)
+    effective_clearance = min(user_clearance, max_clearance)
+    
+    # Filter documents
+    filtered = []
+    for doc in documents:
+        doc_clearance = doc.get("clearance_level", 1)
+        if doc_clearance <= effective_clearance:
+            filtered.append(doc)
+    
+    return filtered

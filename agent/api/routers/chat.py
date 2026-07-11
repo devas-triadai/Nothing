@@ -55,6 +55,21 @@ async def chat(
     username = user.get("sub", "unknown")
     logger.info("Chat from %s: %s", username, body.question[:100])
 
+    # ── RBAC Check: Verify user can access all requested doc_ids ──
+    if body.doc_ids:
+        from api.utils.auth_check import can_access_document
+        from api.rag.vector_store import get_store
+        store = get_store()
+        for did in body.doc_ids:
+            doc_meta = store.get_document_metadata(did)
+            if doc_meta:
+                doc_clearance = doc_meta.get("clearance_level", 1)
+                if not can_access_document(user, doc_clearance):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Access denied: Document '{did}' requires clearance level {doc_clearance}"
+                    )
+
     # Extract raw token for downstream API calls
     auth_header = request.headers.get("authorization", "")
     raw_token = auth_header.replace("Bearer ", "") if auth_header else ""
