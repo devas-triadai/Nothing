@@ -327,7 +327,82 @@ class VectorStore:
             })
 
         combined.sort(key=lambda x: x["combined_score"], reverse=True)
-        return combined[:top_k]
+        results = combined[:top_k]
+
+        # ── Fallback: scroll-based retrieval when hybrid search returns empty ──
+        # This catches cases where dense/BM25 scoring fails but chunks definitely exist
+        # (e.g., semantic gap between requirement text and vendor response text).
+        if not results and doc_ids_filter:
+            logger.debug(
+                "Hybrid search returned 0 results for filter=%s, falling back to scroll retrieval",
+                doc_ids_filter,
+            )
+            results = self._scroll_fallback(query_text, doc_ids_filter, top_k)
+
+        return results
+
+    def _scroll_fallback(
+        self,
+        query_text: str,
+        doc_ids_filter: List[str],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve chunks by doc_id via Qdrant scroll, ranked by simple keyword overlap.
+        Used as a fallback when hybrid dense+BM25 search returns zero results.
+        """
+        all_chunks: List[Dict[str, Any]] = []
+        query_tokens = set(self._tokenise(query_text))
+
+        for doc_id in doc_ids_filter:
+            if not doc_id:
+                continue
+            offset = None
+            while True:
+                try:
+                    page, offset = self.client.scroll(
+                        collection_name=_COLLECTION,
+                        scroll_filter=Filter(
+                            must=[FieldCondition(key="metadata.doc_id", match=MatchValue(value=doc_id))]
+                        ),
+                        limit=500,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                except Exception as exc:
+                    logger.warning("Scroll fallback failed for doc_id=%s: %s", doc_id[:12] if doc_id else "?", exc)
+                    break
+
+                for pt in page:
+                    pid = str(pt.id)
+                    text = decrypt_text(pt.payload.get("text", ""))
+                    meta = pt.payload.get("metadata", {})
+                    # Simple keyword overlap score for ranking
+                    chunk_tokens = set(self._tokenise(text))
+                    overlap = len(query_tokens & chunk_tokens) if query_tokens else 0
+                    all_chunks.append({
+                        "pid": pid,
+                        "text": text,
+                        "metadata": meta,
+                        "dense_score": 0.0,
+                        "bm25_score": 0.0,
+                        "combined_score": float(overlap),
+                    })
+
+                if offset is None:
+                    break
+
+        # Rank by keyword overlap, take top_k
+        all_chunks.sort(key=lambda x: x["combined_score"], reverse=True)
+        fallback_results = all_chunks[:top_k]
+        if fallback_results:
+            logger.info(
+                "Scroll fallback found %d chunks (top keyword overlap=%.1f) for filter=%s",
+                len(fallback_results),
+                fallback_results[0]["combined_score"],
+                doc_ids_filter,
+            )
+        return fallback_results
 
     def document_exists(self, filename: str) -> bool:
         """Check if a document with the given filename exists in the store."""

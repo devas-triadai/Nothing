@@ -398,6 +398,15 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     logger.info("Vendor evidence: %d com chunks from %d files, %d dpr chunks",
                 len(vendor_chunks_com), len(all_vendor_com_doc_ids), len(vendor_chunks_dpr))
 
+    # Pre-split vendor text into overlapping windows for fallback retrieval
+    vendor_com_chunks_text = _split_into_windows(vendor_com_text, window_chars=1500, overlap_chars=200) if vendor_com_text.strip() else []
+    vendor_dpr_chunks_text = _split_into_windows(vendor_dpr_text, window_chars=1500, overlap_chars=200) if vendor_dpr_text.strip() else []
+    all_vendor_windows = vendor_com_chunks_text + vendor_dpr_chunks_text
+
+    # Track how many clauses get evidence from fallback vs search
+    search_hits = 0
+    fallback_hits = 0
+
     # ── Stage 5-7: Clause Evaluation, Missing Detection, Contradictions ──
     evaluated = 0
     for clause in all_clauses:
@@ -406,6 +415,17 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
 
         # RAG search across both vendor files for this clause
         vendor_evidence, source_files = _search_vendor_for_clause(store, clause.requirement_text, body, clause_id=clause.clause_id)
+
+        # ── Fallback: keyword-overlap retrieval from pre-loaded vendor text ──
+        if not vendor_evidence.strip() and all_vendor_windows:
+            vendor_evidence, fb_source = _fallback_keyword_retrieval(clause.requirement_text, all_vendor_windows)
+            if vendor_evidence.strip():
+                fallback_hits += 1
+                source_files = fb_source
+                logger.info("Clause %s: fallback retrieved %d chars of vendor evidence", clause.clause_id, len(vendor_evidence))
+        elif vendor_evidence.strip():
+            search_hits += 1
+
         clause.source_file_detail = ", ".join(source_files) if source_files else ""
         std_evidence = ""
         for std_id, std_text in standard_texts.items():
@@ -441,6 +461,9 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
             hr_flag = _check_house_rule_violation(clause, std_evidence, llm_engine)
             if hr_flag:
                 clause.house_rule_flag = hr_flag
+
+    logger.info("Evidence source summary: %d from vector search, %d from keyword fallback, %d total clauses",
+                search_hits, fallback_hits, total)
 
     # ── Stage 8: Historical Feedback ──
     _update_backend_progress(run_id, "evaluating", total, total, "Checking historical feedback...")
@@ -478,6 +501,7 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
     if body.doc_id_vendor_dpr:
         vendor_doc_ids.append(body.doc_id_vendor_dpr)
 
+    # ── Pass 1: Per-document filtered search ──
     for vid in vendor_doc_ids:
         if not vid:
             continue
@@ -486,6 +510,10 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
                 query=requirement[:500],
                 top_k=5,
                 doc_filter=[vid],
+            )
+            logger.info(
+                "Clause %s: search doc=%s returned %d results",
+                clause_id, vid[:12], len(results),
             )
             for r in results:
                 txt = r.get("text", "")
@@ -496,7 +524,29 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
                     if fname and fname not in source_files:
                         source_files.append(fname)
         except Exception as exc:
-            logger.warning("Vector search failed for %s (doc=%s): %s", clause_id, vid[:8] if vid else "?", exc)
+            logger.warning("Vector search failed for %s (doc=%s): %s", clause_id, vid[:12] if vid else "?", exc)
+
+    # ── Pass 2: Broader fallback — search ALL vendor docs combined if per-doc search found nothing ──
+    if not evidence_parts and vendor_doc_ids:
+        valid_ids = [v for v in vendor_doc_ids if v]
+        try:
+            logger.info("Clause %s: per-doc search empty, trying combined search across %d vendor docs", clause_id, len(valid_ids))
+            results = store.search(
+                query=requirement[:500],
+                top_k=10,
+                doc_filter=valid_ids,
+            )
+            logger.info("Clause %s: combined search returned %d results", clause_id, len(results))
+            for r in results:
+                txt = r.get("text", "")
+                meta = r.get("metadata", {})
+                if txt:
+                    evidence_parts.append(txt)
+                    fname = meta.get("filename", meta.get("zip_file_label", ""))
+                    if fname and fname not in source_files:
+                        source_files.append(fname)
+        except Exception as exc:
+            logger.warning("Combined vendor search failed for %s: %s", clause_id, exc)
 
     # Deduplicate evidence (same text from different chunks)
     seen = set()
@@ -510,8 +560,67 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
 
     result = "\n\n---\n\n".join(unique_parts[:8])  # Allow more evidence from multiple files
     if not result.strip():
-        logger.debug("No vendor evidence found for clause %s (query=%s…)", clause_id, requirement[:80])
+        logger.warning("No vendor evidence found for clause %s (query=%s…)", clause_id, requirement[:80])
+    else:
+        logger.info("Clause %s: found %d unique evidence parts (%d chars)", clause_id, len(unique_parts), len(result))
     return result, source_files
+
+
+def _split_into_windows(text: str, window_chars: int = 1500, overlap_chars: int = 200) -> List[str]:
+    """Split text into overlapping character windows for fallback retrieval."""
+    if not text or not text.strip():
+        return []
+    text = text.strip()
+    if len(text) <= window_chars:
+        return [text]
+    windows = []
+    start = 0
+    while start < len(text):
+        end = start + window_chars
+        windows.append(text[start:end])
+        start = end - overlap_chars
+        if start + overlap_chars >= len(text):
+            break
+    return windows
+
+
+def _fallback_keyword_retrieval(requirement: str, vendor_windows: List[str]) -> tuple:
+    """Retrieve the most relevant vendor text windows using keyword overlap.
+    Used as a last-resort fallback when vector search returns empty evidence.
+    Returns (evidence_text, source_files).
+    """
+    import re as _re
+
+    # Tokenize requirement into meaningful keywords
+    req_tokens = set(
+        t for t in _re.findall(r'[a-z]{3,}', requirement.lower())
+        if t not in {"the", "and", "for", "with", "from", "this", "that", "are", "was", "not", "shall", "should", "will", "can", "may"}
+    )
+    if not req_tokens:
+        # No meaningful keywords — return first window as generic evidence
+        if vendor_windows:
+            return vendor_windows[0][:2000], ["vendor_submission"]
+        return "", []
+
+    scored_windows = []
+    for i, window in enumerate(vendor_windows):
+        win_tokens = set(_re.findall(r'[a-z]{3,}', window.lower()))
+        overlap = len(req_tokens & win_tokens)
+        scored_windows.append((overlap, i, window))
+
+    # Sort by keyword overlap descending
+    scored_windows.sort(key=lambda x: (-x[0], x[1]))
+
+    # Take top 3 windows with any keyword overlap, or top 1 if none overlap
+    evidence_parts = []
+    for score, idx, window in scored_windows[:3]:
+        if score > 0:
+            evidence_parts.append(window[:2000])
+    if not evidence_parts and scored_windows:
+        evidence_parts.append(scored_windows[0][2][:2000])
+
+    result = "\n\n---\n\n".join(evidence_parts)
+    return result, ["vendor_submission"]
 
 
 def _evaluate_clause_llm(clause: ClauseResultData, vendor_text: str, standards_text: str, llm_engine) -> tuple:
@@ -555,7 +664,8 @@ Guidelines:
     try:
         raw = llm_engine.generate(messages, max_tokens=400, temperature=0.1)
         parsed = _parse_llm_json(raw) or {}
-    except Exception:
+    except Exception as exc:
+        logger.warning("LLM evaluation failed for clause %s: %s", clause.clause_id, exc)
         parsed = {}
 
     verdict_str = str(parsed.get("verdict", "UNVERIFIABLE")).upper().strip()
