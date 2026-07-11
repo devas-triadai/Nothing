@@ -695,6 +695,7 @@ Are there any contradictory statements? Return ONLY valid JSON:
 
 def _query_historical_feedback(clause: ClauseResultData) -> List:
     """Query prior compliance runs for historical context on this clause area."""
+    from api.models.compliance_models import HistoricalNote
     try:
         token = _get_service_token()
         resp = httpx.get(
@@ -707,13 +708,13 @@ def _query_historical_feedback(clause: ClauseResultData) -> List:
             notes = []
             for run in runs[:3]:
                 rid = run.get("id")
-                if rid and rid != clause.source_doc_id:
-                    notes.append({
-                        "run_id": rid,
-                        "reference_name": run.get("reference_name", ""),
-                        "previous_verdict": None,
-                        "note": f"Previous compliance run #{rid}: {run.get('reference_name', 'N/A')}",
-                    })
+                if rid and str(rid) != clause.source_doc_id:
+                    notes.append(HistoricalNote(
+                        run_id=rid,
+                        reference_name=run.get("reference_name", ""),
+                        previous_verdict=None,
+                        note=f"Previous compliance run #{rid}: {run.get('reference_name', 'N/A')}",
+                    ))
             return notes
     except Exception:
         pass
@@ -898,7 +899,7 @@ def _score_standards_relevance(
         # Signal 3: category alignment bonus
         for cat, cat_tags in _CATEGORY_TAG_MAP.items():
             cat_count = sotr_categories.get(cat, 0)
-            if cat_count > 0 and (cat_tags & matched_tags):
+            if cat_count > 0 and (set(cat_tags) & matched_tags):
                 bonus = min(cat_count / total_clauses * 15, 15)
                 score += bonus
                 break
