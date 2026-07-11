@@ -508,7 +508,7 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
         try:
             results = store.search(
                 query=requirement[:500],
-                top_k=5,
+                top_k=8,
                 doc_filter=[vid],
             )
             logger.info(
@@ -533,7 +533,7 @@ def _search_vendor_for_clause(store, requirement: str, body: RunPipelineRequest,
             logger.info("Clause %s: per-doc search empty, trying combined search across %d vendor docs", clause_id, len(valid_ids))
             results = store.search(
                 query=requirement[:500],
-                top_k=10,
+                top_k=15,
                 doc_filter=valid_ids,
             )
             logger.info("Clause %s: combined search returned %d results", clause_id, len(results))
@@ -1168,14 +1168,12 @@ async def list_standards(
     try:
         all_docs = store.list_unique_documents()
         for doc in all_docs:
-            doc_id = doc.get("doc_id", "")
-            doc_meta = store.get_document_metadata(doc_id)
-            if doc_meta and doc_meta.get("document_type") == "standard":
+            if doc.get("document_type") == "standard":
                 standards.append(StandardsDocument(
-                    doc_id=doc_id,
-                    filename=doc.get("filename", doc_id),
+                    doc_id=doc.get("doc_id", ""),
+                    filename=doc.get("filename", ""),
                     category=doc.get("category", ""),
-                    description=doc_meta.get("description", doc.get("filename", "")),
+                    description=doc.get("filename", ""),
                 ))
     except Exception as e:
         logger.warning("Failed to query standards: %s", e)

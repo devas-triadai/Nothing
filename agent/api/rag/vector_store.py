@@ -562,6 +562,7 @@ class VectorStore:
                     "doc_id": doc_id,
                     "filename": meta.get("filename", "Unknown"),
                     "category": meta.get("category", "General"),
+                    "document_type": meta.get("document_type", ""),
                     "page_count": meta.get("page_count", 0),
                     "chunks": 0,
                 }
