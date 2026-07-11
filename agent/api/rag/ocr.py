@@ -320,7 +320,7 @@ def extract_image(file_path: str) -> List[Dict[str, Any]]:
     """OCR a standalone image file (JPEG, PNG)."""
     with open(file_path, "rb") as f:
         img_bytes = f.read()
-    text, conf = _ocr_image_bytes(img_bytes)
+    text, conf = _ocr_image_bytes_fallback(img_bytes)
     if not text.strip():
         return []
     logger.info("Image %s: OCR extracted %d characters.", Path(file_path).name, len(text))

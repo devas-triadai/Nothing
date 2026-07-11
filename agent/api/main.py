@@ -11,8 +11,12 @@ Routes:
 
 import os
 import logging
+import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Suppress known third-party Pydantic namespace warnings (sentence-transformers, langchain)
+warnings.filterwarnings("ignore", message='.*Field "model_kwargs" has conflict.*')
 
 import httpx
 from fastapi import FastAPI, Request, Depends, HTTPException

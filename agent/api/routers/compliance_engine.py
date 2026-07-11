@@ -664,11 +664,11 @@ IMPORTANT EVALUATION RULES:
     ]
 
     try:
-        raw = llm_engine.generate(messages, max_tokens=600, temperature=0.1)
+        raw = llm_engine.generate(messages, max_tokens=2048, temperature=0.1, raw=True)
         logger.debug("LLM raw response for %s: %s", clause.clause_id, (raw or "")[:500])
         parsed = _parse_llm_json(raw) or {}
         if not parsed:
-            logger.warning("LLM returned unparseable JSON for %s: %s", clause.clause_id, (raw or "")[:300])
+            logger.warning("LLM returned unparseable JSON for %s: %s", clause.clause_id, (raw or "")[:500])
     except Exception as exc:
         logger.warning("LLM evaluation failed for clause %s: %s", clause.clause_id, exc)
         parsed = {}
@@ -891,11 +891,29 @@ def _generate_report_file(result: PipelineResult, body: RunPipelineRequest) -> O
 
 
 def _parse_llm_json(raw: str) -> Optional[Dict]:
-    """Parse JSON from LLM response, handling markdown fences and stray braces."""
+    """Parse JSON from LLM response, handling markdown fences, thinking blocks, and system prompt leakage."""
+    if not raw:
+        return None
+
+    # 1. Strip <think>...</think> blocks (Gemma 4 reasoning)
+    cleaned = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+
+    # 2. Strip lines that look like system prompt leakage or chain-of-thought
+    leak_markers = (
+        "Military Compliance Officer", "Evaluate vendor submission",
+        "Return only valid JSON", "SOTR Clause:", "Requirement (SOTR",
+        "*   Requirement", "*   SOTR", "Acceptance Criteria:",
+    )
+    lines = cleaned.split("\n")
+    cleaned_lines = [l for l in lines if not any(m in l for m in leak_markers)]
+    cleaned = "\n".join(cleaned_lines)
+
+    # 3. Strip markdown code fences
+    cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
+
+    # 4. Find the outermost JSON object by tracking brace depth
     try:
-        cleaned = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
-        cleaned = re.sub(r'```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-        # Find the outermost JSON object by tracking brace depth
         depth = 0
         start = -1
         for i, ch in enumerate(cleaned):
@@ -907,8 +925,31 @@ def _parse_llm_json(raw: str) -> Optional[Dict]:
                 depth -= 1
                 if depth == 0 and start >= 0:
                     return json.loads(cleaned[start:i + 1])
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
         pass
+
+    # 5. Truncation recovery: if JSON was cut off mid-string, try to close it
+    if start >= 0:
+        fragment = cleaned[start:]
+        # Close any unclosed string (count unescaped quotes)
+        in_string = False
+        quote_count = 0
+        for ch in fragment:
+            if ch == '"' and (quote_count == 0 or fragment[max(0, quote_count - 1)] != '\\'):
+                in_string = not in_string
+                quote_count += 1
+        if in_string:
+            fragment += '"'
+        # Close any unclosed brackets/braces
+        open_braces = fragment.count('{') - fragment.count('}')
+        open_brackets = fragment.count('[') - fragment.count(']')
+        fragment += ']' * max(0, open_brackets)
+        fragment += '}' * max(0, open_braces)
+        try:
+            return json.loads(fragment)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
     return None
 
 
@@ -1125,24 +1166,17 @@ async def list_standards(
     standards = []
 
     try:
-        results = store.search(
-            query="standard rules regulations compliance policy",
-            top_k=50,
-            doc_type="standard",
-        )
-        seen_ids = set()
-        for r in results:
-            meta = r.get("metadata", {})
-            doc_id = meta.get("doc_id", "")
-            if doc_id in seen_ids:
-                continue
-            seen_ids.add(doc_id)
-            standards.append(StandardsDocument(
-                doc_id=doc_id,
-                filename=meta.get("filename", doc_id),
-                category=meta.get("category", ""),
-                description=meta.get("summary", meta.get("description", "")),
-            ))
+        all_docs = store.list_unique_documents()
+        for doc in all_docs:
+            doc_id = doc.get("doc_id", "")
+            doc_meta = store.get_document_metadata(doc_id)
+            if doc_meta and doc_meta.get("document_type") == "standard":
+                standards.append(StandardsDocument(
+                    doc_id=doc_id,
+                    filename=doc.get("filename", doc_id),
+                    category=doc.get("category", ""),
+                    description=doc_meta.get("description", doc.get("filename", "")),
+                ))
     except Exception as e:
         logger.warning("Failed to query standards: %s", e)
 
