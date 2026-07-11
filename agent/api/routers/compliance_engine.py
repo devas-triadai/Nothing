@@ -646,24 +646,29 @@ Return ONLY valid JSON with exactly these fields:
   "citations": [{{"doc_name": "string", "version": "string", "page": 0, "excerpt": "string"}}]
 }}
 
-Guidelines:
-- COMPLIANT: Vendor fully meets all acceptance criteria with clear evidence.
-- PARTIAL: Vendor meets some criteria but has minor gaps or conditions.
-- NON_COMPLIANT: Vendor does not meet criteria or has significant deviations.
-- UNVERIFIABLE: Not enough evidence to determine compliance.
+IMPORTANT EVALUATION RULES:
+- If vendor submission text is provided above, you MUST evaluate it against the requirement. Do NOT default to UNVERIFIABLE when evidence is present.
+- COMPLIANT: The vendor submission addresses the requirement, even if using different terminology. Capability descriptions, feature lists, and product specifications count as evidence.
+- PARTIAL: The vendor partially addresses the requirement but has gaps.
+- NON_COMPLIANT: The vendor submission contradicts the requirement or clearly does not address it.
+- UNVERIFIABLE: ONLY use this when the vendor submission section shows "[No relevant vendor evidence found]" OR the provided excerpts are completely unrelated to the requirement.
+- When in doubt between UNVERIFIABLE and COMPLIANT/PARTIAL, prefer COMPLIANT/PARTIAL if the vendor text mentions relevant capabilities.
 - severity must be null if verdict is COMPLIANT.
 - recommendation must be null if verdict is COMPLIANT (or APPROVE).
 - For NON_COMPLIANT, recommendation must be REVISE_AND_RESUBMIT or REJECT.
 - For PARTIAL, recommendation must be APPROVE WITH CONDITIONS or REVISE_AND_RESUBMIT."""
 
     messages = [
-        {"role": "system", "content": "You are a military compliance officer. Return only valid JSON with the exact schema specified."},
+        {"role": "system", "content": "You are a military compliance officer. Return only valid JSON with the exact schema specified. Always evaluate vendor evidence that is provided - never ignore it."},
         {"role": "user", "content": prompt},
     ]
 
     try:
-        raw = llm_engine.generate(messages, max_tokens=400, temperature=0.1)
+        raw = llm_engine.generate(messages, max_tokens=600, temperature=0.1)
+        logger.debug("LLM raw response for %s: %s", clause.clause_id, (raw or "")[:500])
         parsed = _parse_llm_json(raw) or {}
+        if not parsed:
+            logger.warning("LLM returned unparseable JSON for %s: %s", clause.clause_id, (raw or "")[:300])
     except Exception as exc:
         logger.warning("LLM evaluation failed for clause %s: %s", clause.clause_id, exc)
         parsed = {}
