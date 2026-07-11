@@ -54,7 +54,19 @@ def _get_service_token() -> str:
     """Build a service JWT for backend→agent calls."""
     import jwt as pyjwt
     from datetime import datetime, timedelta
-    secret = os.getenv("SECRET_KEY", "agra-secret-key-change-in-production")
+    # Try agent env first, then fall back to reading backend .env
+    secret = os.getenv("SECRET_KEY")
+    if not secret:
+        from pathlib import Path
+        backend_env = Path(__file__).resolve().parent.parent.parent.parent / "backend" / ".env"
+        if backend_env.exists():
+            for line in backend_env.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("SECRET_KEY="):
+                    secret = line.split("=", 1)[1]
+                    break
+    if not secret:
+        secret = "agra-secret-key-change-in-production"
     payload = {
         "sub": "agent_service",
         "role": "service",

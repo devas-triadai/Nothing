@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import ComplianceRun, ClauseResult, User
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, get_current_user_or_agent
 from app.utils.security import create_access_token
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -537,7 +537,7 @@ def _store_results_in_db(run: ComplianceRun, agent_result: dict, db: Session):
 def list_runs(
     limit: int = 20,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_agent),
 ):
     runs = (
         db.query(ComplianceRun)

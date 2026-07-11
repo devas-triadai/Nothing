@@ -30,6 +30,40 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
+# Sentinel user for agent service-to-backend calls
+_SERVICE_USER = User(id=0, username="agent_service", role=UserRole.ADMIN, is_superadmin=False)
+
+
+def get_current_user_or_agent(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Accept either a regular user token or an agent service token (role=service)."""
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Service token from agent
+    if payload.get("role") == "service" and payload.get("sub") == "agent_service":
+        return _SERVICE_USER
+    # Regular user token
+    username: str = payload.get("sub")
+    if username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
 def require_superadmin(current_user: User = Depends(get_current_user)):
     if not current_user.is_superadmin:
         raise HTTPException(
