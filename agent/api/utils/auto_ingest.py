@@ -218,7 +218,7 @@ def _run_auto_ingest() -> None:
 
     files: List[Path] = sorted(
         p for p in _KB_DIR.iterdir()
-        if p.is_file() and p.suffix.lower() in (".txt", ".pdf", ".docx")
+        if p.is_file() and p.suffix.lower() in (".txt", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
     )
 
     if not files:
