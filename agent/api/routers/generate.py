@@ -158,7 +158,10 @@ def _clean_json(raw: str) -> str:
     cleaned = re.sub(r'```', '', cleaned)
     cleaned = cleaned.strip()
 
-    # 2. Locate first '[' or '{' and pick whichever appears first
+    # 2. Fix trailing commas before } or ] (common LLM JSON mistake)
+    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+
+    # 3. Locate first '[' or '{' and pick whichever appears first
     arr_pos = cleaned.find('[')
     obj_pos = cleaned.find('{')
 
@@ -183,8 +186,7 @@ def _clean_json(raw: str) -> str:
 def _repair_json_with_llm(broken: str, error_msg: str) -> Optional[dict]:
     """
     Last-ditch repair: ask the LLM to fix malformed JSON. Returns parsed
-    dict on success, None if repair also fails. Uses tight max_tokens to
-    keep latency reasonable.
+    dict on success, None if repair also fails.
     """
     try:
         repair_prompt = (
@@ -197,7 +199,7 @@ def _repair_json_with_llm(broken: str, error_msg: str) -> Optional[dict]:
             messages=[
                 {"role": "user", "content": f"Fix the broken JSON below. Return ONLY valid JSON, nothing else.\n\n{repair_prompt}"},
             ],
-            max_tokens=2048,
+            max_tokens=4096,
             temperature=0.0,
             response_format={"type": "json_object"},
             raw=True,
@@ -1316,7 +1318,7 @@ Return ONLY valid JSON in this exact format:
 
     raw = await asyncio.to_thread(
         llm_engine.generate, messages,
-        max_tokens=2048, temperature=0.3, raw=True,
+        max_tokens=4096, temperature=0.3, raw=True,
     )
 
     quiz_data: Optional[dict] = None
@@ -1331,6 +1333,34 @@ Return ONLY valid JSON in this exact format:
     except (json.JSONDecodeError, ValueError) as e:
         last_error = e
         logger.warning("Quiz JSON parse pass 1 failed: %s", e)
+
+    # Pass 1b: Truncation recovery — try to salvage partial JSON
+    if quiz_data is None and cleaned:
+        try:
+            # Find last complete MCQ/TF/SA object and close the structure
+            for marker in ['"explanation"', '"model_answer"', '"answer"']:
+                idx = cleaned.rfind(marker)
+                if idx > 0:
+                    # Find the closing } of this object
+                    close_brace = cleaned.find('}', idx)
+                    if close_brace > 0:
+                        candidate = cleaned[:close_brace + 1]
+                        # Close any open arrays/objects
+                        open_brackets = sum(
+                            1 if c == '[' else -1 if c == ']' else 0
+                            for c in candidate
+                        )
+                        open_braces = sum(
+                            1 if c == '{' else -1 if c == '}' else 0
+                            for c in candidate
+                        )
+                        candidate += ']' * max(0, open_brackets)
+                        candidate += '}' * max(0, open_braces)
+                        quiz_data = json.loads(candidate)
+                        logger.info("Quiz JSON recovered via truncation recovery (marker: %s)", marker)
+                        break
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     # Pass 2: LLM repair if pass 1 failed
     if quiz_data is None:
