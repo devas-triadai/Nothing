@@ -145,7 +145,7 @@ def generate_compliance_report(
         row_cells[1].text = clause.source_file
         row_cells[2].text = clause.verdict.value if clause.verdict else "—"
         row_cells[3].text = clause.severity.value if clause.severity else "—"
-        row_cells[4].text = clause.finding[:200] if clause.finding else "—"
+        row_cells[4].text = clause.finding if clause.finding else "—"
 
         v = clause.verdict.value if clause.verdict else ""
         color = _verdict_color(v)
@@ -184,7 +184,7 @@ def generate_compliance_report(
             row_cells[1].text = clause.verdict.value if clause.verdict else "—"
             row_cells[2].text = clause.severity.value if clause.severity else "—"
             row_cells[3].text = clause.recommendation.value if clause.recommendation else "—"
-            row_cells[4].text = clause.finding[:200] if clause.finding else "—"
+            row_cells[4].text = clause.finding if clause.finding else "—"
 
             v = clause.verdict.value if clause.verdict else ""
             color = _verdict_color(v)
@@ -246,7 +246,7 @@ def generate_compliance_report(
         doc.add_heading("Missing Clauses", level=1)
         doc.add_paragraph("The following SOTR clauses have no corresponding vendor evidence:")
         for clause in missing:
-            p = doc.add_paragraph(f"{clause.clause_id}: {clause.requirement_text[:150]}", style='List Bullet')
+            p = doc.add_paragraph(f"{clause.clause_id}: {clause.requirement_text}", style='List Bullet')
 
     # ── Historical Feedback ──
     has_history = any(c.historical_notes for c in result.clauses)
