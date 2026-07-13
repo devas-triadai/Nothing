@@ -305,11 +305,17 @@ def chunk_pages(
         page_num = page_data.get("page", 1)
         page_text = page_data.get("text", "")
         ocr_confidence = page_data.get("ocr_confidence", 1.0)
+        page_source = page_data.get("source", "")
 
         # Detect section heading from this page's text
         detected = _detect_section_heading(page_text)
         if detected:
             current_section = detected
+
+        # Propagate content_type from page source (e.g. "vlm_description")
+        page_extra = dict(extra_metadata) if extra_metadata else {}
+        if page_source:
+            page_extra["content_type"] = page_source
 
         page_chunks = chunk_text(
             page_text,
@@ -321,7 +327,7 @@ def chunk_pages(
             source=source,
             document_type=document_type,
             content_hash=content_hash,
-            extra_metadata=extra_metadata,
+            extra_metadata=page_extra,
         )
 
         # Prepend contextual header and store section in metadata

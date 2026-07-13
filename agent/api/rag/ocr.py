@@ -317,11 +317,21 @@ def extract_txt(file_path: str) -> List[Dict[str, Any]]:
 
 
 def extract_image(file_path: str) -> List[Dict[str, Any]]:
-    """OCR a standalone image file (JPEG, PNG)."""
+    """OCR a standalone image file (JPEG, PNG). Falls back to VLM description if OCR finds no text."""
     with open(file_path, "rb") as f:
         img_bytes = f.read()
     text, conf = _ocr_image_bytes_fallback(img_bytes)
     if not text.strip():
+        # VLM fallback: describe image content when OCR finds no text
+        try:
+            from api.generators.image_extractor import describe_image_with_vlm
+            ext = Path(file_path).suffix.lstrip(".")
+            vlm_text = describe_image_with_vlm(img_bytes, ext=ext)
+            if vlm_text:
+                logger.info("Image %s: OCR empty, VLM described %d characters.", Path(file_path).name, len(vlm_text))
+                return [{"page": 1, "text": vlm_text, "ocr_confidence": 0.0, "source": "vlm_description"}]
+        except Exception as e:
+            logger.warning("VLM fallback for image %s failed: %s", Path(file_path).name, e)
         return []
     logger.info("Image %s: OCR extracted %d characters.", Path(file_path).name, len(text))
     return [{"page": 1, "text": text, "ocr_confidence": conf}]

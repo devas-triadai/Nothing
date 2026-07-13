@@ -284,6 +284,23 @@ def ingest_document(
     # ── Stage 1: Text extraction / OCR ──
     yield {"stage": "ocr", "progress": 0, "message": "Extracting text…"}
     pages = ocr.extract_document(file_path)
+
+    # VLM fallback for standalone images with no OCR text
+    if not pages:
+        suffix = os.path.splitext(file_path)[1].lower()
+        if suffix in (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"):
+            yield {"stage": "ocr", "progress": 50, "message": "OCR found no text, trying VLM image description…"}
+            try:
+                from api.generators.image_extractor import describe_image_with_vlm
+                with open(file_path, "rb") as f:
+                    img_bytes = f.read()
+                vlm_text = describe_image_with_vlm(img_bytes, ext=suffix.lstrip("."))
+                if vlm_text:
+                    pages = [{"page": 1, "text": vlm_text, "ocr_confidence": 0.0, "source": "vlm_description"}]
+                    logger.info("VLM fallback: described image %s (%d chars)", filename, len(vlm_text))
+            except Exception as e:
+                logger.warning("VLM fallback for %s failed: %s", filename, e)
+
     if not pages:
         yield {"stage": "ocr", "progress": 100, "message": "No text extracted.", "error": "No text extracted from document. If this is a scanned PDF, ensure PaddleOCR, EasyOCR, or Tesseract is installed and working. Try converting the document to a text-based PDF or DOCX."}
         return
