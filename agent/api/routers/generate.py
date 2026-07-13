@@ -386,7 +386,6 @@ Slide 3: layout="bullets", title for main concept/problem statement, 4-5 detaile
 
 Return ONLY a JSON array of 3 objects. No prose. Start with [
 ["""
-    batch1 = await _generate_slide_batch(prompt1, max_tokens=1800, temperature=0.1, expected_count=3)
 
     # ── Batch 2: slides 4-7 (technical/methodology with table) ──
     prompt2 = f"""DOCUMENT EXCERPT (Part 2 of 3, from {files_str}):
@@ -400,7 +399,6 @@ Slide 4: layout="two_column", title, left_column=["..3-4 items.."], right_column
 
 Return ONLY a JSON array of 4 objects. No prose. Start with [
 ["""
-    batch2 = await _generate_slide_batch(prompt2, max_tokens=2000, temperature=0.1, expected_count=4)
 
     # ── Batch 3: slides 8-10 (architecture flowchart + conclusion + thank_you) ──
     prompt3 = f"""DOCUMENT EXCERPT (Part 3 of 3, from {files_str}):
@@ -413,7 +411,13 @@ Slide 3: layout="thank_you", title="Thank You", subtitle (organization name from
 
 Return ONLY a JSON array of 3 objects. No prose. Start with [
 ["""
-    batch3 = await _generate_slide_batch(prompt3, max_tokens=2000, temperature=0.1, expected_count=3)
+
+    # ── Fire all 3 batches in parallel (independent calls, no data dependency) ──
+    batch1, batch2, batch3 = await asyncio.gather(
+        _generate_slide_batch(prompt1, max_tokens=1800, temperature=0.1, expected_count=3),
+        _generate_slide_batch(prompt2, max_tokens=2000, temperature=0.1, expected_count=4),
+        _generate_slide_batch(prompt3, max_tokens=2000, temperature=0.1, expected_count=3),
+    )
 
     combined = []
     combined.extend(batch1)
@@ -458,8 +462,8 @@ async def _do_generate_ppt(job_id: str, body: PPTRequest, auth_header_token: str
 
     # llama-server runs 5 parallel slots: TOTAL 16640 tokens / 5 = 3328 tokens per request.
     # Budget: 3328 - 500 (prompt template) - 1500 (output) = ~1300 tokens (~5000 chars) for context.
-    # We keep a FULL context buffer (~30000 chars) used in multi-batch mode for richer output;
-    # the per-call slice is small enough to stay safely under 3328 tokens.
+    # Multi-batch mode fires 3 concurrent LLM calls (using 3 of 5 slots) via asyncio.gather().
+    # Each call gets a ~4500-char slice (~1300 tokens) — safely under the per-slot limit.
     context_full_text = "\n\n".join(c["text"] for c in context_chunks[:40])
     if len(context_full_text) > 30000:
         context_full_text = context_full_text[:30000] + "\n[Content truncated]"
