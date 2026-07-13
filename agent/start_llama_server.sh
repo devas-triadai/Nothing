@@ -28,13 +28,15 @@ else
     fi
 fi
 
-echo "Starting llama-server with --parallel 5..."
+echo "Starting llama-server with --parallel 10..."
 # Note: Adjust paths if models are stored differently.
+# Config: 10 parallel slots × 3276 tokens each = 32768 total context.
+# VRAM: ~20GB (model) + ~1GB (mmproj) + ~6GB (KV cache) + ~8GB (other models) = ~35GB on 48GB A40.
 ./build/bin/llama-server \
   -m ../models/gemma4-31b-it/google_gemma-4-31B-it-Q4_K_L.gguf \
   --mmproj ../models/gemma4-31b-it/mmproj-google_gemma-4-31B-it-f16.gguf \
-  -c 16384 \
+  -c 32768 \
   -ngl 99 \
-  --parallel 5 \
+  --parallel 10 \
   --port 8080 \
   --host 0.0.0.0

@@ -414,7 +414,7 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     # Results are collected by index to preserve original clause ordering.
     evaluated = 0
     _eval_lock = threading.Lock()
-    _MAX_PARALLEL_CLAUSES = 4  # Use 4 of 5 llama-server slots (leave 1 for other users)
+    _MAX_PARALLEL_CLAUSES = 7  # Use 7 of 10 llama-server slots (leave 3 for other users)
 
     def _eval_one(idx: int, clause: ClauseResultData) -> tuple:
         """Evaluate a single clause: vector search + LLM eval + contradiction + house rule."""

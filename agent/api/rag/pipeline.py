@@ -703,8 +703,8 @@ async def query_pipeline(
 
     # ── Workstream I: Token-budget-aware conversation history ──
     # Approximate 1 token ≈ 4 chars.  Reserve space for system + question + generation.
-    # llama-server runs with -c 16384; use 8192 as a safe working budget.
-    _CTX_LIMIT = 8192
+    # llama-server runs with -c 32768; use 16384 as a safe working budget.
+    _CTX_LIMIT = 16384
     _PROMPT_RESERVE = 2048
     _CHAR_LIMIT = _CTX_LIMIT * 4  # ~32768 chars for 8192 tokens
     _QUESTION_RESERVE = 600       # chars reserved for the user question

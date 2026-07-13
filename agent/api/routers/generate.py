@@ -460,14 +460,14 @@ async def _do_generate_ppt(job_id: str, body: PPTRequest, auth_header_token: str
             None, rerank, body.topic, candidates, 40
         )
 
-    # llama-server runs 5 parallel slots: TOTAL 16640 tokens / 5 = 3328 tokens per request.
-    # Budget: 3328 - 500 (prompt template) - 1500 (output) = ~1300 tokens (~5000 chars) for context.
-    # Multi-batch mode fires 3 concurrent LLM calls (using 3 of 5 slots) via asyncio.gather().
+    # llama-server runs 10 parallel slots: TOTAL 32768 tokens / 10 = 3276 tokens per request.
+    # Budget: 3276 - 500 (prompt template) - 1500 (output) = ~1276 tokens (~4800 chars) for context.
+    # Multi-batch mode fires 3 concurrent LLM calls (using 3 of 10 slots) via asyncio.gather().
     # Each call gets a ~4500-char slice (~1300 tokens) — safely under the per-slot limit.
     context_full_text = "\n\n".join(c["text"] for c in context_chunks[:40])
     if len(context_full_text) > 30000:
         context_full_text = context_full_text[:30000] + "\n[Content truncated]"
-    # Single-pass context (used by fallback paths) — safely under 3328-token window.
+    # Single-pass context (used by fallback paths) — safely under 3276-token window.
     context_text = context_full_text[:4500]
     if len(context_full_text) > 4500:
         context_text = context_text + "\n[Content truncated]"
@@ -537,7 +537,7 @@ Rules:
 Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     # ── 4. Generate slides with retry ──
-    # Per-request budget: 3328 tokens. Input (prompt+context) ~1300 tokens.
+    # Per-request budget: 3276 tokens. Input (prompt+context) ~1300 tokens.
     # Remaining for output ~2000 tokens. Each slide JSON ~250 tokens.
     # Safe cap: 7 slides single-pass (1400-1750 tokens output).
     # Multi-batch mode (used FIRST below) generates the full body.num_slides via
@@ -562,7 +562,7 @@ Return ONLY a valid JSON array of {body.num_slides} slide objects:"""
 
     _attempt_configs = [
         # (temperature, prompt, num_slides, max_tokens)
-        # 3328-token window: input ~1300 tokens, output budget ~2000 tokens.
+        # 3276-token window: input ~1300 tokens, output budget ~2000 tokens.
         # Each slide ~250 tokens; 7 slides = ~1750 tokens. max_tokens=2048 safe.
         (0.1, _prompt_safe, _safe_slides, 2048),
         (
@@ -608,7 +608,7 @@ Use real content from the context above. Return ONLY the JSON array:""",
     # ═══════════════════════════════════════════════════════════
     # MULTI-BATCH GENERATION (Primary path for RICH content)
     # 3 LLM calls × 3-4 slides each = 10 slides with detailed bullets, tables, diagrams.
-    # Each call uses ~1300 input + ~1500 output tokens — safely under 3328 limit.
+    # Each call uses ~1300 input + ~1500 output tokens — safely under 3276 limit.
     # ═══════════════════════════════════════════════════════════
     if not body.revision_prompt and body.num_slides >= 6:
         try:
@@ -1261,7 +1261,7 @@ async def generate_quiz(
     if not chunks:
         raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
 
-    # Plan F: Tighten quiz context to fit 3328-token window (~3000 chars ≈ 750 tokens)
+    # Plan F: Tighten quiz context to fit 3276-token window (~3000 chars ≈ 750 tokens)
     content = "\n\n".join(c["text"] for c in chunks[:8])
     if len(content) > 3000:
         content = content[:3000] + "\n[Content truncated for quiz generation]"
@@ -1530,7 +1530,7 @@ async def generate_draft_sotr(
         raise HTTPException(status_code=404, detail=f"Document {body.doc_id} not found in knowledge base.")
 
     full_text = "\n\n".join(c["text"] for c in chunks)
-    # Plan F: Cap SOTR context for 3328-token model
+    # Plan F: Cap SOTR context for 3276-token model
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "\n[Document truncated]"
 
@@ -1637,7 +1637,7 @@ async def generate_tech_review(
         raise HTTPException(status_code=404, detail="Document not found.")
 
     full_text = "\n\n".join(c["text"] for c in chunks[:30])
-    # Plan F: Cap tech review context for 3328-token model
+    # Plan F: Cap tech review context for 3276-token model
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "\n[Document truncated]"
     filename = chunks[0]["metadata"].get("filename", "document")
