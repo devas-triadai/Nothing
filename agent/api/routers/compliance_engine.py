@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -408,23 +409,25 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
     fallback_hits = 0
 
     # ── Stage 5-7: Clause Evaluation, Missing Detection, Contradictions ──
+    # PARALLEL: Fire up to 4 clause evaluations concurrently via ThreadPoolExecutor.
+    # Each clause does vector search + LLM eval + contradiction + house rule check.
+    # Results are collected by index to preserve original clause ordering.
     evaluated = 0
-    for clause in all_clauses:
-        evaluated += 1
-        _update_backend_progress(run_id, "evaluating", evaluated, total, f"Evaluating clause {clause.clause_id}...")
+    _eval_lock = threading.Lock()
+    _MAX_PARALLEL_CLAUSES = 4  # Use 4 of 5 llama-server slots (leave 1 for other users)
+
+    def _eval_one(idx: int, clause: ClauseResultData) -> tuple:
+        """Evaluate a single clause: vector search + LLM eval + contradiction + house rule."""
+        nonlocal evaluated
 
         # RAG search across both vendor files for this clause
         vendor_evidence, source_files = _search_vendor_for_clause(store, clause.requirement_text, body, clause_id=clause.clause_id)
 
-        # ── Fallback: keyword-overlap retrieval from pre-loaded vendor text ──
+        # Fallback: keyword-overlap retrieval from pre-loaded vendor text
         if not vendor_evidence.strip() and all_vendor_windows:
             vendor_evidence, fb_source = _fallback_keyword_retrieval(clause.requirement_text, all_vendor_windows)
             if vendor_evidence.strip():
-                fallback_hits += 1
                 source_files = fb_source
-                logger.info("Clause %s: fallback retrieved %d chars of vendor evidence", clause.clause_id, len(vendor_evidence))
-        elif vendor_evidence.strip():
-            search_hits += 1
 
         clause.source_file_detail = ", ".join(source_files) if source_files else ""
         std_evidence = ""
@@ -432,8 +435,7 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
             if clause.requirement_text.lower()[:50] in std_text.lower():
                 std_evidence += f"\n[Standard {std_id}]:\n{std_text[:2000]}\n"
 
-        # ── Stage 5: LLM Evaluation ──
-        logger.debug("Clause %s: vendor_evidence length=%d chars", clause.clause_id, len(vendor_evidence))
+        # Stage 5: LLM Evaluation
         verdict, finding, severity, recommendation, citations = _evaluate_clause_llm(
             clause, vendor_evidence, std_evidence, llm_engine
         )
@@ -443,27 +445,67 @@ def _execute_pipeline(body: RunPipelineRequest) -> PipelineResult:
         clause.recommendation = recommendation
         clause.citations = citations
 
-        # ── Stage 6: Missing Clause Detection ──
+        # Stage 6: Missing Clause Detection
         if not vendor_evidence.strip():
             clause.is_missing = True
             if clause.verdict != VerdictEnum.UNVERIFIABLE:
                 clause.verdict = VerdictEnum.UNVERIFIABLE
                 clause.finding = "No vendor evidence found addressing this requirement."
 
-        # ── Stage 7: Contradiction Detection ──
-        if vendor_com_text.strip() and vendor_dpr_text.strip():
-            contradictions = _detect_contradictions(clause, vendor_com_text, vendor_dpr_text, llm_engine)
-            if contradictions:
-                clause.contradictions = contradictions
+        # Stage 7: Contradiction Detection + House Rule Check (parallel)
+        def _run_contradiction():
+            if vendor_com_text.strip() and vendor_dpr_text.strip():
+                return _detect_contradictions(clause, vendor_com_text, vendor_dpr_text, llm_engine)
+            return []
 
-        # ── Stage 3 (cont): House Rule Violation Check ──
-        if std_evidence.strip():
-            hr_flag = _check_house_rule_violation(clause, std_evidence, llm_engine)
-            if hr_flag:
-                clause.house_rule_flag = hr_flag
+        def _run_house_rule():
+            if std_evidence.strip():
+                return _check_house_rule_violation(clause, std_evidence, llm_engine)
+            return None
 
-    logger.info("Evidence source summary: %d from vector search, %d from keyword fallback, %d total clauses",
-                search_hits, fallback_hits, total)
+        with ThreadPoolExecutor(max_workers=2) as sub_pool:
+            sub_futures = {
+                sub_pool.submit(_run_contradiction): "contradiction",
+                sub_pool.submit(_run_house_rule): "house_rule",
+            }
+            for sub_future in as_completed(sub_futures):
+                try:
+                    sub_result = sub_future.result()
+                    if sub_futures[sub_future] == "contradiction" and sub_result:
+                        clause.contradictions = sub_result
+                    elif sub_futures[sub_future] == "house_rule" and sub_result:
+                        clause.house_rule_flag = sub_result
+                except Exception as e:
+                    logger.warning("Sub-check failed for %s: %s", clause.clause_id, e)
+
+        # Thread-safe progress update
+        with _eval_lock:
+            evaluated += 1
+            _update_backend_progress(run_id, "evaluating", evaluated, total, f"Evaluated clause {clause.clause_id} ({evaluated}/{total})")
+
+        return idx, clause
+
+    # Fire all clause evaluations in parallel (bounded by semaphore via executor)
+    logger.info("Starting parallel evaluation of %d clauses (max %d concurrent)", total, _MAX_PARALLEL_CLAUSES)
+    clause_results = [None] * len(all_clauses)
+
+    with ThreadPoolExecutor(max_workers=_MAX_PARALLEL_CLAUSES) as executor:
+        futures = {
+            executor.submit(_eval_one, idx, clause): idx
+            for idx, clause in enumerate(all_clauses)
+        }
+        for future in as_completed(futures):
+            try:
+                idx, clause = future.result()
+                clause_results[idx] = clause
+            except Exception as e:
+                idx = futures[future]
+                logger.error("Clause evaluation failed for index %d: %s", idx, e, exc_info=True)
+
+    # Reassemble in original order (replaces all_clauses list contents)
+    all_clauses = [c for c in clause_results if c is not None]
+
+    logger.info("Evidence source summary: %d total clauses evaluated in parallel", total)
 
     # ── Stage 8: Historical Feedback ──
     _update_backend_progress(run_id, "evaluating", total, total, "Checking historical feedback...")
