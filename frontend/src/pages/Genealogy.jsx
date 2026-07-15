@@ -726,7 +726,7 @@ export default function Genealogy() {
               <button 
                 onClick={handleCreateLink}
                 disabled={!linkTargetId}
-                style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: !linkTargetId ? 'var(--text-muted)' : 'var(--primary)', color: 'white', cursor: !linkTargetId ? 'not-allowed' : 'pointer', fontSize: 14 }}
+                style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: !linkTargetId ? '#9ca3af' : '#3b82f6', color: 'white', cursor: !linkTargetId ? 'not-allowed' : 'pointer', fontSize: 14 }}
               >
                 Create Link
               </button>

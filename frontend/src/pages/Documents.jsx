@@ -705,7 +705,7 @@ export default function Documents() {
               <button onClick={() => setShowBulkCategorize(false)}
                 style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
               <button onClick={handleBulkCategorize}
-                style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: 'var(--primary)', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>Apply</button>
+                style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>Apply</button>
             </div>
           </div>
         </div>
